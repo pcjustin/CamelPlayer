@@ -30,7 +30,10 @@ constexpr size_t kWordFrames = 4096; // read from the WAVE decoder at a time
 constexpr uint64_t kBytesPerWordFrame = 4;
 // Read before a seek target, so the frame holding it is found and the synthesis filter has settled.
 constexpr uint64_t kPreroll = 8192;
-constexpr size_t kHeaderBytes = 64;     // enough of a frame to read its header
+constexpr size_t kHeaderBytes = 64; // enough of a frame to read its header
+// How far the layout is looked for: the minute of a rip's leading silence that FormatProbe passes over, then room for the
+// probed frames at the largest a frame can be.
+constexpr int64_t kProbeBytes = int64_t{44100} * 4 * 60 + int64_t{64} * 32768;
 constexpr size_t kLongestSyncBytes = 6; // what can start a sync word that the next read completes
 constexpr size_t kWordBytes = 2;
 
@@ -200,8 +203,10 @@ private:
             }
             previous = frame;
         };
+        readLimit_ = kProbeBytes;
         while (!found && decoded < kProbedFrames && decodeNextFrame()) {
         }
+        readLimit_.reset();
         onFrame_ = nullptr;
         if (!decoded) throw Error(ErrorCode::UnsupportedStream, "no DTS frames found");
         if (!found) throw Error(ErrorCode::UnsupportedStream, "the DTS frames do not follow the PCM rate");
@@ -240,9 +245,9 @@ private:
         return got != 0;
     }
 
-    // Appends the next block of the file's words; false at the end of the stream.
+    // Appends the next block of the file's words; false at the end of the stream, or past readLimit_.
     bool readWords() {
-        if (wordsDone_) return false;
+        if (wordsDone_ || (readLimit_ && bytesFrom_ + int64_t(bytes_.size()) >= *readLimit_)) return false;
         wordsDone_ = !appendWords(*words_, bytes_);
         return !wordsDone_;
     }
@@ -326,11 +331,12 @@ private:
     std::mutex neighborsMutex_;
     std::filesystem::path nextFile_, previousFile_;
     bool wordsDone_ = false;
-    bool joiningPrevious_ = false; // bytes_ begins in the previous track, whose cut frame is not yet checked
-    bool joinedNext_ = false;      // the frame cut at the end was completed from the next track, or could not be
-    int64_t bytesFrom_ = 0;        // stream offset of bytes_[0]; before the file's start in the previous track's bytes
-    uint64_t next_ = 0;            // track position of the next sample appended to out_
-    uint64_t silence_ = 0;         // frames of silence readFloat() gives before out_, where the bitstream has none
+    bool joiningPrevious_ = false;     // bytes_ begins in the previous track, whose cut frame is not yet checked
+    bool joinedNext_ = false;          // the frame cut at the end was completed from the next track, or could not be
+    int64_t bytesFrom_ = 0;            // stream offset of bytes_[0]; before the file's start in the previous track's bytes
+    std::optional<int64_t> readLimit_; // the stream offset probe() reads no further than
+    uint64_t next_ = 0;                // track position of the next sample appended to out_
+    uint64_t silence_ = 0;             // frames of silence readFloat() gives before out_, where the bitstream has none
     std::function<void(int64_t, const DtsPcm&)> onFrame_;
     std::vector<int32_t> words16_;
     std::vector<uint8_t> bytes_;

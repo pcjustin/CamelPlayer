@@ -226,6 +226,43 @@ TEST(Dts, AnUndecodableSecondFrameDoesNotRefuseTheTrack) {
     EXPECT_EQ(readAll(*d).size(), file.frames * 6);
 }
 
+// A WAVE file that looks like DTS at its start, but whose frames all fail to decode, is refused after a bounded read: a
+// rip of an hour holds hundreds of megabytes, which may be on a NAS.
+TEST(Dts, AWaveWithNoFrameThatDecodesIsRefusedWithoutReadingItWhole) {
+    std::ifstream in(dtsPath(), std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    const size_t data = bytes.find("data");
+    ASSERT_NE(data, std::string::npos);
+    // Every frame keeps its sync word but loses the header after it.
+    const std::string sync("\xFF\x1F\x00\xE8", 4);
+    for (size_t at = bytes.find(sync, data + 8); at != std::string::npos; at = bytes.find(sync, at + 2))
+        std::fill_n(bytes.begin() + ptrdiff_t(at + 6), 12, '\0');
+    // Then 100 MB of noise, which holds no sync word at a word's start.
+    constexpr size_t kNoise = size_t{100} << 20;
+    const uint64_t total = bytes.size() - data - 8 + kNoise;
+    const auto put32 = [&](size_t at, uint64_t value) {
+        for (size_t i = 0; i < 4; i++) bytes[at + i] = char(uint8_t(value >> (8 * i)));
+    };
+    put32(data + 4, total);
+    put32(4, data + total);
+    const auto path = testutil::tempDir() / "dts-undecodable.wav";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << bytes;
+        std::string noise(size_t{1} << 20, '\0');
+        for (size_t i = 0; i < noise.size(); i += 2) noise[i] = char(0x40 + i % 61);
+        for (size_t written = 0; written < kNoise; written += noise.size()) out << noise;
+    }
+    ASSERT_EQ(probeFormat(path), AudioFormat::Dts);
+    IO_COUNTERS before{}, after{};
+    ASSERT_TRUE(GetProcessIoCounters(GetCurrentProcess(), &before));
+    EXPECT_THROW(openDecoder(DecoderKind::Sndfile, path), Error);
+    ASSERT_TRUE(GetProcessIoCounters(GetCurrentProcess(), &after));
+    EXPECT_LT(after.ReadTransferCount - before.ReadTransferCount, uint64_t{32} << 20) << "bytes read";
+    std::filesystem::remove(path);
+}
+
 TEST(Dts, ProbeFindsDtsInsideWave) {
     EXPECT_EQ(probeFormat(dtsPath()), AudioFormat::Dts);
     EXPECT_EQ(probeFormat(syncsInPcm("dts-steady.wav", {12, 4108, 8204})), AudioFormat::Dts);
