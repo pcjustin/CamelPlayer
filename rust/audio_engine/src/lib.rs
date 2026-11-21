@@ -830,6 +830,12 @@ impl Fade {
     }
 }
 
+// What a step of pump() leaves: more to do now, or nothing until there is room or input.
+enum Step {
+    Again,
+    Stop,
+}
+
 enum FadeStep {
     Wrote(u64),
     Mixed,
@@ -1029,159 +1035,26 @@ impl CamelEngine {
                     .saturating_sub(hold)
                     .saturating_sub(segment.read - tail_frames),
             );
-            if hold > 0
+            let step = if hold > 0
                 && segment.ended
                 && (convertible == 0 || segment.cut && next_ready == Some(true))
             {
-                // The next track starts at the fade, which waits for it to be staged and for room for its boundary.
-                if next_ready.is_none() || self.boundaries.full() {
-                    break Ok(());
-                }
-                let length =
-                    fade_frames.min(self.mixed_frames(available + tail_frames, segment.rate));
-                if length == 0 {
-                    segments[1].fade_in = 0;
-                    continue;
-                }
-                let ring_bytes = available as usize * segment.frame_bytes();
-                segment.read = segment.frames;
-                let mut tail = std::mem::take(&mut segment.tail);
-                let tail_read = std::mem::replace(&mut segment.tail_read, 0);
-                let mut held = std::mem::take(&mut segments[1].held);
-                held.clear();
-                // What the ring still has of the track joins its tail where there is room, as it usually is.
-                let rest = if tail.capacity() - tail.len() >= ring_bytes {
-                    &mut tail
-                } else {
-                    &mut held
-                };
-                let at = rest.len();
-                rest.resize(at + ring_bytes, 0);
-                if self.source_ring.read(&mut rest[at..]) != ring_bytes {
-                    break Err(ENGINE_E_INVALID_STATE);
-                }
-                if let Some(start) = segments[1].boundary_start.take() {
-                    let published = self.publish_boundary(start);
-                    debug_assert!(published, "the queue had room");
-                }
-                let (outgoing, incoming, mixed) = buffers.lend();
-                *fade = Some(Fade {
-                    length,
-                    done: 0,
-                    tail,
-                    tail_read,
-                    held,
-                    held_read: 0,
-                    outgoing,
-                    outgoing_done: false,
-                    incoming,
-                    mixed,
-                    waiting: false,
-                });
-                continue;
+                self.start_fade(segments, buffers, fade, next_ready, fade_frames, available)
+            } else if convertible > 0 {
+                self.convert_next(segment, buffers, dsp, space, convertible)
+            } else if available > 0 {
+                self.hold_in_tail(segment, available)
+            } else if segment.ended {
+                let chain_tail = (*stream_ended && last).then_some(&mut *tail_left);
+                self.end_segment(segments, dsp, retired, chain_tail, fade_frames, space)
+            } else {
+                Ok(Step::Stop)
+            };
+            match step {
+                Ok(Step::Again) => {}
+                Ok(Step::Stop) => break Ok(()),
+                Err(status) => break Err(status),
             }
-            if convertible > 0 {
-                if space == 0 {
-                    break Ok(());
-                }
-                let mut frames = segment
-                    .converter
-                    .input_frames_for(space)
-                    .min(convertible)
-                    .min(MAX_PREFILL_FRAMES);
-                buffers.bytes.clear();
-                if tail_frames > 0 {
-                    // A shorter fade, or none, than the tail was held for: it plays first.
-                    frames = frames.min(tail_frames);
-                    let end = segment.tail_read + frames as usize * segment.frame_bytes();
-                    buffers
-                        .bytes
-                        .extend_from_slice(&segment.tail[segment.tail_read..end]);
-                    segment.tail_read = end;
-                    if end == segment.tail.len() {
-                        segment.tail.clear();
-                        segment.tail_read = 0;
-                    }
-                } else {
-                    buffers
-                        .bytes
-                        .resize(frames as usize * segment.frame_bytes(), 0);
-                    if self.source_ring.read(&mut buffers.bytes) != buffers.bytes.len() {
-                        break Err(ENGINE_E_INVALID_STATE);
-                    }
-                    segment.read += frames;
-                }
-                sample_words(&buffers.bytes, segment.sample_bytes, &mut buffers.words);
-                if let Err(status) = segment
-                    .converter
-                    .convert(&buffers.words, frames as usize, dsp)
-                {
-                    break Err(status);
-                }
-                continue;
-            }
-            if available > 0 {
-                // Held for the crossfade until decoding reaches the track's end: in the tail while it has room, so the
-                // source ring has room to decode on.
-                if segment.tail_read > 0 {
-                    segment.tail.drain(..segment.tail_read);
-                    segment.tail_read = 0;
-                }
-                let spare = (segment.tail.capacity() - segment.tail.len()) / segment.frame_bytes();
-                let frames = available.min(spare as u64).min(MAX_PREFILL_FRAMES);
-                if frames == 0 {
-                    break Ok(());
-                }
-                let at = segment.tail.len();
-                let bytes = frames as usize * segment.frame_bytes();
-                segment.tail.resize(at + bytes, 0);
-                if self.source_ring.read(&mut segment.tail[at..]) != bytes {
-                    break Err(ENGINE_E_INVALID_STATE);
-                }
-                segment.read += frames;
-                continue;
-            }
-            if segment.ended {
-                if !segment.converter.finished() {
-                    // At a gapless boundary the next track takes over the filters, which go on without a seam.
-                    if fade_frames == 0 && !segment.cut {
-                        if let [ending, next, ..] = segments.make_contiguous() {
-                            if next.converter.continue_from(&mut ending.converter) {
-                                continue;
-                            }
-                        }
-                    }
-                    // Otherwise the resampler's tail belongs to this track and plays before any queued one.
-                    let segment = segments.front_mut().expect("a segment plays");
-                    if let Err(status) = segment.converter.finish(dsp) {
-                        break Err(status);
-                    }
-                    continue;
-                }
-                if *stream_ended && last {
-                    // After the last track the chain's tail plays out, such as a convolution's reverberation. A chain
-                    // turned off meanwhile has no tail left to play.
-                    let left = if dsp.active() {
-                        *tail_left.get_or_insert(dsp.tail_frames())
-                    } else {
-                        0
-                    };
-                    if left > 0 {
-                        if space == 0 {
-                            break Ok(());
-                        }
-                        let frames = left.min(space as usize).min(MAX_PREFILL_FRAMES as usize);
-                        if let Err(status) = segment.converter.drain(frames, dsp) {
-                            break Err(status);
-                        }
-                        *tail_left = Some(left - frames);
-                        continue;
-                    }
-                }
-                retire(retired, segments.pop_front());
-                continue;
-            }
-            break Ok(());
         };
         if let Err(status) = status {
             self.fail_render(status);
@@ -1196,6 +1069,182 @@ impl CamelEngine {
             );
         }
         Ok(written)
+    }
+
+    // The crossfade into the next track starts: the outgoing track's last `available` source frames, with what its tail
+    // holds, are what it mixes from. It waits for the next track to be staged and for room for its boundary.
+    fn start_fade(
+        &self,
+        segments: &mut std::collections::VecDeque<Segment>,
+        buffers: &mut StageBuffers,
+        fade: &mut Option<Fade>,
+        next_ready: Option<bool>,
+        fade_frames: u64,
+        available: u64,
+    ) -> Result<Step, i32> {
+        if next_ready.is_none() || self.boundaries.full() {
+            return Ok(Step::Stop);
+        }
+        let segment = &mut segments[0];
+        let tail_frames = segment.tail_frames();
+        let length = fade_frames.min(self.mixed_frames(available + tail_frames, segment.rate));
+        if length == 0 {
+            segments[1].fade_in = 0;
+            return Ok(Step::Again);
+        }
+        let ring_bytes = available as usize * segment.frame_bytes();
+        segment.read = segment.frames;
+        let mut tail = std::mem::take(&mut segment.tail);
+        let tail_read = std::mem::replace(&mut segment.tail_read, 0);
+        let mut held = std::mem::take(&mut segments[1].held);
+        held.clear();
+        // What the ring still has of the track joins its tail where there is room, as it usually is.
+        let rest = if tail.capacity() - tail.len() >= ring_bytes {
+            &mut tail
+        } else {
+            &mut held
+        };
+        let at = rest.len();
+        rest.resize(at + ring_bytes, 0);
+        if self.source_ring.read(&mut rest[at..]) != ring_bytes {
+            return Err(ENGINE_E_INVALID_STATE);
+        }
+        if let Some(start) = segments[1].boundary_start.take() {
+            let published = self.publish_boundary(start);
+            debug_assert!(published, "the queue had room");
+        }
+        let (outgoing, incoming, mixed) = buffers.lend();
+        *fade = Some(Fade {
+            length,
+            done: 0,
+            tail,
+            tail_read,
+            held,
+            held_read: 0,
+            outgoing,
+            outgoing_done: false,
+            incoming,
+            mixed,
+            waiting: false,
+        });
+        Ok(Step::Again)
+    }
+
+    // Up to `convertible` source frames, from the tail first, through the converter and the DSP chain into the device
+    // ring, which has room for `space` device frames.
+    fn convert_next(
+        &self,
+        segment: &mut Segment,
+        buffers: &mut StageBuffers,
+        dsp: &mut dsp::Dsp,
+        space: u64,
+        convertible: u64,
+    ) -> Result<Step, i32> {
+        if space == 0 {
+            return Ok(Step::Stop);
+        }
+        let tail_frames = segment.tail_frames();
+        let mut frames = segment
+            .converter
+            .input_frames_for(space)
+            .min(convertible)
+            .min(MAX_PREFILL_FRAMES);
+        buffers.bytes.clear();
+        if tail_frames > 0 {
+            // A shorter fade, or none, than the tail was held for: it plays first.
+            frames = frames.min(tail_frames);
+            let end = segment.tail_read + frames as usize * segment.frame_bytes();
+            buffers
+                .bytes
+                .extend_from_slice(&segment.tail[segment.tail_read..end]);
+            segment.tail_read = end;
+            if end == segment.tail.len() {
+                segment.tail.clear();
+                segment.tail_read = 0;
+            }
+        } else {
+            buffers
+                .bytes
+                .resize(frames as usize * segment.frame_bytes(), 0);
+            if self.source_ring.read(&mut buffers.bytes) != buffers.bytes.len() {
+                return Err(ENGINE_E_INVALID_STATE);
+            }
+            segment.read += frames;
+        }
+        sample_words(&buffers.bytes, segment.sample_bytes, &mut buffers.words);
+        segment
+            .converter
+            .convert(&buffers.words, frames as usize, dsp)?;
+        Ok(Step::Again)
+    }
+
+    // `available` source frames held for the crossfade until decoding reaches the track's end: in the tail while it has
+    // room, so the source ring has room to decode on.
+    fn hold_in_tail(&self, segment: &mut Segment, available: u64) -> Result<Step, i32> {
+        if segment.tail_read > 0 {
+            segment.tail.drain(..segment.tail_read);
+            segment.tail_read = 0;
+        }
+        let spare = (segment.tail.capacity() - segment.tail.len()) / segment.frame_bytes();
+        let frames = available.min(spare as u64).min(MAX_PREFILL_FRAMES);
+        if frames == 0 {
+            return Ok(Step::Stop);
+        }
+        let at = segment.tail.len();
+        let bytes = frames as usize * segment.frame_bytes();
+        segment.tail.resize(at + bytes, 0);
+        if self.source_ring.read(&mut segment.tail[at..]) != bytes {
+            return Err(ENGINE_E_INVALID_STATE);
+        }
+        segment.read += frames;
+        Ok(Step::Again)
+    }
+
+    // A track whose source frames have all been converted: its converter is finished, or passes its filters on to the
+    // next track at a gapless boundary; after the last track the chain's tail plays out, `chain_tail` holding what is
+    // left of it; then the segment leaves the stage.
+    fn end_segment(
+        &self,
+        segments: &mut std::collections::VecDeque<Segment>,
+        dsp: &mut dsp::Dsp,
+        retired: &mut Vec<Segment>,
+        chain_tail: Option<&mut Option<usize>>,
+        fade_frames: u64,
+        space: u64,
+    ) -> Result<Step, i32> {
+        if !segments[0].converter.finished() {
+            // At a gapless boundary the next track takes over the filters, which go on without a seam.
+            if fade_frames == 0 && !segments[0].cut {
+                if let [ending, next, ..] = segments.make_contiguous() {
+                    if next.converter.continue_from(&mut ending.converter) {
+                        return Ok(Step::Again);
+                    }
+                }
+            }
+            // Otherwise the resampler's tail belongs to this track and plays before any queued one.
+            segments[0].converter.finish(dsp)?;
+            return Ok(Step::Again);
+        }
+        if let Some(tail_left) = chain_tail {
+            // After the last track the chain's tail plays out, such as a convolution's reverberation. A chain turned off
+            // meanwhile has no tail left to play.
+            let left = if dsp.active() {
+                *tail_left.get_or_insert(dsp.tail_frames())
+            } else {
+                0
+            };
+            if left > 0 {
+                if space == 0 {
+                    return Ok(Step::Stop);
+                }
+                let frames = left.min(space as usize).min(MAX_PREFILL_FRAMES as usize);
+                segments[0].converter.drain(frames, dsp)?;
+                *tail_left = Some(left - frames);
+                return Ok(Step::Again);
+            }
+        }
+        retire(retired, segments.pop_front());
+        Ok(Step::Again)
     }
 
     // The next track starts at the frames written so far; false while render has too many boundaries to reach first.
