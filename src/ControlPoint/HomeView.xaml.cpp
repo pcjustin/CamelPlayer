@@ -59,26 +59,6 @@ Windows::Foundation::IInspectable item(const ui::BrowseRow& row) {
 
 enum class Start { Day, Month, Year };
 
-// Local midnight `daysBack` days before today, or the first day of this month or year, as UTC milliseconds.
-int64_t localStartMs(int daysBack, Start from = Start::Day) {
-    SYSTEMTIME local{};
-    GetLocalTime(&local);
-    local.wHour = local.wMinute = local.wSecond = local.wMilliseconds = 0;
-    if (from != Start::Day) local.wDay = 1;
-    if (from == Start::Year) local.wMonth = 1;
-    FILETIME file{};
-    SystemTimeToFileTime(&local, &file);
-    ULARGE_INTEGER ticks{{file.dwLowDateTime, file.dwHighDateTime}};
-    ticks.QuadPart -= uint64_t(daysBack) * 24 * 3600 * 10'000'000ULL;
-    file = {ticks.LowPart, ticks.HighPart};
-    SYSTEMTIME start{}, utc{};
-    FileTimeToSystemTime(&file, &start);
-    TzSpecificLocalTimeToSystemTime(nullptr, &start, &utc);
-    SystemTimeToFileTime(&utc, &file);
-    ticks = {{file.dwLowDateTime, file.dwHighDateTime}};
-    return int64_t((ticks.QuadPart - 116'444'736'000'000'000ULL) / 10'000);
-}
-
 using Date = std::chrono::year_month_day;
 
 Date today() {
@@ -99,6 +79,14 @@ int64_t midnightMs(Date date) {
     SystemTimeToFileTime(&utc, &file);
     const ULARGE_INTEGER ticks{{file.dwLowDateTime, file.dwHighDateTime}};
     return int64_t((ticks.QuadPart - 116'444'736'000'000'000ULL) / 10'000);
+}
+
+// Local midnight `daysBack` days before today, or the first day of this month or year, as UTC milliseconds.
+int64_t localStartMs(int daysBack, Start from = Start::Day) {
+    Date date = today();
+    if (from != Start::Day) date = date.year() / date.month() / std::chrono::day{1};
+    if (from == Start::Year) date = date.year() / std::chrono::January / std::chrono::day{1};
+    return midnightMs(Date{std::chrono::sys_days{date} - std::chrono::days{daysBack}});
 }
 
 Date parseDate(const std::string& text) {
