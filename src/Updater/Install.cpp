@@ -162,7 +162,6 @@ public:
             return Outcome::RolledBack;
         }
         try {
-            snapshotData();
             fs::remove_all(backup_); // without a journal, what is left of an install that finished
             fs::create_directory(backup_);
             // Only the package's files move: the release zip has no top folder, so other files may lie beside them.
@@ -200,6 +199,7 @@ public:
         fs::remove(o_.data / files::kStarted, error);
         fs::remove(o_.data / files::kStarting, error);
         try {
+            snapshotData(); // only now: nothing but the new version changes the data
             journal_ += "starting\n";
             writeThrough(o_.app / files::kJournal, journal_);
         } catch (const std::exception& e) {
@@ -207,6 +207,7 @@ public:
             return rollBack(L"undone");
         }
         writeResult(o_.data, L"installed", o_.version, o_.previous);
+        launched_ = true;
         host_.startPlayer(o_.app / files::kPlayer);
         if (!started()) {
             log(L"the new version did not start");
@@ -338,7 +339,6 @@ private:
         for (const auto* name : files::kDataFiles)
             if (fs::exists(o_.data / name))
                 fs::copy_file(o_.data / name, o_.dataBackup / name, fs::copy_options::overwrite_existing);
-        snapshotTaken_ = true;
     }
 
     // A player that said it is starting may open and migrate the data for as long as it needs, while it runs.
@@ -356,8 +356,8 @@ private:
         }
     }
 
-    // Puts the previous version's files and data back and starts it; it reports the undone update as `kind`: failed
-    // when the new version did not start, undone when it was never started.
+    // Puts the previous version's files back, and the data once the new version was started, and starts it; it reports
+    // the undone update as `kind`: failed when the new version did not start, undone when it was never started.
     Outcome rollBack(const wchar_t* kind) {
         std::error_code error;
         if (copying_)
@@ -377,7 +377,7 @@ private:
         if (restored) fs::remove(o_.app / files::kJournal, error);
         for (const auto& name : moved_) removeEmptyFolders(backup_, name);
         if (fs::is_empty(backup_, error)) fs::remove(backup_, error);
-        if (snapshotTaken_) restoreData(o_.dataBackup);
+        if (launched_) restoreData(o_.dataBackup);
         if (restored) fs::remove_all(o_.dataBackup, error);
         fs::remove(o_.data / files::kStarted, error);
         fs::remove(o_.data / files::kStarting, error);
@@ -395,7 +395,7 @@ private:
     std::vector<fs::path> moved_;              // into the backup
     std::string journal_;
     bool copying_ = false;
-    bool snapshotTaken_ = false;
+    bool launched_ = false;
 };
 
 } // namespace
