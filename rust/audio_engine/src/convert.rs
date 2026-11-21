@@ -508,6 +508,33 @@ impl Converter {
         self.finished
     }
 
+    /// At a gapless boundary, takes over the filters of `previous`, the track before, when both convert alike: its
+    /// resampler, DSD decimator, remodulator and modulator, and the DoP byte frame waiting for its pair go on into this
+    /// track without a seam, and `previous` ends without flushing them. False, and nothing changes, otherwise.
+    pub(crate) fn continue_from(&mut self, previous: &mut Converter) -> bool {
+        let alike = self.mode == previous.mode
+            && self.out == previous.out
+            && self.in_rate == previous.in_rate
+            && self.out_rate == previous.out_rate
+            && self.in_channels == previous.in_channels
+            && self.out_channels == previous.out_channels
+            && self.resampler.is_some() == previous.resampler.is_some()
+            && self.decimator.is_some() == previous.decimator.is_some()
+            && self.remodulator.is_some() == previous.remodulator.is_some()
+            && self.modulator.is_some() == previous.modulator.is_some();
+        if !alike || previous.finished {
+            return false;
+        }
+        // Swapped rather than moved, so the unused filters leave with `previous`, to be freed off the DSP stage.
+        std::mem::swap(&mut self.resampler, &mut previous.resampler);
+        std::mem::swap(&mut self.decimator, &mut previous.decimator);
+        std::mem::swap(&mut self.remodulator, &mut previous.remodulator);
+        std::mem::swap(&mut self.modulator, &mut previous.modulator);
+        std::mem::swap(&mut self.carry, &mut previous.carry);
+        previous.finished = true;
+        true
+    }
+
     /// Converts `frames` decoded frames (`samples` interleaved: right-aligned integers, or float32 bit patterns for a
     /// float source) and appends the device bytes to the pending output. `dsp` processes PCM while it acts.
     pub(crate) fn convert(

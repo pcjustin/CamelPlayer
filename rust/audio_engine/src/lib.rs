@@ -1143,7 +1143,16 @@ impl CamelEngine {
             }
             if segment.ended {
                 if !segment.converter.finished() {
-                    // The resampler's tail belongs to this track and plays before any queued one.
+                    // At a gapless boundary the next track takes over the filters, which go on without a seam.
+                    if fade_frames == 0 && !segment.cut {
+                        if let [ending, next, ..] = segments.make_contiguous() {
+                            if next.converter.continue_from(&mut ending.converter) {
+                                continue;
+                            }
+                        }
+                    }
+                    // Otherwise the resampler's tail belongs to this track and plays before any queued one.
+                    let segment = segments.front_mut().expect("a segment plays");
                     if let Err(status) = segment.converter.finish(dsp) {
                         break Err(status);
                     }
@@ -4874,6 +4883,165 @@ mod tests {
         ));
         let used: Vec<_> = heap.iter().filter(|(_, count)| *count > 0).collect();
         assert!(used.is_empty(), "{used:?}");
+    }
+
+    // Plays `first` and then `queued` gaplessly through a device in `cfg` with 24-bit samples in 32, 480 frames at a
+    // time, until the stream ends; returns the left channel.
+    fn play_gapless_s32(cfg: CamelEngineConfigV1, first: &str, queued: &str) -> Vec<i32> {
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        let host = tone_host();
+        let source = tone_source(first, 0, 0);
+        assert_eq!(
+            unsafe {
+                camel_engine_load_flac_v1(
+                    engine,
+                    &command_stamp(1),
+                    &source,
+                    decoder_host::DECODER_SYMPHONIA,
+                    &host,
+                )
+            },
+            ENGINE_OK
+        );
+        assert_eq!(queue_tone(engine, 2, queued, 0, 0), ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(3)) },
+            ENGINE_OK
+        );
+        let mut left = Vec::new();
+        for _ in 0..100_000 {
+            loop {
+                let mut frames = 0;
+                let status = unsafe { camel_engine_prefill_v1(engine, 4096, &mut frames) };
+                if status != ENGINE_OK || frames == 0 {
+                    break;
+                }
+            }
+            let mut processed = 0;
+            unsafe { camel_engine_process_v1(engine, &mut processed) };
+            let mut output = [0u8; 480 * 8];
+            let request = render_request(480, &mut output);
+            let mut result = render_result();
+            let status = unsafe { camel_engine_render_v1(engine, &request, &mut result) };
+            left.extend(
+                output[..result.units_rendered as usize * 8]
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+            );
+            if status == ENGINE_END {
+                assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+                return left;
+            }
+        }
+        panic!("the stream did not end");
+    }
+
+    // Two DSD tracks of one steady signal, played gaplessly as PCM, join without a seam: the decimator goes on from the
+    // first track's last bytes rather than from silence.
+    #[test]
+    fn gapless_dsd_played_as_pcm_has_no_seam() {
+        let mut cfg = config(format(AUDIO_PCM, SAMPLE_S24_IN_32_LE, 24, 32));
+        cfg.format.rate_hz = 352_800;
+        cfg.allow_dsd_to_pcm = 1;
+        let left = play_gapless_s32(cfg, "233:352800:352800:dsd", "233:352800:352800:dsd");
+        assert_eq!(left.len(), 705_600);
+        let level = left[176_400];
+        assert!(level.abs() > 1 << 20, "{level}");
+        let (at, worst) = left[176_400..529_200]
+            .iter()
+            .map(|&v| (v - level).abs())
+            .enumerate()
+            .max_by_key(|&(_, d)| d)
+            .unwrap();
+        // 16 steps of the 24 bits, which sit at the top of the 32: the dither's, never a seam's.
+        assert!(worst < 16 << 8, "{worst} at frame {}", 176_400 + at);
+    }
+
+    // An album sent as DSD goes on without a seam: the resampler before the modulator, and the modulator's loop, go on
+    // from the first track into the second.
+    #[test]
+    fn gapless_pcm_sent_as_dsd_has_no_seam() {
+        let mut dsd64 = format(AUDIO_DSD, SAMPLE_DSD_U8, 1, 8);
+        dsd64.rate_hz = 2_822_400;
+        let mut cfg = config(dsd64);
+        cfg.allow_conversion = 1;
+        cfg.dsd_modulation = 7;
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            unsafe { camel_engine_create_v1(&cfg, &mut engine) },
+            ENGINE_OK
+        );
+        let host = tone_host();
+        let source = tone_source("8000:44100:44100", 0, 0);
+        assert_eq!(
+            unsafe {
+                camel_engine_load_flac_v1(
+                    engine,
+                    &command_stamp(1),
+                    &source,
+                    decoder_host::DECODER_SYMPHONIA,
+                    &host,
+                )
+            },
+            ENGINE_OK
+        );
+        assert_eq!(queue_tone(engine, 2, "8000:44100:44100", 0, 0), ENGINE_OK);
+        assert_eq!(
+            unsafe { camel_engine_play_v1(engine, &command_stamp(3)) },
+            ENGINE_OK
+        );
+        let mut left = Vec::new();
+        let mut ended = false;
+        for _ in 0..100_000 {
+            loop {
+                let mut frames = 0;
+                let status = unsafe { camel_engine_prefill_v1(engine, 4096, &mut frames) };
+                if status != ENGINE_OK || frames == 0 {
+                    break;
+                }
+            }
+            let mut processed = 0;
+            unsafe { camel_engine_process_v1(engine, &mut processed) };
+            let mut buffer = vec![0u8; 4096 * 2];
+            let request = render_request(4096 * 8, &mut buffer);
+            let mut result = render_result();
+            let status = unsafe { camel_engine_render_v1(engine, &request, &mut result) };
+            let bytes = result.units_rendered as usize / 8 * 2;
+            left.extend(buffer[..bytes].iter().step_by(2).map(|&b| i32::from(b)));
+            if status == ENGINE_END {
+                ended = true;
+                break;
+            }
+        }
+        assert!(ended, "the stream did not end");
+        assert_eq!(unsafe { camel_engine_destroy_v1(engine) }, ENGINE_OK);
+        // Back to PCM at 352.8 kHz, averaged over 64 frames so the modulator's shaped noise falls away.
+        let mut decimator = dsd2pcm::DsdDecimator::new(352_800, 1).unwrap();
+        let mut pcm = Vec::new();
+        decimator.process(&left, left.len(), &mut pcm);
+        let smooth: Vec<f64> = pcm
+            .windows(64)
+            .map(|w| w.iter().sum::<f64>() / 64.0)
+            .collect();
+        let level = smooth[176_400];
+        assert!(level.abs() > 0.05, "{level}");
+        let (at, worst) = smooth[176_400..529_200]
+            .iter()
+            .map(|&v| (v - level).abs())
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        assert!(
+            worst < level.abs() / 20.0,
+            "{worst} of {level} at frame {}",
+            176_400 + at
+        );
     }
 
     #[test]
