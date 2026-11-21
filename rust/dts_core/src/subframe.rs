@@ -798,16 +798,13 @@ mod tests {
 
     #[test]
     fn tail_captures_range_index_when_dynf() {
-        // DYNF=1 -> 8-bit RANGE code; CPF=0. Signed-Q2 code 80 =
-        // +20 dB = 10.0x linear.
+        // DYNF=1 -> 8-bit RANGE code; CPF=0.
         let stream = pack_fields(&[(80, 8)]);
         let (tail, bits) =
             decode_primary_side_info_tail_at(&stream, 0, &[0], &[3], true, false).unwrap();
         assert_eq!(bits, 8);
         assert_eq!(tail.range_index, Some(80));
         assert!(!tail.side_info_crc_present);
-        let gain = crate::drc_range::dts_dynrng_to_linear(tail.range_index.unwrap());
-        assert!((gain - 10.0).abs() < 1e-12);
     }
 
     #[test]
@@ -824,14 +821,13 @@ mod tests {
     #[test]
     fn tail_range_then_sicrc_when_both() {
         // DYNF=1 and CPF=1 -> 8-bit RANGE then 16-bit SICRC, in
-        // order. Signed-Q2 code 0 -> unity (0 dB).
+        // order.
         let stream = pack_fields(&[(0, 8), (0x1234, 16)]);
         let (tail, bits) =
             decode_primary_side_info_tail_at(&stream, 0, &[0, 0], &[3, 3], true, true).unwrap();
         assert_eq!(bits, 24);
         assert_eq!(tail.range_index, Some(0));
         assert!(tail.side_info_crc_present);
-        assert_eq!(crate::drc_range::dts_dynrng_to_linear(0), 1.0);
     }
 
     #[test]

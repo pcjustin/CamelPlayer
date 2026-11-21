@@ -9,24 +9,23 @@ Left out: the encoder and what only it uses (`encoder.rs`, `bitwriter.rs`, `qmf_
 
 Also left out, as the decoder never reaches them: the crate root exports only what `src/stream.rs`, the tests and the
 fuzz target use, and what the compiler then reported as never used was removed, with the unit tests and the doc
-examples that only reached it. By module:
+examples that only reached it. The tests split a stream into frames with `find_sync` and `frame_info`, as the Engine
+does, so the frame iterator is not exported either, and the modules only it reached went whole: `aux_data`, `crc16`,
+`dmix_coeff`, `drc_range`, `optional_info` and `rev2_aux`. By module, of those kept:
 
 - `audio_array`: `channel_count`, `decode_audio_data_subframe_at`, `decode_audio_data_subframe_partial_at`
 - `audio_huff`: `abits`, `levels`
 - `block_code`: `block_code_max_code`, `block_code_offset`
 - `d10_vq`: `ADPCM_VQ_INDEX_BITS`, `HFREQ_VQ_ENTRIES_PER_VECTOR`, `VqCodebookShapeError`, `from_coefficients`, `from_elements`, `from_entries`, `from_packed_entries`, `is_empty`, `none`, `unpack_hfreq_vq_entry`, `with_adpcm`, `with_hfreq`
 - `d6_block_book`: `D6BlockBook`, `D6_BLOCK_ELEMENTS`, `D6_BOOK_13`, `D6_BOOK_17`, `D6_BOOK_25`, `D6_BOOK_3`, `D6_BOOK_5`, `D6_BOOK_7`, `D6_BOOK_9`, `build_book`, `code_value`, `d6_book_for_levels`, `decode_block_code_table`, `levels`
-- `dmix_coeff`: `DMIX_TABLE_UNITY_INDEX`, `INV_DMIX_INDEX_OFFSET`, `INV_DMIX_TABLE`, `INV_DMIX_TABLE_LEN`, `inv_dmix_scale`
-- `drc_range`: `DRC_RANGE_LEN`, `DRC_RANGE_MULTIPLIER`, `DRC_RANGE_UNITY_INDEX`, `drc_range`
 - `dsync`: `DSYNC_WIRE_BITS`, `decode_dsync_at`, `dsync_present`
 - `header`: `encode_frame_header_be`, `encode_frame_header_le`
 - `inverse_adpcm`: `inverse_adpcm_decode_i32`, `inverse_adpcm_required`, `update_history_f64`, `update_history_i32`
-- `iter`: `FrameIterator14`, `FrameIteratorResync`, `FrameView14`, `ResyncCause`, `ResyncEvent`, `SyncIterator`, `find_all_syncs`, `iter_frames_14bit`, `iter_frames_resync`, `iter_syncs`, `sync_byte_length`, `sync_byte_range`
+- `iter`: `FrameIterator`, `FrameIterator14`, `FrameIteratorResync`, `FrameView`, `FrameView14`, `ResyncCause`, `ResyncEvent`, `SyncIterator`, `find_all_syncs`, `iter_frames`, `iter_frames_14bit`, `iter_frames_resync`, `iter_syncs`, `sync_byte_length`, `sync_byte_range`
 - `join_scale`: `JOIN_SCALE_UNITY_INDEX`
 - `joint_subband`: `joint_subband_decode_range_f64`, `joint_subband_decode_range_i32`, `joint_subband_required`, `validate_joint_shape`
 - `lfe_interp`: `decimation_select`, `spec_table_name`
 - `lfe_synth`: `decode_subframe`, `history`, `interpolator`
-- `optional_info`: `MAX_AUX_BYTE_COUNT`, `OptionalInfo`, `decode_optional_info_at`
 - `qmf_multichannel`: `channels`, `synthesize_interleaved`, `synthesize_planar_from_header`
 - `qmf_synth`: `x_history`, `z_accumulator`
 - `side_info`: `WIRE_BITS`, `code`, `decode_abits_at`, `decode_adj_at`, `decode_join_scale_at`, `decode_scales_at`, `decode_subsubframe_count_at`, `decode_tmode_at`, `is_termination_tail`, `multiplier`, `multiplier_rational`, `partial_sample_count`, `samples_per_subsubframe_normal`, `scales_code`, `scales_table`, `thuff`

@@ -1151,6 +1151,19 @@ mod tests {
         );
     }
 
+    /// The CRC-16 a Rev2AUX chunk ends with (ETSI TS 102 114 Annex B: polynomial 0x1021, starting from 0xFFFF).
+    fn rev2aux_crc(bytes: &[u8]) -> u16 {
+        bytes.iter().fold(0xFFFF, |crc, &byte| {
+            (0..8).fold(crc ^ u16::from(byte) << 8, |crc, _| {
+                if crc & 0x8000 != 0 {
+                    crc << 1 ^ 0x1021
+                } else {
+                    crc << 1
+                }
+            })
+        })
+    }
+
     /// Nor are the broadcast DRC values of a Rev2AUX chunk.
     #[test]
     fn the_rev2aux_dynamic_range_gain_is_not_applied() {
@@ -1158,35 +1171,23 @@ mod tests {
         // Sync, 7-bit size - 1, the ES, broadcast, DRC and dialnorm flags, the DRC version, then one code per
         // subsubframe (two: -20 dB each), zero-padded to the CRC.
         let size = 8usize;
-        let mut chunk = crate::rev2_aux::REV2_AUX_SYNC_WORD.to_be_bytes().to_vec();
+        let mut chunk = 0x7004_C070_u32.to_be_bytes().to_vec();
         let mut fields = vec![0u8; 7 + 4 + 4];
         let size_code = size as u32 - 1;
         put_bits(&mut fields, 0, 7, size_code);
         put_bits(&mut fields, 7, 4, 0b0110);
-        put_bits(
-            &mut fields,
-            11,
-            4,
-            u32::from(crate::rev2_aux::REV2_DRC_VERSION_SINGLE_BAND),
-        );
+        put_bits(&mut fields, 11, 4, 1); // a single band
         fields.resize(16, 0); // nByteAlign0
         fields.extend(bits_of(&[0xB0, 0xB0]));
         fields.resize((size - 2) * 8, 0);
         chunk.extend(bytes_of(&fields));
-        let crc = crate::crc16::dts_crc16(&chunk[4..]);
+        let crc = rev2aux_crc(&chunk[4..]);
         chunk.extend(crc.to_be_bytes());
 
         let mut bits = bits_of(frame);
         put_bits(&mut bits, FSIZE_BIT, 14, (1024 + chunk.len() - 1) as u32);
         let mut compressed = bytes_of(&bits);
         compressed.extend(&chunk);
-        let found = crate::rev2_aux::parse_rev2_aux(
-            &compressed,
-            &crate::header::parse_frame_header(&compressed).unwrap(),
-        )
-        .unwrap()
-        .unwrap();
-        assert!(found.crc_valid && found.drc.is_some());
 
         assert!(
             surround_frame_pcm(&compressed) == surround_frame_pcm(frame),

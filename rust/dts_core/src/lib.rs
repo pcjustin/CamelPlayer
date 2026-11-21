@@ -12,16 +12,12 @@ mod audio_array;
 mod audio_data;
 mod audio_header;
 mod audio_huff;
-mod aux_data;
 mod bitreader;
 mod block_code;
 mod cos_mod;
-mod crc16;
 mod d10_tables;
 mod d10_vq;
 mod d6_block_book;
-mod dmix_coeff;
-mod drc_range;
 mod dsync;
 mod filter_bank;
 mod fir_coeff;
@@ -33,24 +29,19 @@ mod joint_subband;
 mod lfe_fir_coeff;
 mod lfe_interp;
 mod lfe_synth;
-mod optional_info;
 mod qmf_assemble;
 mod qmf_multichannel;
 mod qmf_synth;
-mod rev2_aux;
 mod side_info;
 mod step_size;
 mod stream;
 mod subframe;
 mod subframe_pcm;
 mod sum_diff;
-#[cfg(test)]
-mod test_util;
 mod unpack14;
 
 // What the Engine, the tests and the fuzz target use.
 pub use crate::header::{SyncWordEncoding, parse_frame_header};
-pub use crate::iter::iter_frames;
 pub use crate::stream::{
     DecodeError, Decoded, Decoder, FrameInfo, Speaker, Sync, find_sync, frame_info,
 };

@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dts_core::pack_16bit_to_14bit;
 use dts_core::{
     DecodeError, Decoded, Decoder, FourteenBitByteOrder, Speaker, SyncWordEncoding, find_sync,
     frame_info,
 };
-use dts_core::{iter_frames, pack_16bit_to_14bit};
 
 const SURROUND: &[u8] = include_bytes!("fixtures/dts_51_lfe.bin");
 const SURROUND_REFERENCE: &[u8] = include_bytes!("fixtures/dts_51_lfe_ffmpeg_ref.s32");
@@ -21,10 +21,18 @@ const ORDER: [Speaker; 6] = [
     Speaker::RightSurround,
 ];
 
+// The stream's frames, found and measured as the Engine finds them.
 fn frames_of(stream: &[u8]) -> Vec<&[u8]> {
-    iter_frames(stream)
-        .map(|frame| frame.expect("the fixture's frames parse").data)
-        .collect()
+    let mut frames = Vec::new();
+    let mut at = 0;
+    while let Some(sync) = find_sync(stream, at) {
+        let bytes = frame_info(&stream[sync.offset..])
+            .expect("the fixture's frames parse")
+            .container_bytes;
+        frames.push(&stream[sync.offset..sync.offset + bytes]);
+        at = sync.offset + bytes;
+    }
+    frames
 }
 
 fn decode_all(frames: &[Vec<u8>]) -> Vec<Decoded> {
