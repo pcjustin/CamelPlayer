@@ -22,6 +22,7 @@
 #include "Common/util/Measure.h"
 #include "Common/util/Text.h"
 #include "ArtistAvatar.h"
+#include "Background.h"
 #include "CardSize.h"
 #include "CreditText.h"
 #include "DialogPlacement.h"
@@ -1772,30 +1773,28 @@ void LibraryView::OnQueueFolderClick(Windows::Foundation::IInspectable const&, R
     if (current_.folder) queueFolder(*current_.folder, false);
 }
 
-winrt::fire_and_forget LibraryView::background(std::function<std::function<void()>()> work) {
-    auto weak = get_weak();
+void LibraryView::background(std::function<std::function<void()>()> work) {
     auto queue = DispatcherQueue();
-    const auto generation = generation_;
-    co_await winrt::resume_background();
-    std::function<void()> apply;
-    try {
-        apply = work();
-    } catch (const camel::server::LibraryRevisionChanged&) {
-        queue.TryEnqueue([weak] {
-            auto self = weak.get();
-            if (!self) return;
-            if (self->collection_) self->collection_->refresh();
-            if (self->listChanged_) self->listChanged_();
+    ui::background(
+        queue, std::move(work),
+        [weak = get_weak(), generation = generation_] {
+            const auto self = weak.get();
+            return self && self->generation_ == generation;
+        },
+        [weak = get_weak(), queue](const std::exception_ptr& error) {
+            try {
+                std::rethrow_exception(error);
+            } catch (const camel::server::LibraryRevisionChanged&) {
+                queue.TryEnqueue([weak] {
+                    auto self = weak.get();
+                    if (!self) return;
+                    if (self->collection_) self->collection_->refresh();
+                    if (self->listChanged_) self->listChanged_();
+                });
+            } catch (const std::exception& e) {
+                camel::log::warn("library view: %s", e.what());
+            }
         });
-        co_return;
-    } catch (const std::exception& e) {
-        camel::log::warn("library view: %s", e.what());
-        co_return;
-    }
-    queue.TryEnqueue([weak, generation, apply] {
-        auto self = weak.get();
-        if (self && self->generation_ == generation && apply) apply();
-    });
 }
 
 void LibraryView::cancelArtwork() {

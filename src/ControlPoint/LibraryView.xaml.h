@@ -241,7 +241,7 @@ private:
     void showMenu(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, Microsoft::UI::Xaml::FrameworkElement const& element,
                   Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const& e);
     // Runs `work` off the UI thread and applies its result on it, unless the view moved on meanwhile.
-    winrt::fire_and_forget background(std::function<std::function<void()>()> work);
+    void background(std::function<std::function<void()>()> work);
 
     std::shared_ptr<camel::server::IServer> server_;
     std::function<void(camel::server::Command)> submit_;

@@ -20,6 +20,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "TrackMarks.h"
+#include "Background.h"
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
 #include "Substitute.h"
@@ -506,22 +507,20 @@ void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::Conte
     e.Handled(true);
 }
 
-winrt::fire_and_forget PlaylistView::background(std::function<std::function<void()>()> work) {
-    auto weak = get_weak();
-    auto queue = DispatcherQueue();
-    const auto generation = generation_;
-    co_await winrt::resume_background();
-    std::function<void()> apply;
-    try {
-        apply = work();
-    } catch (const std::exception& e) {
-        camel::log::warn("playlist view: %s", e.what());
-        co_return;
-    }
-    queue.TryEnqueue([weak, generation, apply] {
-        auto self = weak.get();
-        if (self && self->generation_ == generation && apply) apply();
-    });
+void PlaylistView::background(std::function<std::function<void()>()> work) {
+    ui::background(
+        DispatcherQueue(), std::move(work),
+        [weak = get_weak(), generation = generation_] {
+            const auto self = weak.get();
+            return self && self->generation_ == generation;
+        },
+        [](const std::exception_ptr& error) {
+            try {
+                std::rethrow_exception(error);
+            } catch (const std::exception& e) {
+                camel::log::warn("playlist view: %s", e.what());
+            }
+        });
 }
 
 void PlaylistView::OnTextTrimmedChanged(TextBlock const& text, IsTextTrimmedChangedEventArgs const&) {

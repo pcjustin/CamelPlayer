@@ -77,7 +77,7 @@ private:
     void edit(camel::server::PlaylistEdit edit, bool reloadAfter);
     // Runs the edit off the UI thread; a playlist changed elsewhere meanwhile is read again.
     void send(QueuedEdit edit);
-    winrt::fire_and_forget background(std::function<std::function<void()>()> work);
+    void background(std::function<std::function<void()>()> work);
 
     std::shared_ptr<camel::server::IServer> server_;
     Handlers handlers_;
