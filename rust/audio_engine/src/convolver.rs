@@ -91,7 +91,7 @@ pub(crate) struct ImpulseResponse {
 
 impl ImpulseResponse {
     /// `samples` interleaved: 1 channel for both outputs, 2 for left and right, or 4 for true stereo in the order
-    /// left to left, left to right, right to left, right to left. None when the layout or a value is invalid.
+    /// left to left, left to right, right to left, right to right. None when the layout or a value is invalid.
     pub(crate) fn new(samples: &[f64], channels: usize, rate: u32) -> Option<Self> {
         Self::with_layout(samples, channels, rate, LAYOUT)
     }
