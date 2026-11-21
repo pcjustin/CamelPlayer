@@ -327,6 +327,69 @@ pub(crate) fn analyze(settings: &Settings, rate: u32, channels: usize) -> Analys
     }
 }
 
+/// The chain a change is built for: its rate and channels, and the settings its nodes were made from.
+pub(crate) struct Base {
+    rate: u32,
+    channels: usize,
+    bands: Vec<Band>,
+    crossfeed: Option<crossfeed::Params>,
+    impulse: Option<Arc<ImpulseResponse>>,
+}
+
+impl Base {
+    pub(crate) fn rate(&self) -> u32 {
+        self.rate
+    }
+
+    fn fits(&self, dsp: &Dsp) -> bool {
+        self.rate == dsp.rate
+            && self.channels == dsp.channels
+            && self.bands == dsp.settings.bands
+            && self.crossfeed == dsp.settings.crossfeed
+            && same_impulse(&self.impulse, &dsp.settings.impulse)
+    }
+}
+
+/// The nodes a change of settings replaces, built with no lock held (a long response's convolver takes many
+/// megabytes), with the chain's preamp for them.
+pub(crate) struct Prepared {
+    base: Base,
+    eq: Option<EqNode>,
+    crossfeed: Option<Option<Crossfeed>>,
+    convolution: Option<Option<Convolver>>,
+    preamp_db: f64,
+}
+
+impl Prepared {
+    pub(crate) fn new(settings: &Settings, base: Base) -> Self {
+        let rate = f64::from(base.rate);
+        Prepared {
+            eq: (settings.bands != base.bands)
+                .then(|| EqNode::new(&settings.bands, rate, base.channels)),
+            crossfeed: (settings.crossfeed != base.crossfeed)
+                .then(|| settings.crossfeed.map(|p| Crossfeed::new(p, rate))),
+            convolution: (!same_impulse(&settings.impulse, &base.impulse))
+                .then(|| settings.impulse.clone().map(Convolver::new)),
+            preamp_db: analyze(settings, base.rate, base.channels).preamp_db,
+            base,
+        }
+    }
+}
+
+/// The nodes a change replaced, to be freed once the chain is let go of.
+pub(crate) struct Released {
+    _retired: Vec<Convolver>,
+    _faded: Vec<Option<Convolver>>,
+}
+
+fn same_impulse(a: &Option<Arc<ImpulseResponse>>, b: &Option<Arc<ImpulseResponse>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 pub(crate) struct Dsp {
     rate: u32,
     channels: usize,
@@ -347,11 +410,6 @@ pub(crate) struct Dsp {
 }
 
 impl Dsp {
-    /// The rate the chain runs at.
-    pub(crate) fn rate(&self) -> u32 {
-        self.rate
-    }
-
     pub(crate) fn new(rate: u32, channels: usize) -> Self {
         let fade = ((f64::from(rate) * FADE_MS / 1000.0).round() as usize).max(1);
         Dsp {
@@ -385,27 +443,45 @@ impl Dsp {
         }
     }
 
+    /// What a change is built against now.
+    pub(crate) fn base(&self) -> Base {
+        Base {
+            rate: self.rate,
+            channels: self.channels,
+            bands: self.settings.bands.clone(),
+            crossfeed: self.settings.crossfeed,
+            impulse: self.settings.impulse.clone(),
+        }
+    }
+
     /// Applies `settings`, which must be valid for this rate. Once audio has passed, the change fades in.
+    #[cfg(test)]
     pub(crate) fn set(&mut self, settings: Settings) {
-        self.retired.clear();
-        let rate = f64::from(self.rate);
+        let prepared = Prepared::new(&settings, self.base());
+        drop(self.apply(settings, prepared));
+    }
+
+    /// Applies `settings` with the nodes `prepared` built for them; the nodes replaced come back, to be freed by the
+    /// caller once it has let go of the chain. Once audio has passed, the change fades in.
+    pub(crate) fn apply(&mut self, settings: Settings, prepared: Prepared) -> Released {
+        if !prepared.base.fits(self) {
+            // Another change came in between, so what was built may not fit: it is built again here.
+            let again = Prepared::new(&settings, self.base());
+            return self.apply(settings, again);
+        }
+        let released = Released {
+            _retired: std::mem::replace(&mut self.retired, Vec::with_capacity(4)),
+            _faded: std::mem::replace(&mut self.convolution.done, Vec::with_capacity(MAX_BLENDED)),
+        };
         let started = self.started;
-        if settings.bands != self.settings.bands {
-            let mut node = EqNode::new(&settings.bands, rate, self.channels);
+        if let Some(mut node) = prepared.eq {
             node.adopt_state(&self.eq.current);
             self.eq.set(node, started);
         }
-        if settings.crossfeed != self.settings.crossfeed {
-            let node = settings.crossfeed.map(|p| Crossfeed::new(p, rate));
+        if let Some(node) = prepared.crossfeed {
             self.crossfeed.set(node, started);
         }
-        let same_impulse = match (&settings.impulse, &self.settings.impulse) {
-            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-            (None, None) => true,
-            _ => false,
-        };
-        if !same_impulse {
-            let node = settings.impulse.clone().map(Convolver::new);
+        if let Some(node) = prepared.convolution {
             let old = self.convolution.set(node, started);
             self.retire(old);
         }
@@ -426,9 +502,7 @@ impl Dsp {
             }
         }
         // The volume is the chain's last gain and the preamp its first; both are scalars, so they apply as one.
-        let target = 10f64.powf(
-            (analyze(&settings, self.rate, self.channels).preamp_db + settings.volume_db) / 20.0,
-        );
+        let target = 10f64.powf((prepared.preamp_db + settings.volume_db) / 20.0);
         if target != self.target_gain {
             self.target_gain = target;
             if started {
@@ -438,6 +512,7 @@ impl Dsp {
             }
         }
         self.settings = settings;
+        released
     }
 
     /// Whether the chain changes the signal now: false once nothing does and every fade has ended.

@@ -3129,12 +3129,15 @@ pub unsafe extern "C" fn camel_engine_set_dsp_v1(
             Err(status) => return status,
         };
         let engine = &*engine;
-        // The chain's own rate: the device's, or 352.8 kHz on a modulated DSD stream.
-        let mut stage = engine.stage.lock().unwrap();
-        if !settings.valid(stage.dsp.rate()) {
+        // The chain's own rate: the device's, or 352.8 kHz on a modulated DSD stream. The nodes are built, and those
+        // replaced freed, with the stage unlocked, which pump() needs to fill the device.
+        let base = engine.stage.lock().unwrap().dsp.base();
+        if !settings.valid(base.rate()) {
             return ENGINE_E_INVALID_ARGUMENT;
         }
-        stage.dsp.set(settings);
+        let prepared = dsp::Prepared::new(&settings, base);
+        let released = engine.stage.lock().unwrap().dsp.apply(settings, prepared);
+        drop(released);
         ENGINE_OK
     })) {
         Ok(status) => status,
