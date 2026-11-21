@@ -554,7 +554,7 @@ void MainWindow::InitializeComponent() {
         Automation::AutomationProperties::SetName(button, tr(key));
     };
     setButtonTip(PlayPauseButton(), L"Tip_Play");
-    setButtonTip(StopButton(), L"Tip_Stop");
+    StopMenuItem().Text(tr(L"Tip_Stop"));
     setButtonTip(PreviousButton(), L"Tip_Previous");
     setButtonTip(NextButton(), L"Tip_Next");
     setButtonTip(ShuffleButton(), L"Tip_Shuffle");
@@ -1957,7 +1957,6 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     const auto [pos, total] = showPosition(s);
     const bool hasTrack = !s.pathUtf8.empty();
     PlayPauseButton().IsEnabled(hasTrack);
-    StopButton().IsEnabled(hasTrack);
     PreviousButton().IsEnabled(hasTrack);
     NextButton().IsEnabled(hasTrack);
     CoverButton().IsEnabled(hasTrack);

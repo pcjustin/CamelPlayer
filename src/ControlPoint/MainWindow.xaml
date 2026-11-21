@@ -967,9 +967,6 @@
                         <ToggleButton x:Name="ShuffleButton" Click="OnShuffleClick" Style="{StaticResource TransportToggleStyle}">
                             <SymbolIcon Symbol="Shuffle" />
                         </ToggleButton>
-                        <Button x:Name="StopButton" Click="OnStopClick" Style="{StaticResource TransportButtonStyle}">
-                            <SymbolIcon Symbol="Stop" />
-                        </Button>
                         <Button x:Name="PreviousButton" Click="OnPreviousClick" Style="{StaticResource TransportButtonStyle}">
                             <SymbolIcon Symbol="Previous" />
                         </Button>
@@ -983,6 +980,17 @@
                     <Button x:Name="PlayPauseButton" Click="OnPlayPauseClick" Style="{StaticResource AccentButtonStyle}"
                             Width="48" Height="48" Padding="0" CornerRadius="24" HorizontalAlignment="Center"
                             VerticalAlignment="Center">
+                        <!-- A pause lets a local device go after a second; a network player, an AirPlay receiver or
+                             HQPlayer holds it on, and Stop lets it go at once. -->
+                        <Button.ContextFlyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem x:Name="StopMenuItem" Click="OnStopClick">
+                                    <MenuFlyoutItem.Icon>
+                                        <SymbolIcon Symbol="Stop" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                            </MenuFlyout>
+                        </Button.ContextFlyout>
                         <SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
                     </Button>
                     <Ellipse x:Name="ErrorDot" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
