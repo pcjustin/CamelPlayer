@@ -1,6 +1,6 @@
 # Validation
 
-This file records how CamelPlayer 0.1.0, 0.2.0, 0.2.1, 0.2.2, 0.2.3, 0.3.0, 0.4.0, 0.4.1, 0.4.2 and 0.5.0 were checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance runs were not repeated for 0.2.0, 0.2.1, 0.2.2, 0.3.0, 0.4.0 or 0.4.1, nor the NAS runs for 0.2.0, 0.2.1, 0.2.2, 0.3.0 or 0.4.1; the library performance runs were not repeated for 0.4.2 or 0.5.0 either. [README.md](README.md#testing) explains how to run the tests.
+This file records how each CamelPlayer release was checked beyond their ordinary automated tests: on audio hardware, on network players, in the app, on a NAS and for speed. Each section names when its run took place; later changes may have moved the numbers. The library performance runs were not repeated for 0.2.0, 0.2.1, 0.2.2, 0.3.0, 0.4.0 or 0.4.1, nor the NAS runs for 0.2.0, 0.2.1, 0.2.2, 0.3.0 or 0.4.1; the library performance runs were not repeated for 0.4.2 or 0.5.0 either. [README.md](README.md#testing) explains how to run the tests.
 
 ## Automated tests
 
