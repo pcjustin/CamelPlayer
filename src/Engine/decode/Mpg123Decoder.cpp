@@ -63,14 +63,15 @@ std::optional<LibraryLength> libraryLength(const std::filesystem::path& path) {
 // One libmpg123 stream of the file, which mpg123 sees from byte `start` on.
 class Stream {
 public:
-    Stream(const std::filesystem::path& path, uint64_t start, ScanGate* gate = nullptr) : start_(start), gate_(gate) {
+    // `end`: where the sound ends in the file.
+    Stream(const std::filesystem::path& path, uint64_t start, uint64_t end, ScanGate* gate = nullptr)
+        : start_(start), gate_(gate) {
         static std::once_flag once;
         std::call_once(once, [] { mpg123_init(); });
         std::FILE* file = nullptr;
         if (_wfopen_s(&file, longPath(path).c_str(), L"rb") != 0 || !file)
             throw Error(ErrorCode::FileOpen, "mpg123: cannot open file");
         file_.reset(file);
-        const uint64_t end = mpegSoundEnd(path);
         audioEnd_ = end > start_ ? end - start_ : 0;
         if (_fseeki64(file, int64_t(start_), SEEK_SET) != 0) throw Error(ErrorCode::FileOpen, "mpg123: cannot seek");
         int error = MPG123_OK;
@@ -153,7 +154,8 @@ public:
     // count the tags before it as audio when it estimates the length of a stream without a header, and decode a VBRI
     // frame, which holds no sound.
     Mpg123Decoder(const std::filesystem::path& path, uint32_t lossyBits, bool measure)
-        : path_(path), start_(mpegSoundStart(path)), stream_(std::make_unique<Stream>(path, start_)),
+        : path_(path), layout_(mpegLayout(path)), start_(layout_.soundStart),
+          stream_(std::make_unique<Stream>(path, start_, layout_.soundEnd)),
           library_(measure ? libraryLength(path) : std::nullopt) {
         info_.sampleRate = uint32_t(stream_->rate);
         info_.channels = uint32_t(stream_->channels);
@@ -162,9 +164,9 @@ public:
         // library's length knows better than either.
         // A stream without any header whose bitrate varies is estimated from frames read across it.
         const int64_t length = mpg123_length64(stream_->mh());
-        const uint64_t vbri = vbriSamples(path);
+        const uint64_t vbri = layout_.vbriSamples;
         vbri_ = vbri != 0;
-        const uint64_t sampled = library_ || vbri_ || lossyLengthDeclared(path) ? 0 : headerlessSamples(path);
+        const uint64_t sampled = library_ || vbri_ || layout_.lengthDeclared ? 0 : headerlessSamples(path);
         estimate_ = library_ ? library_->frames : vbri ? vbri : sampled ? sampled : length > 0 ? uint64_t(length) : 0;
         deferScan_ = measure && library_ && !library_->estimated;
         if (!measure)
@@ -185,6 +187,7 @@ public:
     Mpg123Decoder& operator=(const Mpg123Decoder&) = delete;
 
     const SourceInfo& info() const override { return info_; }
+    bool lengthDeclared() const { return layout_.lengthDeclared; }
     uint64_t estimatedFrames() const override { return info_.totalFrames ? info_.totalFrames : estimate_; }
 
     size_t read(int32_t* dst, size_t frames) override {
@@ -273,7 +276,7 @@ private:
 
     void scanMain(const std::filesystem::path& path) {
         try {
-            auto scanning = std::make_unique<Stream>(path, start_, &gate_);
+            auto scanning = std::make_unique<Stream>(path, start_, layout_.soundEnd, &gate_);
             {
                 const std::scoped_lock lock(gate_.mutex);
                 scanning_ = scanning.get();
@@ -346,7 +349,7 @@ private:
         const bool measured = library_ && !library_->estimated;
         const bool noVbrHeader = frame.vbr == MPG123_CBR && !vbri_;
         const bool fits = measured && estimated && std::abs(audio / double(estimated) - frameBytes) <= frameBytes * 0.005;
-        const bool cbr = noVbrHeader && (fits || (!measured && lossyLengthDeclared(path_)));
+        const bool cbr = noVbrHeader && (fits || (!measured && layout_.lengthDeclared));
         // Without a header or a measured length, the frame size is the best guess there is.
         const bool bySize = cbr || (noVbrHeader && !measured);
         if (!bySize && !toc_) toc_ = xingToc(path_);
@@ -396,6 +399,7 @@ private:
     }
 
     std::filesystem::path path_;
+    MpegLayout layout_;
     uint64_t start_;
     std::unique_ptr<Stream> stream_;
     std::optional<LibraryLength> library_;
@@ -434,8 +438,8 @@ void rememberLibraryLength(const std::filesystem::path& path, uint64_t frames, b
 }
 
 SourceInfo probeMp3Info(const std::filesystem::path& path, bool& estimated) {
-    estimated = !lossyLengthDeclared(path);
     const Mpg123Decoder decoder(path, 24, false);
+    estimated = !decoder.lengthDeclared();
     return decoder.info();
 }
 

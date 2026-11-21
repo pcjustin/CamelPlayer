@@ -433,27 +433,46 @@ std::optional<EncoderTrim> itunesTrim(const File& f, const Box& moov) {
 
 } // namespace
 
-bool lossyLengthDeclared(const std::filesystem::path& path) {
-    const File f(path);
+namespace {
+
+// The parts of an MP3's start, each from the first frame at `start`.
+bool lengthDeclaredAt(const File& f, uint64_t start) {
     uint8_t h[10] = {};
     if (!f.readAt(0, h, sizeof h)) return false;
     if (tagIs(h + 4, "ftyp")) return true;
     // The first MPEG frame carries the header after its side information (at most 32 bytes in).
     uint8_t frame[4 + 32 + 4] = {};
-    if (!f.readAt(mpegStart(f), frame, sizeof frame) || !frameSync(frame)) return false;
+    if (!f.readAt(start, frame, sizeof frame) || !frameSync(frame)) return false;
     for (size_t i = 4; i + 4 <= sizeof frame; i++)
         if (tagIs(frame + i, "Xing") || tagIs(frame + i, "Info")) return true;
     return false;
 }
 
-uint64_t vbriSamples(const std::filesystem::path& path) {
-    const File f(path);
+uint64_t vbriSamplesAt(const File& f, uint64_t start) {
     // The VBRI frame follows the header and 32 bytes of side information: version, delay, quality, bytes, frames.
     uint8_t frame[36 + 18] = {};
-    if (!f.readAt(mpegStart(f), frame, sizeof frame) || !frameSync(frame) || !tagIs(frame + 36, "VBRI")) return 0;
+    if (!f.readAt(start, frame, sizeof frame) || !frameSync(frame) || !tagIs(frame + 36, "VBRI")) return 0;
     const bool mpeg1 = ((frame[1] >> 3) & 3) == 3;
     const uint32_t frames = be32(frame + 36 + 14); // the VBRI frame counts itself
     return uint64_t(frames ? frames - 1 : 0) * (mpeg1 ? 1152 : 576);
+}
+
+uint64_t soundStartAt(const File& f, uint64_t start) {
+    uint8_t frame[40] = {};
+    if (!f.readAt(start, frame, sizeof frame) || !tagIs(frame + 36, "VBRI")) return start;
+    return start + mpegFrameLength(frame);
+}
+
+} // namespace
+
+bool lossyLengthDeclared(const std::filesystem::path& path) {
+    const File f(path);
+    return lengthDeclaredAt(f, mpegStart(f));
+}
+
+uint64_t vbriSamples(const std::filesystem::path& path) {
+    const File f(path);
+    return vbriSamplesAt(f, mpegStart(f));
 }
 
 std::optional<XingToc> xingToc(const std::filesystem::path& path) {
@@ -564,10 +583,6 @@ uint64_t soundEnd(const File& f) {
 }
 } // namespace
 
-uint64_t mpegSoundEnd(const std::filesystem::path& path) {
-    return soundEnd(File(path));
-}
-
 uint64_t headerlessSamples(const std::filesystem::path& path) {
     const File f(path);
     const uint64_t start = mpegStart(f), end = soundEnd(f);
@@ -620,10 +635,13 @@ uint64_t headerlessSamples(const std::filesystem::path& path) {
 
 uint64_t mpegSoundStart(const std::filesystem::path& path) {
     const File f(path);
+    return soundStartAt(f, mpegStart(f));
+}
+
+MpegLayout mpegLayout(const std::filesystem::path& path) {
+    const File f(path);
     const uint64_t start = mpegStart(f);
-    uint8_t frame[40] = {};
-    if (!f.readAt(start, frame, sizeof frame) || !tagIs(frame + 36, "VBRI")) return start;
-    return start + mpegFrameLength(frame);
+    return {soundStartAt(f, start), soundEnd(f), vbriSamplesAt(f, start), lengthDeclaredAt(f, start)};
 }
 
 std::optional<EncoderTrim> mp4EncoderTrim(const std::filesystem::path& path, uint32_t sampleRate) {

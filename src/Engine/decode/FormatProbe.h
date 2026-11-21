@@ -33,10 +33,7 @@ bool lossyLengthDeclared(const std::filesystem::path& path);
 // a frame.
 uint64_t vbriSamples(const std::filesystem::path& path);
 
-// Where an MP3's sound ends: before an ID3v1 tag and an APEv2 tag at the end of the file, which can hold a cover.
-uint64_t mpegSoundEnd(const std::filesystem::path& path);
-
-// The samples of an MP3 with no header, estimated from its sound alone (to mpegSoundEnd): by the frame size where its
+// The samples of an MP3 with no header, estimated from its sound alone (to MpegLayout::soundEnd): by the frame size where its
 // first frames share one bitrate, else from the frames of windows read across it, as a first frame's bitrate, which
 // mpg123 estimates from, can be a minute off on a stream whose bitrate varies. 0 for anything that is not MPEG audio.
 uint64_t headerlessSamples(const std::filesystem::path& path);
@@ -44,6 +41,16 @@ uint64_t headerlessSamples(const std::filesystem::path& path);
 // Where an MP3's sound starts: at its first frame, past its tags and any other bytes before it, or at the frame after a
 // VBRI frame, which holds no sound.
 uint64_t mpegSoundStart(const std::filesystem::path& path);
+
+// What an MP3's playback needs of its layout, read through one opening of the file: on a share each opening and its
+// walk through the tags is a round trip or more.
+struct MpegLayout {
+    uint64_t soundStart = 0; // mpegSoundStart
+    uint64_t soundEnd = 0;   // before an ID3v1 tag and an APEv2 tag at the end of the file, which can hold a cover
+    uint64_t vbriSamples = 0;
+    bool lengthDeclared = false; // lossyLengthDeclared
+};
+MpegLayout mpegLayout(const std::filesystem::path& path);
 
 // What an MP3's Xing (VBR) frame declares, when it declares all three: the frames after it, the bytes from it on, and
 // for each percent of the frames, where they start in 256ths of those bytes. `at` is where the frame starts in the file,
