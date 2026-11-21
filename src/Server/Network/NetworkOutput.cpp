@@ -235,7 +235,7 @@ public:
 
     bool supports(const DeviceFormat& f) override {
         if (f.channels != 2) return false;
-        if (!formatsRead_ || !gaplessRead_) readCapabilities();
+        if ((!formatsRead_ || !gaplessRead_) && std::chrono::steady_clock::now() >= askAgainAt_) readCapabilities();
         if (f.type == SampleType::Dsd8) return formats_.dsf;
         if (f.type == SampleType::Int16) return formats_.wav || formats_.l16;
         if (f.type == SampleType::Int24) return formats_.wav || formats_.l24;
@@ -368,9 +368,14 @@ public:
 
 private:
     // What the player takes, read again later for what it could not tell yet, as when it was waking from standby.
+    // A player that does not answer takes the requests' time to fail, 8 s, which every format a negotiation tries took
+    // again; it is asked again only after a while. One that refuses at once, as when it wakes, is asked at every call.
     void readCapabilities() {
+        const auto started = std::chrono::steady_clock::now();
         if (!formatsRead_) formats_ = player_->formats(formatsRead_);
         if (!gaplessRead_) gapless_ = player_->gapless(gaplessRead_);
+        const auto now = std::chrono::steady_clock::now();
+        askAgainAt_ = now - started > std::chrono::seconds(1) ? now + std::chrono::seconds(10) : now;
     }
 
     void ensureLink() {
@@ -1009,6 +1014,7 @@ private:
     upnp::PlayerFormats formats_;
     bool gapless_ = false;
     bool formatsRead_ = false, gaplessRead_ = false;
+    std::chrono::steady_clock::time_point askAgainAt_; // for what the player could not tell
     std::unique_ptr<PlayerControl> link_;
 
     SOCKET listener_ = kNoSocket;
