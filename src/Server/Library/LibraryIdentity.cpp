@@ -14,6 +14,8 @@
 #include <limits>
 #include <cstring>
 #include <set>
+#include <chrono>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <array>
@@ -208,8 +210,9 @@ std::optional<std::vector<DirectoryEntry>> directoryEntries(void* handle, const 
     return result;
 }
 
-std::wstring storageKey(const std::filesystem::path& path) {
-    if (path.empty()) return {};
+namespace {
+
+std::wstring findStorageKey(const std::filesystem::path& path) {
     std::wstring text = path.wstring();
     if (text.starts_with(L"\\\\?\\") && text.size() > 5 && text[5] == L':') text.erase(0, 4);
     if (text.size() > 2 && text[1] == L':' && GetDriveTypeW(text.substr(0, 3).c_str()) == DRIVE_REMOTE) {
@@ -233,6 +236,32 @@ std::wstring storageKey(const std::filesystem::path& path) {
     }
     CharLowerBuffW(text.data(), DWORD(text.size()));
     return text;
+}
+
+} // namespace
+
+// Kept a minute for each path: background work asks for the storage of the file it reads and of each playing file
+// between its chunks, every 20 ms while it waits, and a local file's takes two system calls, 1.5 ms a check.
+std::wstring storageKey(const std::filesystem::path& path) {
+    if (path.empty()) return {};
+    struct Known {
+        std::wstring key;
+        std::chrono::steady_clock::time_point at;
+    };
+    static std::mutex mutex;
+    static std::unordered_map<std::wstring, Known> known;
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard lock(mutex);
+        if (const auto found = known.find(path.native());
+            found != known.end() && now - found->second.at < std::chrono::minutes(1))
+            return found->second.key;
+    }
+    auto key = findStorageKey(path);
+    std::lock_guard lock(mutex);
+    if (known.size() >= 4096) known.clear(); // a scan asks for each of its files once
+    known[path.native()] = {key, now};
+    return key;
 }
 
 FileVersion storedVersion(const sqlite::Statement& row, int column) {
