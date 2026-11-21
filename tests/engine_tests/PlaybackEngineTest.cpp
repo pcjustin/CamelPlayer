@@ -434,6 +434,31 @@ TEST_F(EngineStateTest, AManualCrossfadeAfterAQueuedTrackStartedWaitsForItsOwnSe
     EXPECT_GT(pulled, 4800u + 9600u) << "the chosen file counted from the queued track's start";
 }
 
+// A change during a crossfade mixes what that fade would still play while the Engine's DSP stage waits. At 384 kHz, with
+// a ten-second crossfade between tracks that are resampled, the change takes well under the 250 ms the device ring
+// holds.
+TEST_F(EngineStateTest, AChangeDuringALongCrossfadeKeepsTheDeviceFed) {
+    settings.crossfade = {true, 10.0};
+    settings.convertWhenUnsupported = true;
+    engine->applySettings(settings);
+    probe.onlyRate = 384000;
+    const auto first = testutil::generatedFile({"long-fade-first", 44100, 16, 2, 25.0});
+    const auto queued = testutil::generatedFile({"long-fade-queued", 44100, 16, 2, 30.0});
+    const auto chosen = testutil::generatedFile({"long-fade-chosen", 44100, 16, 2, 30.0});
+    engine->openAndPlay(first);
+    engine->waitIdle();
+    ASSERT_TRUE(engine->queueNext(queued, std::nullopt, 0.0, 10000));
+    engine->waitIdle();
+    // A second into the fade, which starts ten seconds before the first file's end.
+    ASSERT_EQ(pull(size_t{384000} * 16), size_t{384000} * 16);
+    const auto started = std::chrono::steady_clock::now();
+    engine->crossfadeTo(chosen);
+    engine->waitIdle();
+    const auto took = std::chrono::steady_clock::now() - started;
+    EXPECT_EQ(engine->snapshot().file, chosen.wstring());
+    EXPECT_LT(took, 200ms) << std::chrono::duration<double, std::milli>(took).count() << " ms";
+}
+
 // A stream output, as AirPlay is, learns at each seam which track follows: after a manual crossfade, the one that
 // plays, not the one queued before it, at that seam and at the next.
 TEST_F(EngineStateTest, AManualCrossfadeTellsAStreamOutputTheTrackThatPlays) {

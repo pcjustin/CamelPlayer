@@ -132,6 +132,9 @@ const MAX_HOLD_BYTES: u64 = 256 << 20;
 // A manual change keeps this much more of the playing track than its fade takes, so it plays on while the chosen one
 // starts decoding.
 const CUT_MARGIN_MS: u32 = 1_000;
+// A change during a crossfade fades what that fade would play out over at most this, as it is mixed at the change while
+// the DSP stage waits.
+const INTERRUPTED_FADE_MS: u32 = 2_000;
 
 pub const AUDIO_PCM: u32 = 1;
 pub const AUDIO_DSD: u32 = 2;
@@ -801,19 +804,24 @@ impl Fade {
     fn mix(&mut self, frames: usize, channels: usize) {
         self.mixed.clear();
         self.mixed.resize(frames * channels, 0.0);
+        // The gains turn by the same angle each frame, from the frame's middle: a rotation rather than a cosine and a
+        // sine for every frame, which took most of the time a change during a long crossfade waits for.
+        let step = std::f64::consts::FRAC_PI_2 / self.length as f64;
+        let (step_sin, step_cos) = step.sin_cos();
+        let (mut in_gain, mut out_gain) = ((self.done as f64 + 0.5) * step).sin_cos();
         for (i, frame) in self.mixed.chunks_exact_mut(channels).enumerate() {
-            let progress = (self.done as f64 + i as f64 + 0.5) / self.length as f64;
-            let (out_gain, in_gain) = if progress >= 1.0 {
-                (0.0, 1.0)
-            } else {
-                let angle = progress * std::f64::consts::FRAC_PI_2;
-                (angle.cos(), angle.sin())
-            };
+            if self.done + i as u64 >= self.length {
+                (out_gain, in_gain) = (0.0, 1.0);
+            }
             for (c, sample) in frame.iter_mut().enumerate() {
                 let k = i * channels + c;
                 *sample = self.outgoing.get(k).map_or(0.0, |v| v * out_gain)
                     + self.incoming.get(k).map_or(0.0, |v| v * in_gain);
             }
+            (in_gain, out_gain) = (
+                in_gain * step_cos + out_gain * step_sin,
+                out_gain * step_cos - in_gain * step_sin,
+            );
         }
         let used = frames * channels;
         self.outgoing.drain(..used.min(self.outgoing.len()));
@@ -2599,8 +2607,8 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             return ENGINE_E_NOT_READY;
         }
         let mut stage = engine.stage.lock().unwrap();
-        let fade_in = engine.fade_frames(next.crossfade_ms);
-        let keep_frames = fade_in + engine.fade_frames(CUT_MARGIN_MS);
+        let mut fade_in = engine.fade_frames(next.crossfade_ms);
+        let margin = engine.fade_frames(CUT_MARGIN_MS);
         let next_length = engine.mixed_frames(next.remaining_frames(), next.info.sample_rate);
         let Stage {
             segments,
@@ -2614,11 +2622,12 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             let [outgoing, incoming, ..] = segments.make_contiguous() else {
                 return ENGINE_E_INVALID_STATE;
             };
+            fade_in = fade_in.min(engine.fade_frames(INTERRUPTED_FADE_MS));
             let rendered = engine.render_fade(
                 outgoing,
                 incoming,
                 &mut playing,
-                keep_frames as usize,
+                (fade_in + margin) as usize,
                 buffers,
             );
             buffers.outgoing = playing.outgoing;
@@ -2668,7 +2677,7 @@ pub unsafe extern "C" fn camel_engine_crossfade_to_v1(
             let tail_frames = playing.tail_frames();
             let keep = playing
                 .converter
-                .input_frames_for(engine.device_frames(keep_frames))
+                .input_frames_for(engine.device_frames(fade_in + margin))
                 .min(playing.frames - playing.read + tail_frames);
             // What is kept becomes the track's tail, out of the source ring the new track decodes into.
             let frame_bytes = playing.frame_bytes();
@@ -4600,6 +4609,45 @@ mod tests {
         let start = boundaries[1];
         assert_eq!(left.len(), start + 96_000);
         assert!(left[start + 48_000..].iter().all(|&v| v == 2000));
+    }
+
+    // What a crossfade would still play is mixed at the change, while the DSP stage waits, so it fades out over two
+    // seconds at most, and the chosen track fades in over the same.
+    #[test]
+    fn a_change_during_a_long_crossfade_fades_over_two_seconds_at_most() {
+        let mut changed = false;
+        let mut boundaries = Vec::new();
+        let left = play_tones("8000:240000:48000", |engine, rendered| {
+            if rendered == 0 {
+                assert_eq!(
+                    queue_tone(engine, 3, "-4000:240000:48000", 3000, 0),
+                    ENGINE_OK
+                );
+            }
+            let (count, position, _) = transitions(engine);
+            if count as usize > boundaries.len() {
+                boundaries.push(rendered - position as usize);
+            }
+            if count == 1 && !changed {
+                changed = true;
+                let host = tone_host();
+                let source = tone_source("2000:240000:48000", 3000, 0);
+                let status = unsafe {
+                    camel_engine_crossfade_to_v1(
+                        engine,
+                        &command_stamp(4),
+                        &source,
+                        decoder_host::DECODER_SYMPHONIA,
+                        &host,
+                    )
+                };
+                assert_eq!(status, ENGINE_OK);
+            }
+        });
+        assert_eq!(boundaries.len(), 2);
+        let start = boundaries[1];
+        assert_ne!(left[start + 96_000 - 2_400], 2000);
+        assert!(left[start + 96_000..].iter().all(|&v| v == 2000));
     }
 
     #[test]
