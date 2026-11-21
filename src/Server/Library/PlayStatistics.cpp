@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <sqlite3.h>
 
+#include "Server/Library/LibraryViews.h"
+
 namespace camel::server {
 namespace {
 
@@ -258,7 +260,7 @@ void setTrackFavorite(LibraryStore& store, const std::vector<LibraryTrackKey>& t
                 mark.run();
                 mark.reset();
             }
-            db.exec("UPDATE library_revision SET value=value+1 WHERE id=1");
+            markFavoritesChanged(db);
         })
         .get();
 }
@@ -279,7 +281,7 @@ void setAlbumFavorite(LibraryStore& store, const std::vector<int64_t>& albums, b
                 mark.run();
                 mark.reset();
             }
-            db.exec("UPDATE library_revision SET value=value+1 WHERE id=1");
+            markFavoritesChanged(db);
         })
         .get();
 }

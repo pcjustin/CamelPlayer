@@ -210,6 +210,10 @@ std::string libraryDisplayPath(const std::string& key);
 // A library file's path as the scan spelled it, from its root's display path and the names stored for its folders and
 // itself, without asking the file system; nullopt when the library does not hold the file.
 std::optional<std::string> libraryStoredPath(sqlite::Database& db, int64_t file);
+
+// After a favorite mark changed: the listings showing marks are read again, as the library revision changes, but the
+// orders of the others stay, as a mark is no part of them.
+void markFavoritesChanged(sqlite::Database& db);
 // Where a library folder is, as Roon shows it: a share as \\server\share\folder, a local folder as
 // "COMPUTER › [D:] volume label › folder".
 std::string libraryLocation(const std::string& key);
