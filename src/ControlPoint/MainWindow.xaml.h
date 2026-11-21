@@ -231,6 +231,9 @@ private:
     void updateBackendGroups();
     void refreshFromServer();
     void applySnapshot(const camel::server::Snapshot& snapshot);
+    // The playing track's place: the slider, the waveform's played part, the time and the lyrics line; returns the
+    // position and the length in seconds.
+    std::pair<double, double> showPosition(const camel::server::PlaybackSnapshot& s);
     bool movesOnlyThePosition(const camel::server::Snapshot& snapshot) const;
     void submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);

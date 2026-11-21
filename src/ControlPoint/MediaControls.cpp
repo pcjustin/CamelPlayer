@@ -121,6 +121,11 @@ void MediaControls::update(const camel::server::PlaybackSnapshot& playback, cons
                                                                            : MediaPlaybackStatus::Stopped);
         shownPosition_ = -1; // the timeline follows every change of state
     }
+    showPosition(position, length);
+}
+
+void MediaControls::showPosition(double position, double length) {
+    if (!controls_ || shownPath_.empty()) return;
     // Windows moves the shown position along by itself while playing; corrections once a second are enough.
     if (length != shownLength_ || std::abs(position - shownPosition_) >= 1.0) {
         shownLength_ = length;

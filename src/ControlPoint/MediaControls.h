@@ -31,6 +31,8 @@ public:
     // The track as the playback bar shows it; positions are in seconds.
     void update(const camel::server::PlaybackSnapshot& playback, const std::string& title, const std::string& artist,
                 const std::string& album, double position, double length);
+    // The same track moved on to `position`.
+    void showPosition(double position, double length);
 
 private:
     winrt::fire_and_forget showCover(std::string path);

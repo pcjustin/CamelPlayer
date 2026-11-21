@@ -1884,7 +1884,18 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             ErrorBar().IsOpen(false);
     }
     if (!server_ || !cursor_.accept(snapshot)) return;
+    // While a track plays, most snapshots differ from the one shown in its position alone: only what shows the
+    // position is redrawn for them, not the whole bar and the signal path.
+    auto moved = shown_;
+    moved.revision = snapshot.revision;
+    moved.playback.position = snapshot.playback.position;
+    const bool onlyMoved = moved == snapshot;
     shown_ = snapshot;
+    if (onlyMoved) {
+        const auto [pos, total] = showPosition(snapshot.playback);
+        if (media_) media_->showPosition(pos, total);
+        return;
+    }
     if (snapshot.devices.revision != shownDevicesRevision_ || snapshot.settings.airplayGroup != settings_.airplayGroup ||
         snapshot.settings.airplay.deviceId != settings_.airplay.deviceId) {
         shownDevicesRevision_ = snapshot.devices.revision;
@@ -1911,11 +1922,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             if (!artworkPath_.empty()) ui::loadArtwork(image, server_, {ArtworkKind::Track, 0, artworkPath_}, artworkToken_);
         }
     }
-    const uint32_t rate = s.source ? s.source->sampleRate : 0;
-    const double pos = rate ? framesToSeconds(s.position, rate) : 0.0;
-    const double total = rate ? framesToSeconds(s.total, rate) : 0.0;
     if (s.pathUtf8 != lyricsPath_) loadLyrics(s.pathUtf8);
-    followLyrics(pos);
 
     // The play button and the repeat button are named for what they do or show now. As in Roon, the play button alone
     // shows whether it plays: a ring turns around it while a slow source is buffered, and a dot on it stays for an error
@@ -1947,18 +1954,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         waveformBar_->clear();
         waveformAsked_ = {};
     }
-    if (!waveformPath_.empty() && settings_.waveform.enabled && !waveformBar_->shown() && !waveformFetching_ &&
-        std::chrono::steady_clock::now() - waveformAsked_ > std::chrono::seconds(2))
-        fetchWaveform();
-    positionTotal_ = total;
-    waveformBar_->setPlayed(total > 0 ? pos / total : 0.0);
-    if (!seekTimer_.IsRunning()) { // do not fight the user while they drag
-        sliderUpdating_ = true;
-        PositionSlider().Maximum(std::max(1.0, total));
-        PositionSlider().Value(std::min(pos, std::max(1.0, total)));
-        sliderUpdating_ = false;
-    }
-    TimeText().Text(ui::formatTime(pos) + L" / " + ui::formatTime(total));
+    const auto [pos, total] = showPosition(s);
     const bool hasTrack = !s.pathUtf8.empty();
     PlayPauseButton().IsEnabled(hasTrack);
     StopButton().IsEnabled(hasTrack);
@@ -2291,6 +2287,26 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         StatusDetailText().Text(clauseLines(s.outputDetail));
     }
     showStatusNotices(s);
+}
+
+std::pair<double, double> MainWindow::showPosition(const PlaybackSnapshot& s) {
+    const uint32_t rate = s.source ? s.source->sampleRate : 0;
+    const double pos = rate ? framesToSeconds(s.position, rate) : 0.0;
+    const double total = rate ? framesToSeconds(s.total, rate) : 0.0;
+    followLyrics(pos);
+    if (!waveformPath_.empty() && settings_.waveform.enabled && !waveformBar_->shown() && !waveformFetching_ &&
+        std::chrono::steady_clock::now() - waveformAsked_ > std::chrono::seconds(2))
+        fetchWaveform();
+    positionTotal_ = total;
+    waveformBar_->setPlayed(total > 0 ? pos / total : 0.0);
+    if (!seekTimer_.IsRunning()) { // do not fight the user while they drag
+        sliderUpdating_ = true;
+        PositionSlider().Maximum(std::max(1.0, total));
+        PositionSlider().Value(std::min(pos, std::max(1.0, total)));
+        sliderUpdating_ = false;
+    }
+    TimeText().Text(ui::formatTime(pos) + L" / " + ui::formatTime(total));
+    return {pos, total};
 }
 
 void MainWindow::showNowPlaying(const ui::NowPlaying& was) {
