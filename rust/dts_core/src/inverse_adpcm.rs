@@ -39,8 +39,8 @@
 //! # Scope
 //!
 //! This module exposes the predictor primitive itself, not the
-//! dispatch. The caller (a future subframe walker) is responsible
-//! for:
+//! dispatch. Its caller, the subframe decode in `subframe_pcm.rs`, is
+//! responsible for:
 //!
 //! - Reading the per-subband `PMODE` flag and only invoking the
 //!   predictor for subbands whose `PMODE == 1`.
@@ -51,11 +51,8 @@
 //!   become the next block's `raSample[-4]..raSample[-1]` priming
 //!   values.
 //!
-//! Both the integer (i32) and floating-point (f64) flavours are
-//! exposed because the §C.2.2 spec text does not constrain the
-//! arithmetic type — the predictor sits between dequantisation and
-//! the §C.2.5 32-band synthesis QMF, both of which may run in
-//! either domain depending on the decoder's precision policy.
+//! Only the floating-point (f64) predictor is kept, as the decoder runs
+//! in f64; the integer flavour was left out (`NOTICE.md`).
 //!
 //! # Implementation note
 //!

@@ -81,12 +81,12 @@ pub enum SyncWordEncoding {
     /// DTS. Commonly seen inside DTS-in-WAV / CD-DA encapsulation.
     RawLittleEndian,
     /// `1F FF E8 00 07 Fx` — 14-bit big-endian packed DTS. The
-    /// `unpack14` module (round 2) converts this into the raw-BE
-    /// form for [`parse_frame_header_14bit`].
+    /// `unpack14` module converts this into the raw-BE form for
+    /// `parse_frame_header_14bit`.
     FourteenBitBigEndian,
     /// `FF 1F 00 E8 Fx 07` — 14-bit little-endian packed DTS. The
-    /// `unpack14` module (round 2) converts this into the raw-BE
-    /// form for [`parse_frame_header_14bit`].
+    /// `unpack14` module converts this into the raw-BE form for
+    /// `parse_frame_header_14bit`.
     FourteenBitLittleEndian,
 }
 
@@ -107,13 +107,11 @@ impl SyncWordEncoding {
     /// (`07 Fx` / `Fx 07`) carries the upper bits of the 32-bit
     /// syncword inside a 14-bit-payload container, and matching the
     /// full sync requires inspecting the four high bits of that
-    /// trailing container per [`crate::header::parse_frame_header_14bit`]'s
+    /// trailing container per `parse_frame_header_14bit`'s
     /// detection rule.
     ///
-    /// This accessor is the wiki-derived counterpart to a
-    /// [`crate::iter::SyncMatch::sync_byte_length`] call. It does not
-    /// reflect the **frame** byte length (that is
-    /// [`crate::header::DtsFrameHeader::frame_size_bytes`]) — only the bytes
+    /// It does not reflect the **frame** byte length (that is
+    /// `DtsFrameHeader::frame_size_bytes`) — only the bytes
     /// the sync sequence itself occupies on the wire.
     #[inline]
     pub fn sync_byte_length(self) -> usize {
@@ -144,8 +142,7 @@ impl SyncWordEncoding {
     ///
     /// Equivalent to `!self.is_raw_16bit()` but spelled out
     /// affirmatively for readability at call sites that need the
-    /// 14-bit branch (e.g. the [`crate::iter::FrameIterator`]'s
-    /// `UnsupportedFourteenBit` guard).
+    /// 14-bit branch.
     #[inline]
     pub fn is_14bit_packed(self) -> bool {
         matches!(
@@ -1230,8 +1227,8 @@ impl DtsFrameHeader {
 ///   offset zero.
 /// - [`Error::UnsupportedFourteenBit`] if a 14-bit-packed sync is
 ///   found at offset zero — callers with 14-bit input should use
-///   [`parse_frame_header_14bit`] (or pre-unpack with
-///   [`crate::unpack14::unpack_14bit_to_16bit`]) instead.
+///   `parse_frame_header_14bit` (or pre-unpack with
+///   `unpack_14bit_to_16bit`) instead.
 ///
 /// The parser is non-allocating and side-effect free.
 pub fn parse_frame_header(bytes: &[u8]) -> Result<DtsFrameHeader> {

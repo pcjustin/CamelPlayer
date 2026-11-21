@@ -91,7 +91,7 @@ impl FourteenBitByteOrder {
 /// Pack a 16-bit-equivalent (raw big-endian) DTS byte buffer back into
 /// the 14-bit-packed container form.
 ///
-/// This is the inverse of [`unpack_14bit_to_16bit`]. The input is read
+/// This is the inverse of `unpack_14bit_to_16bit`. The input is read
 /// as an MSB-first bit stream; successive 14-bit chunks are written
 /// into the **lower** 14 bits of 16-bit containers, with the upper 2
 /// bits filled by a copy of payload bit 13 (so the resulting container

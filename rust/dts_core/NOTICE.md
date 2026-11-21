@@ -11,7 +11,8 @@ Also left out, as the decoder never reaches them: the crate root exports only wh
 fuzz target use, and what the compiler then reported as never used was removed, with the unit tests and the doc
 examples that only reached it. The tests split a stream into frames with `find_sync` and `frame_info`, as the Engine
 does, so the frame iterator is not exported either, and the modules only it reached went whole: `aux_data`, `crc16`,
-`dmix_coeff`, `drc_range`, `optional_info` and `rev2_aux`. By module, of those kept:
+`dmix_coeff`, `drc_range`, `optional_info` and `rev2_aux`, with `sum_diff`, which had nothing left but its tests'
+section headings (its matrix decode is `apply_sum_difference` in `subframe_pcm.rs`). By module, of those kept:
 
 - `audio_array`: `channel_count`, `decode_audio_data_subframe_at`, `decode_audio_data_subframe_partial_at`
 - `audio_huff`: `abits`, `levels`
@@ -31,4 +32,3 @@ does, so the frame iterator is not exported either, and the modules only it reac
 - `side_info`: `WIRE_BITS`, `code`, `decode_abits_at`, `decode_adj_at`, `decode_join_scale_at`, `decode_scales_at`, `decode_subsubframe_count_at`, `decode_tmode_at`, `is_termination_tail`, `multiplier`, `multiplier_rational`, `partial_sample_count`, `samples_per_subsubframe_normal`, `scales_code`, `scales_table`, `thuff`
 - `step_size`: `dequant_scale`, `dequant_subsubframe`, `scale_subsubframe_samples`
 - `subframe_pcm`: `Subframe`, `adpcm_history`, `decode_core_frame`, `decode_core_frame_with_info`, `decode_core_frame_with_info_into`, `decode_frame_with_info`, `decode_subframe`, `decode_subframe_with_joint`, `qmf`, `reset_adpcm_history`, `set_vq_codebooks`, `subframe_decoder`, `vq_codebooks`
-- `sum_diff`: `front_sum_difference_required`, `sum_difference_decode_f64`, `sum_difference_decode_i32`, `sum_difference_decode_subband_pair_f64`, `sum_difference_decode_subband_pair_i32`, `surround_sum_difference_required`

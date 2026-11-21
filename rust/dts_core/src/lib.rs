@@ -37,7 +37,6 @@ mod step_size;
 mod stream;
 mod subframe;
 mod subframe_pcm;
-mod sum_diff;
 mod unpack14;
 
 // What the Engine, the tests and the fuzz target use.
@@ -47,9 +46,7 @@ pub use crate::stream::{
 };
 pub use crate::unpack14::{FourteenBitByteOrder, pack_16bit_to_14bit};
 
-/// Crate-local error type. Round 1 surfaces only the parser-related
-/// variants; future rounds will extend this enum as decoding stages
-/// land.
+/// What parsing or decoding a frame can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
@@ -59,19 +56,9 @@ pub enum Error {
     /// 4–5 bytes of the input.
     NoSync,
     /// A 14-bit DTS sync was detected at the 16-bit-input entry
-    /// point [`parse_frame_header`]. Round 2 added a dedicated
-    /// [`parse_frame_header_14bit`] entry point plus
-    /// [`unpack_14bit_to_16bit`] for callers that want to convert
-    /// 14-bit-packed bytes into the raw-BE form. This variant
-    /// remains for callers that route by sync up-front.
+    /// point [`parse_frame_header`]; 14-bit-packed frames are read
+    /// through `parse_frame_header_14bit`, which unpacks them first.
     UnsupportedFourteenBit,
-    /// A raw 16-bit DTS sync was detected at the 14-bit-input entry
-    /// point [`crate::iter_frames_14bit`]. Symmetric counterpart to
-    /// [`Self::UnsupportedFourteenBit`]: the 14-bit iterator only
-    /// walks 14-bit-packed container streams, so a raw-16-bit sync at
-    /// the cursor is out-of-domain. Callers walking raw 16-bit input
-    /// should switch to [`crate::iter_frames`].
-    UnsupportedRaw16Bit,
     /// The decoded `NBLKS` field reported fewer than 5 blocks per
     /// frame — the wiki/spec disallow this.
     BlockCountOutOfRange {
@@ -84,25 +71,6 @@ pub enum Error {
         /// Decoded frame size in bytes (after the +1 increment).
         frame_size: u16,
     },
-    /// A field passed to [`crate::encode_frame_header_be`] does not
-    /// fit the bit-width the wiki bit-table documents (e.g. AMODE > 63
-    /// for a 6-bit field, VERSION > 15 for a 4-bit field, or a
-    /// `header_crc: Some(_)` paired with `crc_present == false`).
-    /// Only the encoder returns this variant; the parser cannot
-    /// produce out-of-range values because every field is read from
-    /// the bit-vector through a width-bounded read.
-    FieldOutOfRange {
-        /// Static name of the offending [`crate::DtsFrameHeader`]
-        /// field.
-        field: &'static str,
-        /// Caller-supplied value.
-        value: u32,
-        /// Maximum value the field's documented bit-width can hold.
-        /// For the `header_crc` mismatch variant this is set to `0`
-        /// (the value being out-of-range is the `Some` vs `None`
-        /// disagreement with `crc_present`, not the integer payload).
-        max: u32,
-    },
     /// A Primary Audio Coding Side Information field
     /// (§5.4.1 Table 5-28) carried a value the ETSI spec marks as
     /// reserved/invalid: a `BHUFF` / `SHUFF` selector equal to `7`,
@@ -110,7 +78,7 @@ pub enum Error {
     /// range of the §D.1.1 / §D.1.2 RMS square-root table (e.g.
     /// index 63 in the 6-bit table, or indices 125..=127 in the
     /// 7-bit table, both written as "invalid" in the staged PDF),
-    /// or a [`crate::decode_primary_side_info_at`] loop bound
+    /// or a `decode_primary_side_info_at` loop bound
     /// outside its §5.3.2 range (`"nPCHS"` above 5 per PDF p.25,
     /// `"nSUBS"` above the `NumSubband = 32` cap, or `"VQSUB"`
     /// above the channel's `nSUBS`).
@@ -133,39 +101,8 @@ pub enum Error {
         /// Static name of the codebook that failed to match.
         table: &'static str,
     },
-    /// The left and right slice arguments to a §C.2.4 sum/difference
-    /// decoder ([`crate::sum_difference_decode_i32`],
-    /// [`crate::sum_difference_decode_f64`], or one of their
-    /// subband-pair counterparts) had different lengths. The §C.2.4
-    /// pseudocode requires a one-to-one pairing of left- and right-
-    /// channel samples.
-    SumDiffLengthMismatch {
-        /// Length of the left-channel slice.
-        left_len: usize,
-        /// Length of the right-channel slice.
-        right_len: usize,
-    },
-    /// The slice arguments to a §C.2.3 joint-subband decoder
-    /// ([`crate::joint_subband_decode_range_i32`] or
-    /// [`crate::joint_subband_decode_range_f64`]) violated one of the
-    /// §C.2.3 pseudocode's structural invariants: `n_subs_dst >
-    /// n_subs_src` (the imported range would run backwards), a
-    /// per-channel subband array shorter than `n_subs_src` (no
-    /// storage for the imported range), a `scales` slice whose length
-    /// disagrees with `n_subs_src - n_subs_dst`, or a per-subband
-    /// destination/source sample-length disagreement. `dst_len` /
-    /// `src_len` carry the lengths that disagreed (the meaning is
-    /// context-dependent: see the documented invariants on each
-    /// constructor site).
-    JointSubbandShapeMismatch {
-        /// Length-like value on the destination side of the disagreement.
-        dst_len: usize,
-        /// Length-like value on the source side of the disagreement.
-        src_len: usize,
-    },
-    /// A slice argument to a §C.2.2 inverse-ADPCM decoder
-    /// ([`crate::inverse_adpcm_decode_i32`] or
-    /// [`crate::inverse_adpcm_decode_f64`]) had a length that disagrees
+    /// A slice argument to the §C.2.2 inverse-ADPCM predictor
+    /// (`inverse_adpcm_decode_f64`) had a length that disagrees
     /// with the spec's fixed `NumADPCMCoeff = 4` invariant. The
     /// predictor requires a four-sample history (carrying
     /// `raSample[-4..0]`) and four ADPCM coefficients
@@ -177,7 +114,7 @@ pub enum Error {
         /// Caller-supplied coefficient-array length (spec requires 4).
         coeffs_len: usize,
     },
-    /// The `n_levels` argument to [`crate::decode_block_code`] was
+    /// The `n_levels` argument to `decode_block_code` was
     /// less than 2. A one-level alphabet has only the index `0` and
     /// the §C.2.1 mixed-radix recurrence is undefined for
     /// `n_levels < 2` (division by zero / one would never advance).
@@ -202,103 +139,16 @@ pub enum Error {
         n_levels: u32,
     },
     /// An `ABITS` bit-allocation index passed to the §D.2
-    /// quantization-step-size lookup ([`crate::StepSizeTable::step_size`]
-    /// or a `dequant_*` composer) was one of the `27..=31` indices the
+    /// quantization-step-size lookup (`StepSizeTable::step_size`) was
+    /// one of the `27..=31` indices the
     /// staged §D.2.1 / §D.2.2 tables write "invalid" (PDF p.193-194),
     /// or was `>= 32`. A defined `ABITS` index is `0..=26`.
     InvalidStepSize {
         /// The reserved / out-of-range `ABITS` index.
         abits: u8,
     },
-    /// A slice argument to a §5.5 subsubframe dequantizer
-    /// ([`crate::scale_subsubframe_samples`] /
-    /// [`crate::dequant_subsubframe`]) was not exactly
-    /// [`crate::SAMPLES_PER_SUBSUBFRAME`] (= 8) samples long. The §5.5
-    /// `Audio Data` block scales one subband analysis subwindow of
-    /// eight samples per call (PDF p.31-32).
-    SampleCountMismatch {
-        /// The number of samples the §5.5 loop requires (always 8).
-        expected: usize,
-        /// The slice length the caller actually supplied.
-        found: usize,
-    },
-    /// The bytes at the offset handed to
-    /// [`crate::parse_aux_data_at`] were not the §5.7.1 DWORD-aligned
-    /// auxiliary-data sync word `0x9A1105A0` (`nSYNCAUX`).
-    AuxSyncMismatch {
-        /// The 32-bit word actually read at the offset.
-        found: u32,
-    },
-    /// One of the two 4-bit markers bracketing the §5.7.1 Table 5-31
-    /// 36-bit `nAUXTimeStamp` halves was not the documented `0b1011`
-    /// (`nMaker==1011`), indicating a false-positive sync match or a
-    /// corrupt auxiliary-data chunk.
-    AuxTimeStampMarkerMismatch {
-        /// The 4-bit value actually read.
-        found: u8,
-    },
-    /// The §5.7.1 `DeriveNumDwnMixCodeCoeffs()` input-channel count
-    /// (`nPriCh = anNumCh[AMODE]`) could not be resolved because the
-    /// frame's `AMODE` is a user-defined code (`16..=63`) whose
-    /// channel count Table 5-4 does not define.
-    AuxChannelCountUnresolved {
-        /// The unresolvable 6-bit `AMODE` code.
-        amode: u8,
-    },
-    /// The bytes at the offset handed to
-    /// [`crate::parse_rev2_aux_at`] were not the §5.7.2 DWORD-aligned
-    /// Rev2 auxiliary sync word `0x7004C070` (`nSYNCRev2AUX`).
-    Rev2AuxSyncMismatch {
-        /// The 32-bit word actually read at the offset.
-        found: u32,
-    },
-    /// The §5.7.2 `nRev2AUXDataByteSize` field was outside its valid
-    /// `3..=128` range ("Error: Invalid range of Rev 2 Auxiliary Data
-    /// Chunk Size"), or the chunk's declared fields overran the
-    /// size-located `nRev2AUXCRC16` position.
-    Rev2AuxSizeOutOfRange {
-        /// The decoded chunk byte size (after the `+1` increment).
-        size: u8,
-    },
-    /// The §5.7.2 `nEmbESDownMixScaleIndex` was outside its valid
-    /// `40..=240` range (the encode side limits the `ESDmixScale`
-    /// parameters to `[-40 dB, 0 dB]`).
-    Rev2AuxEsScaleIndexOutOfRange {
-        /// The out-of-range 8-bit index.
-        index: u8,
-    },
-    /// The §5.7.2 per-subsubframe DRC value count could not be
-    /// derived: one 8-bit value is transmitted per 256-sample
-    /// subsubframe (Table 5-34), but the frame's block count is not a
-    /// whole number of subsubframes (`32·(NBLKS+1)` not a multiple of
-    /// 256).
-    Rev2AuxDrcCountUnresolved {
-        /// The frame's `NBLKS + 1` block count.
-        blocks: u8,
-    },
-    /// A §5.7.1 Table 5-31 dynamic-downmix coefficient code word
-    /// passed to [`crate::decode_dmix_code`] was wider than the
-    /// documented 9-bit field, or its one-biased low byte resolved
-    /// past the end of the 241-entry §D.11 `DmixTable` (the
-    /// pseudocode's `if (nTmp > nTblSize) return false;` arm).
-    DownmixCodeOutOfRange {
-        /// The offending 9-bit (or wider) code word.
-        code: u16,
-    },
-    /// The planar PCM handed to
-    /// [`crate::DynamicDownmix::apply_planar`] did not match the
-    /// coefficient table's shape: the plane count must equal the
-    /// §5.7.1 `nPriCh` input channel count, and every plane must have
-    /// the same sample count.
-    DownmixInputShapeMismatch {
-        /// The expected plane count (or, for the unequal-length case,
-        /// the first plane's sample count).
-        expected: usize,
-        /// The offending count actually supplied.
-        found: usize,
-    },
     /// The §5.5 Table 5-29 `DSYNC` subsubframe synchronization check
-    /// word ([`crate::decode_dsync_at`]) read a 16-bit value other than
+    /// word, read with the subsubframe's audio data, was a 16-bit value other than
     /// `0xffff` (PDF p.32: `if ( DSYNC != 0xffff )`). The spec text only
     /// emits a diagnostic and keeps decoding; this crate surfaces it as
     /// a recoverable typed error carrying the bad word and the
@@ -327,12 +177,6 @@ impl core::fmt::Display for Error {
                  entry point; call parse_frame_header_14bit (or \
                  unpack_14bit_to_16bit + parse_frame_header) instead"
             ),
-            Error::UnsupportedRaw16Bit => write!(
-                f,
-                "oxideav-dts: raw 16-bit DTS sync detected at the \
-                 14-bit-input entry point; call iter_frames (or \
-                 parse_frame_header) instead"
-            ),
             Error::BlockCountOutOfRange { blocks } => write!(
                 f,
                 "oxideav-dts: NBLKS={blocks} is out of the documented 5..=128 \
@@ -342,11 +186,6 @@ impl core::fmt::Display for Error {
                 f,
                 "oxideav-dts: frame size {frame_size} B is out of the documented \
                  95..=16384 range (spec mandates >=95)"
-            ),
-            Error::FieldOutOfRange { field, value, max } => write!(
-                f,
-                "oxideav-dts: field `{field}` value {value} exceeds the wiki \
-                 bit-table maximum {max}"
             ),
             Error::InvalidSideInfo { field, value } => write!(
                 f,
@@ -359,20 +198,6 @@ impl core::fmt::Display for Error {
                 "oxideav-dts: bit stream did not match any entry in Annex D \
                  Huffman codebook `{table}` within the documented maximum \
                  code length"
-            ),
-            Error::SumDiffLengthMismatch {
-                left_len,
-                right_len,
-            } => write!(
-                f,
-                "oxideav-dts: §C.2.4 sum/difference decode requires matched \
-                 left/right slice lengths; got left={left_len} right={right_len}"
-            ),
-            Error::JointSubbandShapeMismatch { dst_len, src_len } => write!(
-                f,
-                "oxideav-dts: §C.2.3 joint-subband decode shape mismatch; got \
-                 dst-side={dst_len} src-side={src_len} (see ETSI TS 102 114 \
-                 §C.2.3 for the structural invariants)"
             ),
             Error::InverseAdpcmShapeMismatch {
                 history_len,
@@ -402,61 +227,6 @@ impl core::fmt::Display for Error {
                 f,
                 "oxideav-dts: §D.2 quantization step-size lookup: ABITS index \
                  {abits} is reserved/invalid (defined range is 0..=26)"
-            ),
-            Error::SampleCountMismatch { expected, found } => write!(
-                f,
-                "oxideav-dts: §5.5 subsubframe dequantization expects {expected} \
-                 samples per subband analysis subwindow, got {found}"
-            ),
-            Error::AuxSyncMismatch { found } => write!(
-                f,
-                "oxideav-dts: §5.7.1 auxiliary-data parse expected the \
-                 DWORD-aligned sync word 0x9a1105a0, read 0x{found:08x}"
-            ),
-            Error::AuxTimeStampMarkerMismatch { found } => write!(
-                f,
-                "oxideav-dts: §5.7.1 auxiliary time-stamp marker mismatch: \
-                 read 0b{found:04b}, expected 0b1011"
-            ),
-            Error::AuxChannelCountUnresolved { amode } => write!(
-                f,
-                "oxideav-dts: §5.7.1 dynamic-downmix coefficient count cannot \
-                 be derived: AMODE {amode} is a user-defined channel \
-                 arrangement with no Table 5-4 channel count"
-            ),
-            Error::Rev2AuxSyncMismatch { found } => write!(
-                f,
-                "oxideav-dts: §5.7.2 Rev2 auxiliary-data parse expected the \
-                 DWORD-aligned sync word 0x7004c070, read 0x{found:08x}"
-            ),
-            Error::Rev2AuxSizeOutOfRange { size } => write!(
-                f,
-                "oxideav-dts: §5.7.2 Rev2 auxiliary chunk size {size} B is \
-                 invalid (valid range 3..=128, and the declared fields must \
-                 fit in front of the size-located CRC)"
-            ),
-            Error::Rev2AuxEsScaleIndexOutOfRange { index } => write!(
-                f,
-                "oxideav-dts: §5.7.2 embedded-ES downmix scale index {index} \
-                 is outside the valid 40..=240 range ([-40 dB, 0 dB])"
-            ),
-            Error::Rev2AuxDrcCountUnresolved { blocks } => write!(
-                f,
-                "oxideav-dts: §5.7.2 Rev2AUX DRC value count cannot be \
-                 derived: {blocks} blocks per frame is not a whole number of \
-                 256-sample subsubframes"
-            ),
-            Error::DownmixCodeOutOfRange { code } => write!(
-                f,
-                "oxideav-dts: §5.7.1 dynamic-downmix coefficient code 0x{code:03x} \
-                 is out of domain (must be a 9-bit word whose one-biased low byte \
-                 indexes the 241-entry §D.11 DmixTable)"
-            ),
-            Error::DownmixInputShapeMismatch { expected, found } => write!(
-                f,
-                "oxideav-dts: §5.7.1 downmix fold shape mismatch: expected \
-                 {expected}, got {found} (plane count must equal the nPriCh \
-                 input channel count and all planes must be equal-length)"
             ),
             Error::DsyncMismatch {
                 found,

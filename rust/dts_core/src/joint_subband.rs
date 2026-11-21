@@ -49,9 +49,9 @@
 //!
 //! # Scope
 //!
-//! This module exposes the matrix copy + scale itself, not the
-//! dispatch. The caller (a future subframe walker) is responsible
-//! for:
+//! This module holds the source-channel lookup; the copy and scale
+//! are `apply_joint_subband` in `subframe_pcm.rs`, which is
+//! responsible for:
 //!
 //! - Reading the `JOINX[ch]` per-channel selector from the AUDIO
 //!   CODING HEADER (`JOINX` is per-channel and 0 when joint-subband
@@ -67,17 +67,10 @@
 //!   the destination and source channels and confirming
 //!   `nSUBS[ch] < nSUBS[nSourceCh]` (an empty `[nSUBS[ch],
 //!   nSUBS[nSourceCh])` range yields a no-op decode but is otherwise
-//!   well-formed: see [`joint_subband_decode_range_i32`] /
-//!   [`joint_subband_decode_range_f64`]).
+//!   well-formed).
 //!
-//! Both the integer (i32) and floating-point (f64) decode flavours are
-//! exposed because the §C.2.3 spec text does not constrain the
-//! arithmetic type — the inverse-quantisation path that feeds the
-//! joint-subband decode may run in either; the decoder picks per its
-//! precision requirements. The i32 flavour uses `i32::wrapping_mul`
-//! to mirror the §C.2.3 pseudocode's C-style `int` overflow
-//! semantics; callers that require saturating arithmetic perform the
-//! conversion before invoking the primitive.
+//! The decoder runs it in f64; the original crate's integer and
+//! floating-point range decoders were left out (`NOTICE.md`).
 
 /// Resolve the one-based `JOINX[ch]` field to the zero-based
 /// source-channel index `nSourceCh` per §C.2.3.
