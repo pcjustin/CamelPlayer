@@ -12,6 +12,7 @@
 
 #include "Common/util/Text.h"
 #include "ControlPoint/EditSequence.h"
+#include "Server/Library/LibraryScanner.h"
 #include "Server/Library/LibraryText.h"
 #include "Server/Library/PlayStatistics.h"
 #include "Server/Library/Playlists.h"
@@ -291,8 +292,9 @@ TEST_F(PlaylistsTest, AnM3u8ImportResolvesPathsAndKeepsOrderDuplicatesAndOutside
     const auto local = (music / L"夜に駆ける.flac").wstring();
     store
         ->write([&](sqlite::Database& db) {
+            // As the scanner stores a path: extended and case-folded.
             db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,2,1,?,'audio',1,1,1)")
-                .bind(1, camel::toUtf8(local))
+                .bind(1, camel::toUtf8(spelledLibraryPath(local).wstring()))
                 .run();
             db.exec("INSERT INTO tracks(id,file_id,album_id,title,sample_rate,total_frames,start_frame) "
                     "VALUES(10,7,1,'Yoru',1000,1000,0)");
@@ -338,7 +340,7 @@ TEST_F(PlaylistsTest, AnM3u8ExportWritesRelativePathsOnTheSameDriveAndRoundTrips
     store
         ->write([&](sqlite::Database& db) {
             db.prepare("INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime,available) VALUES(7,2,1,?,'audio',1,1,1)")
-                .bind(1, camel::toUtf8(inside))
+                .bind(1, camel::toUtf8(spelledLibraryPath(inside).wstring()))
                 .run();
             db.exec("INSERT INTO tracks(id,file_id,album_id,title,artist,sample_rate,total_frames,start_frame) "
                     "VALUES(10,7,1,'A','B',1000,2400,0)");
