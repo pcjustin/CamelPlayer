@@ -373,134 +373,58 @@ static json timingJson(const PlaybackTiming& t) {
             {"releaseAfterPauseSeconds", t.releaseAfterPauseSeconds}};
 }
 
-uint32_t fixedRate(const Settings& s) {
+// What `read` takes from the backend in use's own settings; `otherwise` with AirPlay and HQPlayer, which have none of
+// them, and with WASAPI in shared mode, whose format Windows decides.
+template <class Read, class T> static T fromDevice(const Settings& s, Read read, T otherwise) {
     switch (s.backend) {
     case Backend::Wasapi:
-        return s.wasapi.shared ? 0 : s.wasapi.fixedRate;
+        return s.wasapi.shared ? otherwise : read(s.wasapi);
     case Backend::Asio:
-        return s.asio.fixedRate;
+        return read(s.asio);
     case Backend::Ks:
-        return s.ks.fixedRate;
+        return read(s.ks);
     case Backend::Network:
-        return s.network.fixedRate;
+        return read(s.network);
     case Backend::AirPlay:
     case Backend::HQPlayer:
-        return 0;
+        break;
     }
-    return 0;
+    return otherwise;
+}
+
+uint32_t fixedRate(const Settings& s) {
+    return fromDevice(s, [](const auto& b) { return b.fixedRate; }, uint32_t{0});
 }
 
 Upsampling upsampling(const Settings& s) {
-    switch (s.backend) {
-    case Backend::Wasapi:
-        return s.wasapi.shared ? Upsampling::Off : s.wasapi.upsampling;
-    case Backend::Asio:
-        return s.asio.upsampling;
-    case Backend::Ks:
-        return s.ks.upsampling;
-    case Backend::Network:
-        return s.network.upsampling;
-    case Backend::AirPlay:
-    case Backend::HQPlayer:
-        return Upsampling::Off;
-    }
-    return Upsampling::Off;
+    return fromDevice(s, [](const auto& b) { return b.upsampling; }, Upsampling::Off);
 }
 
 uint32_t upsamplingMultiple(const Settings& s) {
-    return s.backend == Backend::Asio      ? s.asio.upsamplingMultiple
-           : s.backend == Backend::Ks      ? s.ks.upsamplingMultiple
-           : s.backend == Backend::Network ? s.network.upsamplingMultiple
-                                           : s.wasapi.upsamplingMultiple;
+    return fromDevice(s, [](const auto& b) { return b.upsamplingMultiple; }, s.wasapi.upsamplingMultiple);
 }
 
 ResampleFilter resampleFilter(const Settings& s) {
-    switch (s.backend) {
-    case Backend::Wasapi:
-        return s.wasapi.shared ? ResampleFilter{.quality = s.wasapi.sharedResampleQuality} : s.wasapi.filter;
-    case Backend::Asio:
-        return s.asio.filter;
-    case Backend::Ks:
-        return s.ks.filter;
-    case Backend::Network:
-        return s.network.filter;
-    case Backend::AirPlay:
-    case Backend::HQPlayer:
-        return {.quality = s.resampleQuality};
-    }
-    return {};
+    if (s.backend == Backend::Wasapi && s.wasapi.shared) return {.quality = s.wasapi.sharedResampleQuality};
+    return fromDevice(s, [](const auto& b) { return b.filter; }, ResampleFilter{.quality = s.resampleQuality});
 }
 
 DsdUpsamplingSettings dsdUpsampling(const Settings& s) {
-    const auto chosen = [](DsdOutput output, const DsdUpsamplingSettings& d) {
-        return output == DsdOutput::Pcm ? DsdUpsamplingSettings{} : d;
-    };
-    switch (s.backend) {
-    case Backend::Wasapi:
-        return s.wasapi.shared ? DsdUpsamplingSettings{} : chosen(s.wasapi.dsdOutput, s.wasapi.dsdUpsampling);
-    case Backend::Asio:
-        return chosen(s.asio.dsdOutput, s.asio.dsdUpsampling);
-    case Backend::Ks:
-        return chosen(s.ks.dsdOutput, s.ks.dsdUpsampling);
-    case Backend::Network:
-        return chosen(s.network.dsdOutput, s.network.dsdUpsampling);
-    case Backend::AirPlay:
-    case Backend::HQPlayer:
-        return {};
-    }
-    return {};
+    return fromDevice(
+        s, [](const auto& b) { return b.dsdOutput == DsdOutput::Pcm ? DsdUpsamplingSettings{} : b.dsdUpsampling; },
+        DsdUpsamplingSettings{});
 }
 
 bool dspOnDsd(const Settings& s) {
-    const auto chosen = [](DsdOutput output, bool on) { return output != DsdOutput::Pcm && on; };
-    switch (s.backend) {
-    case Backend::Wasapi:
-        return !s.wasapi.shared && chosen(s.wasapi.dsdOutput, s.wasapi.dspOnDsd);
-    case Backend::Asio:
-        return chosen(s.asio.dsdOutput, s.asio.dspOnDsd);
-    case Backend::Ks:
-        return chosen(s.ks.dsdOutput, s.ks.dspOnDsd);
-    case Backend::Network:
-        return chosen(s.network.dsdOutput, s.network.dspOnDsd);
-    case Backend::AirPlay:
-    case Backend::HQPlayer:
-        return false;
-    }
-    return false;
+    return fromDevice(s, [](const auto& b) { return b.dsdOutput != DsdOutput::Pcm && b.dspOnDsd; }, false);
 }
 
 uint32_t maxSampleRate(const Settings& s) {
-    switch (s.backend) {
-    case Backend::Wasapi:
-        return s.wasapi.shared ? 0 : s.wasapi.maxSampleRate;
-    case Backend::Asio:
-        return s.asio.maxSampleRate;
-    case Backend::Ks:
-        return s.ks.maxSampleRate;
-    case Backend::Network:
-        return s.network.maxSampleRate;
-    case Backend::AirPlay:
-    case Backend::HQPlayer:
-        return 0;
-    }
-    return 0;
+    return fromDevice(s, [](const auto& b) { return b.maxSampleRate; }, uint32_t{0});
 }
 
 uint32_t maxDsdByteRate(const Settings& s) {
-    switch (s.backend) {
-    case Backend::Wasapi:
-        return s.wasapi.shared ? 0 : dsdByteRate(s.wasapi.maxDsdRate);
-    case Backend::Asio:
-        return dsdByteRate(s.asio.maxDsdRate);
-    case Backend::Ks:
-        return dsdByteRate(s.ks.maxDsdRate);
-    case Backend::Network:
-        return dsdByteRate(s.network.maxDsdRate);
-    case Backend::AirPlay:
-    case Backend::HQPlayer:
-        return 0;
-    }
-    return 0;
+    return fromDevice(s, [](const auto& b) { return dsdByteRate(b.maxDsdRate); }, uint32_t{0});
 }
 
 const PlaybackTiming& timing(const Settings& s) {
@@ -540,9 +464,12 @@ template <class T, size_t N> static T fromIds(const json& o, const char* k, cons
     return found == std::end(ids) ? T{} : T(found - std::begin(ids));
 }
 
-// An output's sample-rate choice and filter, as WASAPI, ASIO, KS and network players keep them.
+// An output's sample-rate choice, limits and filter, as WASAPI, ASIO, KS and network players keep them.
 template <class T> static json rateJson(const T& t) {
     return {{"fixedRate", t.fixedRate},
+            {"maxSampleRate", t.maxSampleRate},
+            {"maxDsdRate", t.maxDsdRate},
+            {"dsdPcmRate", t.dsdPcmRate},
             {"upsampling", kUpsamplingIds[int(t.upsampling)]},
             {"upsamplingMultiple", t.upsamplingMultiple},
             {"filter",
@@ -566,6 +493,9 @@ template <size_t N> static uint32_t oneOf(int value, const uint32_t (&choices)[N
 // An output saved before it had a filter of its own starts from `quality`, the one every output resampled with.
 template <class T> static void readRate(const json& o, T& t, ResampleQuality quality) {
     t.fixedRate = fixedRateFrom(num(o, "fixedRate", 0, 0, 1e7));
+    t.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
+    t.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
+    t.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     t.upsampling = fromIds<Upsampling>(o, "upsampling", kUpsamplingIds);
     const auto multiple = uint32_t(integer(o, "upsamplingMultiple", 2, 2, 8));
     t.upsamplingMultiple = std::ranges::find(kUpsamplingMultiples, multiple) != std::end(kUpsamplingMultiples) ? multiple : 2;
@@ -605,9 +535,6 @@ static json wasapiJson(const WasapiSettings& w) {
               {"customPeriodMs", w.customPeriodMs},
               {"sampleType", w.sampleType ? sampleTypeId(*w.sampleType) : ""},
               {"dsdOutput", dsdOutputId(w.dsdOutput)},
-              {"dsdPcmRate", w.dsdPcmRate},
-              {"maxSampleRate", w.maxSampleRate},
-              {"maxDsdRate", w.maxDsdRate},
               {"pollBufferMs", w.pollBufferMs},
               {"mmcssTask", mmcssTaskId(w.mmcssTask)},
               {"mmcssPriority", mmcssPriorityId(w.mmcssPriority)}};
@@ -626,10 +553,7 @@ static void readWasapi(const json& o, WasapiSettings& w, ResampleQuality quality
     w.sampleType = sampleTypeFromId(str(o, "sampleType", ""));
     w.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Dop);
     if (w.dsdOutput == DsdOutput::Native) w.dsdOutput = DsdOutput::Dop; // WASAPI has no native DSD
-    w.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     readRate(o, w, quality);
-    w.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
-    w.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     w.pollBufferMs = num(o, "pollBufferMs", 200.0, 20.0, 2000.0);
     w.mmcssTask = mmcssTaskFromId(str(o, "mmcssTask", ""));
     w.mmcssPriority = mmcssPriorityFromId(str(o, "mmcssPriority", ""));
@@ -641,10 +565,7 @@ static json asioJson(const AsioSettings& a) {
               {"bufferSize", a.bufferSize},
               {"outLeft", a.outLeft},
               {"outRight", a.outRight},
-              {"dsdOutput", dsdOutputId(a.dsdOutput)},
-              {"dsdPcmRate", a.dsdPcmRate},
-              {"maxSampleRate", a.maxSampleRate},
-              {"maxDsdRate", a.maxDsdRate}};
+              {"dsdOutput", dsdOutputId(a.dsdOutput)}};
     j.update(rateJson(a));
     j.update(timingJson(a.timing));
     return j;
@@ -656,10 +577,7 @@ static void readAsio(const json& o, AsioSettings& a, ResampleQuality quality) {
     a.outLeft = integer(o, "outLeft", 0, 0, 63);
     a.outRight = integer(o, "outRight", 1, 0, 63);
     a.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Native);
-    a.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     readRate(o, a, quality);
-    a.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
-    a.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     readTiming(o, a.timing);
 }
 
@@ -671,9 +589,6 @@ static json ksJson(const KsSettings& k) {
               {"packetMs", k.packetMs},
               {"sampleType", k.sampleType ? sampleTypeId(*k.sampleType) : ""},
               {"dsdOutput", dsdOutputId(k.dsdOutput)},
-              {"dsdPcmRate", k.dsdPcmRate},
-              {"maxSampleRate", k.maxSampleRate},
-              {"maxDsdRate", k.maxDsdRate},
               {"mmcssTask", mmcssTaskId(k.mmcssTask)},
               {"mmcssPriority", mmcssPriorityId(k.mmcssPriority)}};
     j.update(rateJson(k));
@@ -690,19 +605,14 @@ static void readKs(const json& o, KsSettings& k, ResampleQuality quality) {
     k.sampleType = sampleTypeFromId(str(o, "sampleType", ""));
     k.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Dop);
     if (k.dsdOutput == DsdOutput::Native) k.dsdOutput = DsdOutput::Dop; // Windows defines no KS DSD format
-    k.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     readRate(o, k, quality);
-    k.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
-    k.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     k.mmcssTask = mmcssTaskFromId(str(o, "mmcssTask", ""));
     k.mmcssPriority = mmcssPriorityFromId(str(o, "mmcssPriority", ""));
     readTiming(o, k.timing);
 }
 
 static json networkJson(const NetworkSettings& n) {
-    json j = {{"player", n.udn},      {"maxSampleRate", n.maxSampleRate},      {"maxDsdRate", n.maxDsdRate},
-              {"maxBits", n.maxBits}, {"dsdOutput", dsdOutputId(n.dsdOutput)}, {"dsdPcmRate", n.dsdPcmRate},
-              {"gapless", n.gapless}};
+    json j = {{"player", n.udn}, {"maxBits", n.maxBits}, {"dsdOutput", dsdOutputId(n.dsdOutput)}, {"gapless", n.gapless}};
     j.update(rateJson(n));
     j.update(timingJson(n.timing));
     return j;
@@ -711,11 +621,8 @@ static json networkJson(const NetworkSettings& n) {
 static void readNetwork(const json& o, NetworkSettings& n, ResampleQuality quality) {
     n.udn = str(o, "player", "");
     readRate(o, n, quality);
-    n.maxSampleRate = fixedRateFrom(num(o, "maxSampleRate", 0, 0, 1e7));
-    n.maxDsdRate = maxDsdRateFrom(num(o, "maxDsdRate", 0, 0, 1e4));
     n.maxBits = integer(o, "maxBits", 0, 0, 16) == 16 ? 16 : 0;
     n.dsdOutput = str(o, "dsdOutput", "") == dsdOutputId(DsdOutput::Pcm) ? DsdOutput::Pcm : DsdOutput::Native;
-    n.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
     n.gapless = boolean(o, "gapless", true);
     readTiming(o, n.timing);
 }
