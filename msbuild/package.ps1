@@ -86,13 +86,23 @@ $inventory = Get-Content -Raw (Join-Path $root 'third_party\dependencies.json') 
 $sourceStage = Join-Path $dist 'third-party-source'
 if (Test-Path $sourceStage) { Remove-Item -LiteralPath $sourceStage -Recurse -Force }
 $downloads = Join-Path $env:LOCALAPPDATA 'vcpkg\downloads'
-$byHash = @{}
-Get-ChildItem $downloads -File | ForEach-Object { $byHash[(Get-FileHash $_.FullName -Algorithm SHA512).Hash.ToLowerInvariant()] = $_ }
+# vcpkg names an archive after its GitHub repository and ref, or after its URL's file: those are hashed first, and the
+# other downloads only when none of them is the one.
+function Find-Download($source) {
+    $sha512 = ($source.checksums | Where-Object algorithm -eq 'SHA512').checksumValue
+    $name = if ($source.location -match '^git\+https://github\.com/([^/]+)/([^@]+)@(.+)$') { "$($Matches[1])-$($Matches[2])-$($Matches[3])" }
+            else { Split-Path $source.location -Leaf }
+    $files = @(Get-ChildItem $downloads -File)
+    $named = @($files | Where-Object { $_.Name.StartsWith($name, [StringComparison]::OrdinalIgnoreCase) })
+    foreach ($file in $named + @($files | Where-Object { $_ -notin $named })) {
+        if ((Get-FileHash $file.FullName -Algorithm SHA512).Hash -eq $sha512) { return $file }
+    }
+}
 foreach ($entry in $inventory.native | Where-Object { $_.role -notin 'test', 'build' -and $_.license -match 'GPL|MPL' }) {
     $out = Join-Path $sourceStage "native\$($entry.name)"
     New-Item -ItemType Directory -Force $out | Out-Null
     foreach ($source in $entry.sources) {
-        $archive = $byHash[($source.checksums | Where-Object algorithm -eq 'SHA512').checksumValue]
+        $archive = Find-Download $source
         if (-not $archive) { throw "Upstream source of $($entry.name) not found in $downloads ($($source.location))" }
         Copy-Item -LiteralPath $archive.FullName -Destination $out
     }
