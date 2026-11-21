@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <filesystem>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 #include "Common/util/Log.h"
@@ -86,8 +87,13 @@ std::string normalizeLibrarySearch(std::string_view text) {
     if (text.empty()) return {};
     auto normalized = normalizeKc(toWide(std::string(text)));
     normalized = map(map(normalized, LCMAP_HIRAGANA), LCMAP_LOWERCASE);
-    thread_local opencc::SimpleConverter converter(converterConfig());
-    return converter.Convert(toUtf8(normalized));
+    // One for the process: each thread's own read the dictionaries again at its first search, 11 to 14 ms. A conversion
+    // takes microseconds, so they wait little for each other.
+    static opencc::SimpleConverter converter(converterConfig());
+    static std::mutex mutex;
+    const auto utf8 = toUtf8(normalized);
+    std::lock_guard lock(mutex);
+    return converter.Convert(utf8);
 }
 
 std::string librarySortSource(const std::string& tag, const std::string& name) {
