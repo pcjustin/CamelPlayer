@@ -466,7 +466,13 @@ struct Entry {
     bool lengthChecked = false; // its first frame showed its length marked exact is right
 };
 
-enum class ListedIds { Unknown, Accepted, Rejected };
+// Widened: the server answers a handle's FileIdInfo with the listing's 8-byte ID zero-extended to 16 bytes, as Windows
+// does for NTFS, so the listing's IDs are widened to match.
+enum class ListedIds { Unknown, Accepted, Widened, Rejected };
+
+void widen(Version& version) {
+    if (version.index.size() == 8) version.index.resize(16, 0);
+}
 
 struct Listing {
     Path path;
@@ -813,19 +819,28 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
             }
             // One direct query per scan confirms the server reports the same IDs as a file handle.
             if (listedIds.load() == ListedIds::Unknown && !out.files.empty()) {
-                bool matches = false;
+                auto found = ListedIds::Rejected;
                 try {
-                    matches = library::fileVersion(out.files.front().path) == out.files.front().version;
+                    const auto direct = library::fileVersion(out.files.front().path);
+                    auto listed = out.files.front().version;
+                    if (direct == listed) {
+                        found = ListedIds::Accepted;
+                    } else {
+                        widen(listed);
+                        if (direct == listed) found = ListedIds::Widened;
+                    }
                 } catch (const std::exception&) {
                 }
                 auto expected = ListedIds::Unknown;
-                if (!matches)
+                if (found == ListedIds::Rejected)
                     listedIds = ListedIds::Rejected;
                 else
-                    listedIds.compare_exchange_strong(expected, ListedIds::Accepted);
+                    listedIds.compare_exchange_strong(expected, found);
             }
             if (listedIds.load() == ListedIds::Rejected)
                 for (auto& entry : out.files) entry.listedVersion = false;
+            if (listedIds.load() == ListedIds::Widened)
+                for (auto& entry : out.files) widen(entry.version);
             return out;
         }
         if (!token.cancelled()) listedIds = ListedIds::Rejected;
