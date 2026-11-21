@@ -461,6 +461,9 @@ public:
     virtual ArtistPicture chooseArtistCandidate(const std::string& name, const std::string& mbid,
                                                 const CancellationToken& token = {}) = 0;
     virtual LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const = 0;
+    // The paths of the albums' tracks, album after album, each in albumDetail's order.
+    virtual std::vector<std::string> albumTrackPaths(const std::vector<int64_t>& albums,
+                                                     const CancellationToken& token = {}) const = 0;
     virtual LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const = 0;
     // Every track in a folder and below it, in the Folders page's order (see folderTracks in LibraryViews.h).
     virtual std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const = 0;

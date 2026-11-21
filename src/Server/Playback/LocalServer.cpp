@@ -2755,6 +2755,9 @@ ArtistPicture LocalServer::chooseArtistCandidate(const std::string& name, const 
 LibraryAlbumDetail LocalServer::albumDetail(int64_t album, const CancellationToken& token) const {
     return camel::server::albumDetail(impl_->library(), album, token);
 }
+std::vector<std::string> LocalServer::albumTrackPaths(const std::vector<int64_t>& albums, const CancellationToken& token) const {
+    return camel::server::albumTrackPaths(impl_->library(), albums, token);
+}
 LibraryFolderListing LocalServer::browseFolder(std::optional<int64_t> folder, const CancellationToken& token) const {
     return camel::server::browseFolder(impl_->library(), folder, token);
 }

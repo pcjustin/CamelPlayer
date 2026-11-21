@@ -269,6 +269,16 @@ TEST_F(LibraryViewsTest, APlayingRowIsFoundWhereItsListingShowsIt) {
     EXPECT_EQ(trackRowPosition(*store, TrackSort::Title, false, std::nullopt, 999), std::nullopt);
 }
 
+// Playing albums takes their tracks album after album, each as its album lists them.
+TEST_F(LibraryViewsTest, AlbumTrackPathsFollowTheAlbumsAndTheirTrackOrder) {
+    std::vector<std::string> expected;
+    for (const int64_t album : {2, 1})
+        for (const auto& t : albumDetail(*store, album).tracks) expected.push_back(t.path);
+    ASSERT_EQ(expected.size(), 4u);
+    EXPECT_EQ(albumTrackPaths(*store, {2, 1}), expected);
+    EXPECT_TRUE(albumTrackPaths(*store, {999}).empty());
+}
+
 TEST_F(LibraryViewsTest, FavoritesShowInTrackRowsAndAlbums) {
     const auto before = browseTrackRows(*store, TrackSort::Title, false, std::nullopt, 0, 50).revision;
     setTrackFavorite(*store, {{3}, {4}}, true);

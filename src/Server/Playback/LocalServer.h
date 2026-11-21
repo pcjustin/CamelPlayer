@@ -62,6 +62,8 @@ public:
     ArtistPicture chooseArtistCandidate(const std::string& name, const std::string& mbid,
                                         const CancellationToken& token = {}) override;
     LibraryAlbumDetail albumDetail(int64_t album, const CancellationToken& token = {}) const override;
+    std::vector<std::string> albumTrackPaths(const std::vector<int64_t>& albums,
+                                             const CancellationToken& token = {}) const override;
     LibraryFolderListing browseFolder(std::optional<int64_t> folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryTrackRow> folderTracks(int64_t folder, const CancellationToken& token = {}) const override;
     std::vector<LibraryTrackRow> folderTracksFrom(int64_t track, const CancellationToken& token = {}) const override;

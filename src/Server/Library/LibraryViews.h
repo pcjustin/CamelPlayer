@@ -199,6 +199,9 @@ LibraryGroupPage favoriteArtists(const LibraryStore& store, int64_t offset, int6
 // it became one.
 void setArtistFavorite(LibraryStore& store, const std::vector<LibraryGroupFilter>& artists, bool favorite);
 LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t album, const CancellationToken& token = {});
+// The paths of the albums' tracks, album after album, each in albumDetail's order.
+std::vector<std::string> albumTrackPaths(const LibraryStore& store, const std::vector<int64_t>& albums,
+                                         const CancellationToken& token = {});
 // Shows the names and root locations scans recorded, without reading the music storage.
 LibraryFolderListing browseFolder(const LibraryStore& store, std::optional<int64_t> folder, const CancellationToken& token = {});
 std::vector<LibraryRootInfo> libraryRoots(const LibraryStore& store);

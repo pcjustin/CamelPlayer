@@ -1408,12 +1408,13 @@ void LibraryView::playList(bool shuffle) {
     if (!submit_ || !server_) return;
     background([server = server_, rows = listRows(), albums = current_.favoriteAlbums, shuffle, this] {
         std::vector<std::string> paths;
-        for (const auto& row : rows()) {
-            if (!albums) {
+        if (albums) {
+            std::vector<int64_t> ids;
+            for (const auto& row : rows()) ids.push_back(row.id);
+            paths = server->albumTrackPaths(ids);
+        } else {
+            for (const auto& row : rows())
                 if (!row.value.empty()) paths.push_back(row.value);
-                continue;
-            }
-            for (const auto& t : server->albumDetail(row.id).tracks) paths.push_back(t.path);
         }
         if (shuffle) std::ranges::shuffle(paths, std::mt19937{std::random_device{}()});
         return std::function<void()>([this, paths = std::move(paths)] {

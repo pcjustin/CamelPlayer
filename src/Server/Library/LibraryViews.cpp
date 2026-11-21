@@ -733,6 +733,8 @@ void setArtistFavorite(LibraryStore& store, const std::vector<LibraryGroupFilter
         .get();
 }
 
+constexpr const char* kAlbumTrackOrder = " ORDER BY coalesce(nullif(t.disc_number,0),1),t.track_number,f.path";
+
 LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const CancellationToken& token) {
     Query q(store, std::nullopt, token);
     LibraryAlbumDetail detail;
@@ -743,9 +745,8 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const Canc
                                kJoins + kStats + "WHERE a.id=? AND" + kVisible + " GROUP BY a.id");
     if (!header.bind(1, id).step()) throw std::invalid_argument("unknown or unavailable album");
     detail.album = album(header);
-    auto rows =
-        q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
-                     "WHERE t.album_id=? AND" + kVisible + " ORDER BY coalesce(nullif(t.disc_number,0),1),t.track_number,f.path");
+    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
+                             "WHERE t.album_id=? AND" + kVisible + kAlbumTrackOrder);
     rows.bind(1, id);
     while (rows.step()) detail.tracks.push_back(trackRow(rows));
     auto formats =
@@ -756,6 +757,20 @@ LibraryAlbumDetail albumDetail(const LibraryStore& store, int64_t id, const Canc
     while (formats.step())
         detail.formats.push_back({formats.text(0), formats.integer(1), formats.integer(2), formats.integer(3)});
     return detail;
+}
+
+std::vector<std::string> albumTrackPaths(const LibraryStore& store, const std::vector<int64_t>& albums,
+                                         const CancellationToken& token) {
+    Query q(store, std::nullopt, token);
+    auto rows = q.db.prepare(std::string("SELECT ") + kTrackColumns + kDuration + " FROM tracks t" + kJoins + kStats +
+                             "WHERE t.album_id=? AND" + kVisible + kAlbumTrackOrder);
+    std::vector<std::string> paths;
+    for (const auto album : albums) {
+        rows.bind(1, album);
+        while (rows.step()) paths.push_back(trackRow(rows).path);
+        rows.reset();
+    }
+    return paths;
 }
 
 namespace {
