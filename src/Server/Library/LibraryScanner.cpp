@@ -524,6 +524,9 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
                            "WHERE f.root_id=? AND f.available=1" +
                            scope + " ORDER BY coalesce(nullif(t.disc_number,0),1),t.track_number,t.id");
     rows.bind(1, root);
+    // Each prepared once: compiled for every track and album, they took a large part of a whole root's rebuild.
+    auto parent = db.prepare("SELECT path FROM folders WHERE id=?");
+    auto setDisc = db.prepare("UPDATE tracks SET disc_number=?1 WHERE id=?2 AND disc_number IS NOT ?1");
     while (rows.step()) {
         const auto track = rows.integer(0);
         const auto discFolder = rows.integer(5);
@@ -533,7 +536,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         const auto folder = discSubfolder ? parentFolder : discFolder;
         if (fileFolders && !albumFolders.contains(folder)) continue;
         if (discSubfolder) {
-            auto parent = db.prepare("SELECT path FROM folders WHERE id=?");
+            parent.reset();
             if (parent.bind(1, parentFolder).step()) folderPath = Path(toWide(parent.text(0)));
         }
         auto title = albumTitleWithoutDiscSuffix(toWide(rows.text(1)));
@@ -563,11 +566,10 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             const auto suffixNumber =
                 title != originalTitle ? discNumber(std::wstring_view(originalTitle).substr(title.size())) : 0;
             const int inferred = suffixNumber ? suffixNumber : discNumber(Path(toWide(rows.text(7))).filename().wstring());
-            if (inferred)
-                db.prepare("UPDATE tracks SET disc_number=?1 WHERE id=?2 AND disc_number IS NOT ?1")
-                    .bind(1, int64_t(inferred))
-                    .bind(2, track)
-                    .run();
+            if (inferred) {
+                setDisc.reset();
+                setDisc.bind(1, int64_t(inferred)).bind(2, track).run();
+            }
         }
         if (title.empty()) title = folderPath.filename().wstring();
         const auto titleText = toUtf8(title);
@@ -586,14 +588,23 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             album.artists.insert(rows.text(3));
         album.tracks.push_back(track);
     }
-    for (auto& [keyText, album] : albums) {
-        if (album.artist.empty()) album.artist = album.artists.size() == 1 ? *album.artists.begin() : "Various Artists";
+    auto upsert =
         db.prepare("INSERT INTO albums(folder_id,grouping_key,title,album_artist,year,disc_count,added,title_norm,artist_norm) "
                    "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(grouping_key) DO UPDATE SET folder_id=excluded.folder_id,"
                    "title=excluded.title,album_artist=excluded.album_artist,year=excluded.year,disc_count=excluded.disc_count,"
                    "title_norm=excluded.title_norm,"
-                   "artist_norm=excluded.artist_norm")
-            .bind(1, album.folder)
+                   "artist_norm=excluded.artist_norm");
+    auto row = db.prepare("SELECT id FROM albums WHERE grouping_key=?");
+    auto setAlbum = db.prepare("UPDATE tracks SET album_id=?1 WHERE id=?2 AND album_id IS NOT ?1");
+    auto images = db.prepare("SELECT id,path,size FROM files WHERE folder_id=? AND kind='image' AND available=1");
+    auto clearCover = db.prepare("UPDATE albums SET cover_id=NULL WHERE id=?");
+    auto cover = db.prepare("SELECT id FROM covers WHERE source=? AND file_id=?");
+    auto addCover = db.prepare("INSERT INTO covers(source,file_id,mime) VALUES(?,?,?)");
+    auto setCover = db.prepare("UPDATE albums SET cover_id=? WHERE id=?");
+    for (auto& [keyText, album] : albums) {
+        if (album.artist.empty()) album.artist = album.artists.size() == 1 ? *album.artists.begin() : "Various Artists";
+        upsert.reset();
+        upsert.bind(1, album.folder)
             .bind(2, keyText)
             .bind(3, album.title)
             .bind(4, album.artist)
@@ -603,12 +614,14 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             .bind(8, toUtf8(lower(toWide(album.title))))
             .bind(9, toUtf8(lower(toWide(album.artist))))
             .run();
-        auto row = db.prepare("SELECT id FROM albums WHERE grouping_key=?");
+        row.reset();
         row.bind(1, keyText).step();
         const auto albumId = row.integer(0);
         // Rewriting an unchanged album_id would count as a library change for every track of a rescanned root.
-        for (auto track : album.tracks)
-            db.prepare("UPDATE tracks SET album_id=?1 WHERE id=?2 AND album_id IS NOT ?1").bind(1, albumId).bind(2, track).run();
+        for (auto track : album.tracks) {
+            setAlbum.reset();
+            setAlbum.bind(1, albumId).bind(2, track).run();
+        }
         updateLibraryAlbumText(db, albumId);
 
         // The scan indexed the folder's images, so the cover is chosen without listing the folder again (slow on a NAS).
@@ -617,7 +630,7 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
         std::string mime;
         std::optional<std::pair<size_t, const char*>> best;
         int64_t bestSize = 0;
-        auto images = db.prepare("SELECT id,path,size FROM files WHERE folder_id=? AND kind='image' AND available=1");
+        images.reset();
         images.bind(1, album.folder);
         while (images.step())
             if (const auto rank = folderArtworkRank(Path(toWide(images.text(1)))); rank && (!best || rank->first < best->first)) {
@@ -635,24 +648,27 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             coverFile = album.coverTrackFile;
             source = "embedded";
         }
-        db.prepare("UPDATE albums SET cover_id=NULL WHERE id=?").bind(1, albumId).run();
+        clearCover.reset();
+        clearCover.bind(1, albumId).run();
         if (coverFile) {
-            auto cover = db.prepare("SELECT id FROM covers WHERE source=? AND file_id=?");
+            cover.reset();
             cover.bind(1, source).bind(2, coverFile);
             int64_t coverId = 0;
             if (cover.step())
                 coverId = cover.integer(0);
             else {
-                db.prepare("INSERT INTO covers(source,file_id,mime) VALUES(?,?,?)")
-                    .bind(1, source)
-                    .bind(2, coverFile)
-                    .bind(3, mime)
-                    .run();
+                addCover.reset();
+                addCover.bind(1, source).bind(2, coverFile).bind(3, mime).run();
                 coverId = db.lastInsertId();
             }
-            db.prepare("UPDATE albums SET cover_id=? WHERE id=?").bind(1, coverId).bind(2, albumId).run();
+            setCover.reset();
+            setCover.bind(1, coverId).bind(2, albumId).run();
         }
     }
+    // No reading statement stays open over the deletes.
+    row.reset();
+    images.reset();
+    cover.reset();
     db.exec("DELETE FROM albums WHERE NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.album_id=albums.id);"
             "DELETE FROM covers WHERE NOT EXISTS(SELECT 1 FROM albums WHERE albums.cover_id=covers.id);"
             // Album rows carry no revision trigger; one step covers titles and covers this rebuild changed.
