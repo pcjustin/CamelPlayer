@@ -470,25 +470,31 @@ std::vector<LibraryNamePart> creditParts(const LibraryCreditNames& names, std::s
     return parts;
 }
 
+// The jump bar's initials, read once per library revision like the listings' orders: grouping every visible track
+// again took 0.4 to 0.7 s for the artists of a library of 86,541 files at each opening of the page.
 std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGroupField field, const CancellationToken& token) {
     if (field == LibraryGroupField::Year) return {};
     Query q(store, std::nullopt, token);
-    std::vector<std::vector<uint8_t>> keys;
-    auto rows = q.db.prepare("SELECT min(sort) FROM (" + groupValues(field) +
-                             ") WHERE coalesce(name,'')<>'' GROUP BY name ORDER BY min(sort),name");
-    while (rows.step()) keys.push_back(rows.blob(0));
-    return initialsOf(keys, sortKeyStarts(q.db));
+    return *ordered<LibraryInitial>(store, q.revision, "groupInitials|" + std::to_string(int(field)), [&] {
+        std::vector<std::vector<uint8_t>> keys;
+        auto rows = q.db.prepare("SELECT min(sort) FROM (" + groupValues(field) +
+                                 ") WHERE coalesce(name,'')<>'' GROUP BY name ORDER BY min(sort),name");
+        while (rows.step()) keys.push_back(rows.blob(0));
+        return initialsOf(keys, sortKeyStarts(q.db));
+    });
 }
 
 std::vector<LibraryInitial> albumInitials(const LibraryStore& store, AlbumSort sort, const CancellationToken& token) {
     if (sort != AlbumSort::Title && sort != AlbumSort::Artist) return {};
     Query q(store, std::nullopt, token);
-    const std::string query = std::string("SELECT ") + (sort == AlbumSort::Title ? "a.sort_key" : "a.artist_sort_key") +
-                              albumsFrom({}) + " GROUP BY a.id ORDER BY " + kAlbumOrders[size_t(sort)] + ",a.id";
-    auto rows = q.db.prepare(query);
-    std::vector<std::vector<uint8_t>> keys;
-    while (rows.step()) keys.push_back(rows.blob(0));
-    return initialsOf(keys, sortKeyStarts(q.db));
+    return *ordered<LibraryInitial>(store, q.revision, "albumInitials|" + std::to_string(int(sort)), [&] {
+        const std::string query = std::string("SELECT ") + (sort == AlbumSort::Title ? "a.sort_key" : "a.artist_sort_key") +
+                                  albumsFrom({}) + " GROUP BY a.id ORDER BY " + kAlbumOrders[size_t(sort)] + ",a.id";
+        auto rows = q.db.prepare(query);
+        std::vector<std::vector<uint8_t>> keys;
+        while (rows.step()) keys.push_back(rows.blob(0));
+        return initialsOf(keys, sortKeyStarts(q.db));
+    });
 }
 
 LibraryTrackRowPage browseTrackRows(const LibraryStore& store, TrackSort sort, bool descending,
