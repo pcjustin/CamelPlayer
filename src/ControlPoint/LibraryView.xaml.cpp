@@ -52,7 +52,7 @@ struct Texts {
             composer = tr(L"Library_RoleComposer");
 };
 
-// ormat is read on the UI thread and passed to work done elsewhere, so it comes already translated.
+// `format` is read on the UI thread and passed to work done elsewhere, so it comes already translated.
 hstring counted(const hstring& format, int64_t n) {
     return hstring(ui::substitute(std::wstring(format), {ui::count(n)}));
 }
@@ -1436,7 +1436,6 @@ void LibraryView::OnShuffleListClick(Windows::Foundation::IInspectable const&, R
     playList(true);
 }
 
-// A playlist named after the list, holding what it lists now.
 void LibraryView::loadArtistPicture(const std::string& name, bool allowed) {
     pictureToken_.cancel();
     pictureToken_ = {};
@@ -1559,6 +1558,7 @@ void LibraryView::OnRefusePicturesClick(Windows::Foundation::IInspectable const&
     if (answerArtistPictures_) answerArtistPictures_(false);
 }
 
+// A playlist named after the list, holding what it lists now.
 void LibraryView::OnSaveListClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     if (!savePlaylist_) return;
     const auto title = current_.title;
