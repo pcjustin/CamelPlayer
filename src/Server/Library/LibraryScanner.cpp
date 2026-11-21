@@ -21,6 +21,8 @@
 #include <future>
 #include <fstream>
 #include <map>
+#include <mutex>
+#include <optional>
 #include <set>
 #include <stop_token>
 #include <string_view>
@@ -145,6 +147,46 @@ bool contains(const Path& parent, const Path& child) {
 using Version = library::FileVersion;
 using library::fileVersion;
 using TrustedIdentity = std::tuple<std::string, std::vector<uint8_t>, int64_t>;
+
+// What a file the scan reads needs of the whole library, read when the first one does: a folder scan whose files are
+// all known reads none of it, a third of a second on a library of 86,541 files. Any worker may ask.
+class LibraryWide {
+public:
+    explicit LibraryWide(const LibraryStore& store) : store_(store) {}
+
+    // How the recorded files of `size` were fingerprinted, sampled where both kinds were; none for a size not recorded.
+    std::optional<library::Fingerprint> fingerprintOf(int64_t size) {
+        load();
+        const auto found = hashSizes_.find(size);
+        return found == hashSizes_.end() ? std::nullopt : std::optional(found->second);
+    }
+    bool trusted(const TrustedIdentity& identity) {
+        load();
+        return trusted_.contains(identity);
+    }
+
+private:
+    void load() {
+        std::call_once(loaded_, [this] {
+            auto reader = store_.openReader();
+            // Read through the table: through the content_hash index each row is a lookup of its own, which read 274 MB
+            // of a 184 MB library.
+            auto fingerprints = reader.prepare(
+                "SELECT size,MAX(length(content_hash)) FROM files NOT INDEXED WHERE content_hash IS NOT NULL GROUP BY size");
+            while (fingerprints.step())
+                hashSizes_.emplace(fingerprints.integer(0),
+                                   fingerprints.integer(1) == 32 ? library::Fingerprint::Full : library::Fingerprint::Sampled);
+            auto identities =
+                reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
+            while (identities.step()) trusted_.emplace(identities.text(0), identities.blob(1), identities.integer(2));
+        });
+    }
+
+    const LibraryStore& store_;
+    std::once_flag loaded_;
+    std::map<int64_t, library::Fingerprint> hashSizes_;
+    std::set<TrustedIdentity> trusted_;
+};
 
 std::string kind(const Path& path) {
     // macOS keeps a file's Finder data beside it as "._name" (AppleDouble) on file systems without forks, such as SMB.
@@ -617,9 +659,8 @@ void rebuildAlbums(sqlite::Database& db, int64_t root, const std::optional<std::
             "UPDATE library_revision SET value=value+1 WHERE id=1");
 }
 
-Listing readEntries(Listing out, const std::map<std::string, Version>& known,
-                    const std::map<int64_t, library::Fingerprint>& hashSizes, const std::set<std::string>& pendingIdentity,
-                    const std::set<std::string>& knownHashes, const std::set<TrustedIdentity>& trusted, bool reread,
+Listing readEntries(Listing out, const std::map<std::string, Version>& known, LibraryWide& wide,
+                    const std::set<std::string>& pendingIdentity, const std::set<std::string>& knownHashes, bool reread,
                     const std::set<std::string>& readAgain, const std::set<std::string>& lengthMarkedExact,
                     const CancellationToken& token, const std::function<BackgroundPace()>& pace) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
@@ -673,8 +714,7 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
                 // fingerprint also confirms the version; during playback it is left to that pass. Images get none: a
                 // cover is chosen again by every scan, so following its moves keeps nothing.
                 if (type != "image" && !busy()) {
-                    const auto kind =
-                        hashSizes.contains(entry.version.size) ? hashSizes.at(entry.version.size) : library::Fingerprint::Sampled;
+                    const auto kind = wide.fingerprintOf(entry.version.size).value_or(library::Fingerprint::Sampled);
                     entry.digest = library::fileDigest(child, entry.version, token, busy, kind);
                 }
                 if (type == "audio" && !entry.digest && fileVersion(child) != entry.version)
@@ -683,10 +723,10 @@ Listing readEntries(Listing out, const std::map<std::string, Version>& known,
             const bool hashed = old != known.end() && old->second == entry.version && knownHashes.contains(fileKey);
             if (!hashed && !entry.digest && type != "image" &&
                 (old == known.end() || !entry.version.sameFile(old->second) || pendingIdentity.contains(fileKey)) &&
-                hashSizes.contains(entry.version.size) &&
-                !trusted.contains({entry.version.volumeKey, entry.version.index, entry.version.created})) {
+                wide.fingerprintOf(entry.version.size) &&
+                !wide.trusted({entry.version.volumeKey, entry.version.index, entry.version.created})) {
                 if (!directoryValid()) break;
-                entry.digest = library::fileDigest(child, entry.version, token, busy, hashSizes.at(entry.version.size));
+                entry.digest = library::fileDigest(child, entry.version, token, busy, *wide.fingerprintOf(entry.version.size));
                 // The file is not recorded yet; the rest of the scan goes on, and only this folder is scanned again.
                 if (!entry.digest) {
                     out.deferred = true;
@@ -1082,7 +1122,13 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
     // The scan generation at which this version began reading them, so a scan after an interrupted one leaves out the
     // files this version has read or checked since: each is written with its scan's generation.
     const auto refusedFromKey = "library_refused_from:" + std::to_string(root);
-    const int64_t generation = reader.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files").value();
+    // A folder scan works it out on the writer when it first writes a file.
+    std::optional<int64_t> generationValue;
+    const auto generationIn = [&](sqlite::Database& db) {
+        if (!generationValue) generationValue = db.scalar("SELECT COALESCE(MAX(last_seen),0)+1 FROM files");
+        return generationValue.value();
+    };
+    if (!partial) generationIn(reader);
     std::set<std::string> readAgain, lengthMarkedExact;
     auto refusedVersion = reader.prepare("SELECT value FROM app_state WHERE key=?");
     refusedVersion.bind(1, refusedKey);
@@ -1090,7 +1136,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         const std::string prefix = std::string(CAMEL_VERSION_STRING) + " ";
         auto from = reader.prepare("SELECT value FROM app_state WHERE key=?");
         from.bind(1, refusedFromKey);
-        int64_t since = generation;
+        int64_t since = *generationValue;
         if (from.step() && from.text(0).starts_with(prefix))
             since = std::stoll(from.text(0).substr(prefix.size()));
         else
@@ -1098,7 +1144,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                 .write([&](sqlite::Database& db) {
                     db.prepare("INSERT OR REPLACE INTO app_state(key,value) VALUES(?,?)")
                         .bind(1, refusedFromKey)
-                        .bind(2, prefix + std::to_string(generation))
+                        .bind(2, prefix + std::to_string(*generationValue))
                         .run();
                 })
                 .get();
@@ -1109,17 +1155,8 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
         rows.bind(1, root).bind(2, since);
         while (rows.step()) (rows.integer(1) ? lengthMarkedExact : readAgain).insert(rows.text(0));
     }
-    // A new file is fingerprinted like the recorded files of its size; sampled wins where both kinds exist. Read through
-    // the table: through the content_hash index each row is a lookup of its own, which read 274 MB of a 184 MB library.
-    std::map<int64_t, library::Fingerprint> hashSizes;
-    auto fingerprints = reader.prepare(
-        "SELECT size,MAX(length(content_hash)) FROM files NOT INDEXED WHERE content_hash IS NOT NULL GROUP BY size");
-    while (fingerprints.step())
-        hashSizes.emplace(fingerprints.integer(0),
-                          fingerprints.integer(1) == 32 ? library::Fingerprint::Full : library::Fingerprint::Sampled);
-    std::set<TrustedIdentity> trusted;
-    auto identities = reader.prepare("SELECT volume_key,file_index,created FROM files WHERE volume_key<>'' AND identity_state=0");
-    while (identities.step()) trusted.emplace(identities.text(0), identities.blob(1), identities.integer(2));
+    // A new file is fingerprinted like the recorded files of its size.
+    LibraryWide wide(store_);
     // What this scan found, on the writer's thread. Kept here because writing it to every row would rewrite the whole
     // table at each scan of a library that has not changed.
     std::unordered_set<int64_t> present;
@@ -1206,7 +1243,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                     named.bind(1, toUtf8(entry.path.filename().wstring())).bind(2, file).run();
                     named.reset();
                     if (entry.lengthChecked)
-                        db.prepare("UPDATE files SET last_seen=? WHERE id=?").bind(1, generation).bind(2, file).run();
+                        db.prepare("UPDATE files SET last_seen=? WHERE id=?").bind(1, generationIn(db)).bind(2, file).run();
                     // Tracks indexed by an interrupted first scan have no album yet.
                     ungrouped.reset();
                     if (ungrouped.bind(1, file).step()) trackFolders.insert(ungrouped.integer(0));
@@ -1234,7 +1271,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                         .bind(6, entry.version.mtime)
                         .bind(7, entry.version.volume)
                         .bind(8, entry.version.index)
-                        .bind(9, generation)
+                        .bind(9, generationIn(db))
                         .bind(10, entry.version.created)
                         .bind(11, entry.version.volumeKey)
                         .bind(12, toUtf8(entry.path.filename().wstring()))
@@ -1250,7 +1287,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
                                "volume_serial=?,file_index=?,created=?,volume_key=?,name=? WHERE id=?")
                         .bind(1, entry.version.size)
                         .bind(2, entry.version.mtime)
-                        .bind(3, generation)
+                        .bind(3, generationIn(db))
                         .bind(4, folderId)
                         .bind(5, root)
                         .bind(6, entry.version.volume)
@@ -1286,7 +1323,7 @@ ScanReport LibraryScanner::scan(int64_t root, const CancellationToken& request, 
             pending.pop_front();
             active.push_back(std::async(std::launch::async, [&, work = std::move(work)]() mutable {
                 if (!work.fileWork) return list(work.path, token, network, listedIds);
-                return readEntries(std::move(work), known, hashSizes, pendingIdentity, knownHashes, trusted, reread, readAgain,
+                return readEntries(std::move(work), known, wide, pendingIdentity, knownHashes, reread, readAgain,
                                    lengthMarkedExact, token, pace);
             }));
         }
