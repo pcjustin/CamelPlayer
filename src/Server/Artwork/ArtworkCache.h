@@ -50,7 +50,8 @@ private:
     std::optional<ArtworkReference> stored(const LibraryStore& store, const ArtworkRequest& request,
                                            const CancellationToken& token);
     std::optional<ArtworkReference> artist(const LibraryStore& store, const std::string& name, const CancellationToken& token);
-    // A non-empty `key` names the thumbnail instead of a digest of the source.
+    // A non-empty `key` names the thumbnail instead of a digest of the source. Takes mutex_ only to put the thumbnail in
+    // place, so that several are decoded and encoded at once.
     std::optional<ArtworkReference> generate(const ArtworkCandidate& image, const CancellationToken& token,
                                              const std::string& key = {}, unsigned pixels = kPixels);
     void trim();

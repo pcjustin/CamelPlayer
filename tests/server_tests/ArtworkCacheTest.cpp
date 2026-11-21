@@ -135,6 +135,25 @@ TEST_F(ArtworkCacheTest, GeneratesTheThumbnailPreservingAspectAndReusesTheCache)
     EXPECT_EQ(smallRef->path, reused->path);
     EXPECT_EQ(smallRef->path.extension(), L".jpg");
 }
+// Thumbnails are made at once on several threads, two of them asked for the same picture by each.
+TEST_F(ArtworkCacheTest, SeveralThreadsMakeThumbnailsAtOnce) {
+    ArtworkCache cache(dir / "thumbs");
+    std::vector<std::future<std::optional<ArtworkReference>>> made;
+    for (int i = 0; i < 8; ++i)
+        made.push_back(
+            std::async(std::launch::async, [&cache, i] { return cache.thumbnail(bitmap(800, 400, uint8_t(40 + i / 2 * 30))); }));
+    std::set<std::string> keys;
+    for (auto& thumbnail : made) {
+        const auto ref = thumbnail.get();
+        ASSERT_TRUE(ref);
+        EXPECT_EQ(dimensions(ref->path), (std::pair<unsigned, unsigned>{256, 128}));
+        keys.insert(ref->key);
+    }
+    EXPECT_EQ(keys.size(), 4u);
+    size_t files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dir / "thumbs")) files += entry.path().extension() == L".jpg";
+    EXPECT_EQ(files, 4u);
+}
 TEST_F(ArtworkCacheTest, RejectsCorruptOversizedDimensionsAndCancellationWithoutPublishing) {
     ArtworkCache cache(dir / "thumbs");
     ArtworkCandidate corrupt;

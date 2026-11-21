@@ -244,7 +244,6 @@ std::optional<ArtworkReference> ArtworkCache::get(const LibraryStore* store, con
     auto use = [&](const std::optional<ArtworkCandidate>& candidate) -> std::optional<ArtworkReference> {
         if (!candidate || token.cancelled()) return {};
         try {
-            std::lock_guard lock(mutex_);
             return generate(*candidate, token, {}, request.pixels);
         } catch (const std::exception&) {
             return {};
@@ -343,7 +342,6 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
         return ArtworkReference{key, target};
     }
     if (token.cancelled()) return std::nullopt;
-    // The source is read before taking the lock, so the covers of several albums are read from a NAS at once.
     ArtworkCandidate image;
     if (cover->embedded) {
         ArtworkQuery query;
@@ -356,7 +354,6 @@ std::optional<ArtworkReference> ArtworkCache::stored(const LibraryStore& store, 
         image.bytes = readImage(cover->file, token);
         if (image.bytes.empty()) return std::nullopt;
     }
-    std::lock_guard lock(mutex_);
     return generate(image, token, cover->key, request.pixels);
 }
 
@@ -382,7 +379,6 @@ std::optional<ArtworkReference> ArtworkCache::artist(const LibraryStore& store, 
         if (!picture.bind(1, name).step() || picture.isNull(0)) return std::nullopt;
         ArtworkCandidate image;
         image.bytes = picture.blob(0);
-        std::lock_guard lock(mutex_);
         return generate(image, token, key);
     } catch (const std::exception&) {
         return std::nullopt;
@@ -495,7 +491,6 @@ size_t ArtworkCache::forgetDeleted(const LibraryStore& store) {
 }
 
 std::optional<ArtworkReference> ArtworkCache::thumbnail(const ArtworkCandidate& image, const CancellationToken& token) {
-    std::lock_guard lock(mutex_);
     try {
         return generate(image, token);
     } catch (const std::exception&) {
@@ -509,7 +504,10 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
     const auto key = (stableKey.empty() ? sourceKey(image) : stableKey) + "-" + std::to_string(pixels);
     const auto target = directory_ / (key + ".jpg");
     std::filesystem::create_directories(directory_);
-    if (!diskBytes_) trim();
+    {
+        std::lock_guard lock(mutex_);
+        if (!diskBytes_) trim();
+    }
     std::error_code ec;
     if (std::filesystem::is_regular_file(target, ec) && std::filesystem::file_size(target, ec) > 0) {
         std::filesystem::last_write_time(target, std::filesystem::file_time_type::clock::now(), ec);
@@ -534,7 +532,7 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
     check(factory->CreateBitmapScaler(&scaler));
     check(scaler->Initialize(source.Get(), std::max(1u, UINT(width * scale)), std::max(1u, UINT(height * scale)),
                              WICBitmapInterpolationModeFant));
-    const auto temporary = Path(target.wstring() + L".tmp");
+    const auto temporary = Path(target.wstring() + L"." + std::to_wstring(GetCurrentThreadId()) + L".tmp");
     auto cleanup = wil::scope_exit([&] { std::filesystem::remove(temporary, ec); });
     {
         ComPtr<IWICStream> output;
@@ -543,6 +541,9 @@ std::optional<ArtworkReference> ArtworkCache::generate(const ArtworkCandidate& i
         encodeJpeg(factory.Get(), scaler.Get(), output.Get());
     }
     if (token.cancelled()) return {};
+    std::lock_guard lock(mutex_);
+    if (std::filesystem::is_regular_file(target, ec) && std::filesystem::file_size(target, ec) > 0)
+        return ArtworkReference{key, target}; // made meanwhile for another caller
     std::filesystem::rename(temporary, target);
     if (diskBytes_) *diskBytes_ += std::filesystem::file_size(target);
     trim();
