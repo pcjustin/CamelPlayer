@@ -3211,9 +3211,17 @@ pub unsafe extern "C" fn camel_dsp_analyze_v1(
             let frequencies = std::slice::from_raw_parts(frequencies, points);
             let left = std::slice::from_raw_parts_mut(left_db, points);
             let right = std::slice::from_raw_parts_mut(right_db, points);
+            let left_sections = eq::channel_sections(&settings.bands, rate, 0);
+            let right_sections = eq::channel_sections(&settings.bands, rate, 1);
             for (i, &f) in frequencies.iter().enumerate() {
-                left[i] = eq::response_db(&settings.bands, rate, 0, f);
-                right[i] = eq::response_db(&settings.bands, rate, 1, f);
+                left[i] = 20.0
+                    * eq::sections_response(&left_sections, rate, f)
+                        .norm()
+                        .log10();
+                right[i] = 20.0
+                    * eq::sections_response(&right_sections, rate, f)
+                        .norm()
+                        .log10();
             }
         }
         ENGINE_OK

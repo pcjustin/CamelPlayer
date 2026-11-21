@@ -204,11 +204,13 @@ pub(crate) fn sections_response(sections: &[[f64; 5]], rate: f64, frequency: f64
 }
 
 /// The complex response `bands` give `channel` at `frequency`.
+#[cfg(test)]
 pub(crate) fn response(bands: &[Band], rate: f64, channel: usize, frequency: f64) -> Complex {
     sections_response(&channel_sections(bands, rate, channel), rate, frequency)
 }
 
 /// The level in dB that `bands` give `channel` at `frequency`.
+#[cfg(test)]
 pub(crate) fn response_db(bands: &[Band], rate: f64, channel: usize, frequency: f64) -> f64 {
     20.0 * response(bands, rate, channel, frequency).norm().log10()
 }
