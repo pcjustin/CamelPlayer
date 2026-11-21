@@ -214,7 +214,11 @@ void LibraryNameSplitter::learn(std::string_view credit) {
     std::vector<Token> tokens;
     divide(toWide(std::string(credit)), tokens);
     for (const auto& token : tokens)
-        if (token.name) known_.insert(keyOf(token.text));
+        if (token.name) {
+            const auto key = keyOf(token.text);
+            widest_ = std::max(widest_, ambiguousSeparators(toWide(key)).size() + 1);
+            known_.insert(key);
+        }
 }
 
 std::vector<LibraryNamePart> LibraryNameSplitter::parts(std::string_view credit) const {
@@ -241,7 +245,8 @@ std::vector<LibraryNamePart> LibraryNameSplitter::parts(std::string_view credit)
         std::vector<size_t> from(segments + 1, 0);
         best[0] = {0, 0};
         for (size_t i = 1; i <= segments && !spans.empty(); ++i)
-            for (size_t j = 0; j < i; ++j) {
+            // A group wider than any known name is no name: normalizing every one made a credit of 60 names take 5 ms.
+            for (size_t j = i > widest_ ? i - widest_ : 0; j < i; ++j) {
                 if (best[j].first < 0 || (j == 0 && i == segments)) continue;
                 const auto group = s.substr(begin(j), end(i - 1) - begin(j));
                 if (trimmed(group).empty()) continue;

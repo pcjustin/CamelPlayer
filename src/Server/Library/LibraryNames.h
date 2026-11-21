@@ -45,6 +45,7 @@ public:
 
 private:
     std::unordered_set<std::string> known_;
+    size_t widest_ = 1; // the most segments a known name spans, by the separators in its key
 };
 
 // Changes whenever LibraryNameSplitter splits differently, so that libraries derive their names again.
