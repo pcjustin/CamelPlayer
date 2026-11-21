@@ -1940,9 +1940,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                       : s.state == PlaybackState::Paused  ? tr(L"State_Paused")
                                                                           : tr(L"State_Stopped"));
     BufferingRing().IsActive(buffering);
-    // The waveform appears once the Server has it: made at once for the playing track, asked for every 2 seconds.
-    if (s.pathUtf8 != waveformPath_) {
-        waveformPath_ = s.pathUtf8;
+    // The waveform appears once the Server has it: made at once for the playing track, asked for every 2 seconds. Stopped,
+    // there is none: the plain slider shows until a track plays or pauses again.
+    if (const std::string shown = s.state == PlaybackState::Stopped ? std::string() : s.pathUtf8; shown != waveformPath_) {
+        waveformPath_ = shown;
         waveformBar_->clear();
         waveformAsked_ = {};
     }
