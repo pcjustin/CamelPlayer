@@ -913,12 +913,13 @@ TEST_F(LibraryPlaybackTest, SavingTheQueueWhileItsStorageIsAwayKeepsItsTracksInT
     const auto music = setUp({a});
     send(queueReplace({track(a)}));
     send(command(CommandKind::Stop));
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries[0].file == file(a); }));
+    const auto id = file(a); // before it goes: the folder watch may then mark it unavailable
+    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries[0].file == id; }));
     std::filesystem::rename(music / a.filename(), dir / a.filename());
     const auto saved = server->saveQueueAsPlaylist("Away");
     const auto page = server->playlistItems(saved.playlist, 0, 10);
     ASSERT_EQ(page.items.size(), 1u);
-    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{file(a)}));
+    EXPECT_EQ(page.items[0].track, (LibraryTrackKey{id}));
 }
 
 // A library command waits for the library writer beside the command thread: while another holds the library, the
