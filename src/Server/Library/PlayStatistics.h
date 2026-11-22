@@ -111,6 +111,7 @@ struct PlayHistoryEntry {
     std::string title, artist, album;
     bool available = false;
     std::string path, name; // the file to play again and its on-disk name
+    std::string zone;       // the zone it played in, by the name it had then; empty before zones
 };
 
 struct PlayStatistics {

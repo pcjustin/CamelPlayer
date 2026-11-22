@@ -155,12 +155,14 @@ bool counted(bool byTime, int64_t count, int64_t ms) {
     return byTime ? ms > 0 : count > 0;
 }
 
+// When it played and, since zones, in which (docs/Plan.md §7.8).
 ui::BrowseRow historyRow(const PlayHistoryEntry& h) {
+    const hstring started = startedText(h.startedMs, h.utcOffsetMinutes);
     ui::BrowseRow row{h.event,
                       h.path,
                       titleOf(h.title, h.name, h.path),
                       ui::utf8(h.artist),
-                      startedText(h.startedMs, h.utcOffsetMinutes),
+                      h.zone.empty() ? started : started + L" · " + ui::utf8(h.zone),
                       hstring(ui::formatTime(double(h.heardMs) / 1000.0))};
     row.file = h.track.file;
     row.unavailable = !h.available;

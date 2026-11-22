@@ -205,7 +205,8 @@ PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQue
     auto history = db.prepare("SELECT e.id,e.file_id,e.started,e.utc_offset,e.heard_ms,e.counted,"
                               "coalesce(t.title,''),coalesce(t.artist,''),coalesce(t.album,'')," +
                               available +
-                              ",f.path,coalesce(f.name,'') FROM play_events e LEFT JOIN tracks t ON t.file_id=e.file_id "
+                              ",f.path,coalesce(f.name,''),coalesce(e.zone,'') FROM play_events e LEFT JOIN tracks t ON "
+                              "t.file_id=e.file_id "
                               "JOIN files f ON f.id=e.file_id JOIN roots r ON r.id=f.root_id" +
                               where + " ORDER BY e.started DESC,e.id DESC LIMIT ? OFFSET ?");
     history.bind(1, query.historyLimit).bind(2, query.historyOffset);
@@ -221,7 +222,8 @@ PlayStatistics playStatistics(const LibraryStore& store, const PlayStatisticsQue
                                history.text(8),
                                history.integer(9) != 0,
                                history.text(10),
-                               history.text(11)});
+                               history.text(11),
+                               history.text(12)});
     db.exec("COMMIT");
     return out;
 }

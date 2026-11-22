@@ -833,6 +833,36 @@ TEST_F(ZonesTest, PlaysInTwoZonesAtOnceAreEachCountedOnceUnderTheirZonesNames) {
     EXPECT_EQ(db.scalar("SELECT sum(play_count) FROM stats"), 2);
 }
 
+// Two zones playing at once count both plays' listening time in full, and the history names each play's zone (MZ-R11).
+TEST_F(ZonesTest, PlaysAtOnceInTwoZonesAddUpTheirListeningTimeAndTheHistoryNamesTheirZones) {
+    start(2, {}, true);
+    const Settings settings = nativeSettings(server->snapshot().settings);
+    server.reset();
+    std::filesystem::create_directories(dir / "music");
+    const std::vector files{dir / "music" / "one.flac", dir / "music" / "two.flac"};
+    std::filesystem::copy_file(track(1, 2.0), files[0]);
+    std::filesystem::copy_file(track(2, 2.0), files[1]);
+    {
+        LibraryStore store(dir / "data");
+        LibraryScanner scanner(store);
+        ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    }
+    open(settings);
+    send(play(1, {files[0]}));
+    send(play(2, {files[1]}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return ended(of(s, 1)) && ended(of(s, 2)); }));
+    server->waitIdle();
+    const auto stats = server->playStatistics({});
+    EXPECT_EQ(stats.overview.plays, 2);
+    // Each two-second play counted in full though they overlapped.
+    EXPECT_GE(stats.overview.listenedMs, 3600);
+    EXPECT_LE(stats.overview.listenedMs, 4400);
+    ASSERT_EQ(stats.history.size(), 2U);
+    std::vector<std::string> zones{stats.history[0].zone, stats.history[1].zone};
+    std::ranges::sort(zones);
+    EXPECT_EQ(zones, (std::vector<std::string>{"Zone 1", "Zone 2"}));
+}
+
 namespace {
 
 SavedOutput enabled(Backend backend, const std::string& id, const std::string& name) {
