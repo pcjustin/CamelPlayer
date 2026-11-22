@@ -347,6 +347,7 @@ private:
     };
     std::optional<PendingPairing> pairing_;
     uint64_t shownQueueRevision_ = UINT64_MAX;
+    std::string shownQueueZone_;
     uint64_t shownQueueMarks_ = UINT64_MAX;
     camel::server::RepeatMode shownRepeat_ = camel::server::RepeatMode::Off;
     std::wstring shownStatus_; // the badges' texts when their fit was last checked
@@ -364,6 +365,31 @@ private:
     void addSettingsLinks();
     void markSettingsSection();
     winrt::fire_and_forget showOutputSettings(camel::Backend backend, std::string id, winrt::hstring label);
+    // The zone picker the output button opens (docs/Plan.md §5.12): a row for each zone while it is open.
+    struct ZoneRow {
+        std::string zone;
+        camel::server::OutputRow output;
+        camel::VolumeMode volumeMode = camel::VolumeMode::Fixed;
+        double volumeDb = 0.0;
+        Microsoft::UI::Xaml::Controls::Button select{nullptr};
+        Microsoft::UI::Xaml::Shapes::Rectangle mark{nullptr};
+        Microsoft::UI::Xaml::Controls::Image cover{nullptr};
+        Microsoft::UI::Xaml::Controls::TextBlock title{nullptr}, detail{nullptr};
+        Microsoft::UI::Xaml::Controls::Button playPause{nullptr};
+        Microsoft::UI::Xaml::Controls::SymbolIcon playIcon{nullptr};
+        Microsoft::UI::Xaml::Controls::Slider volume{nullptr};
+        std::string coverPath;
+    };
+    Microsoft::UI::Xaml::Controls::Flyout zonePicker_{nullptr};
+    std::vector<ZoneRow> zoneRows_;
+    Microsoft::UI::Xaml::Controls::Button pauseAllButton_{nullptr};
+    bool showingZones_ = false; // the rows' sliders are set from a snapshot, not moved by the user
+    void showZoneRows(const camel::server::Snapshot& snapshot);
+    bool zonePlays(const camel::server::OutputRow& row) const;
+    winrt::fire_and_forget askTurnOffOutput(camel::server::OutputRow row, winrt::hstring label);
+    void selectZone(const std::string& id);
+    void changeZoneVolume(const std::string& id, double value);
+    winrt::hstring zoneName(const camel::server::Snapshot& snapshot, const std::string& id) const;
     struct OutputEdit {
         camel::Backend backend = camel::Backend::Wasapi;
         std::string id;
@@ -374,6 +400,7 @@ private:
     Microsoft::UI::Xaml::Controls::StackPanel outputDspSection(const OutputEdit& editing,
                                                                const std::vector<camel::server::OutputRow>& rows);
     void changeOutputDsp(const camel::OutputDsp& dsp);
+    Microsoft::UI::Xaml::Controls::StackPanel outputZoneSection(const OutputEdit& editing);
     Microsoft::UI::Xaml::Controls::TextBlock outputDspText_{nullptr};
     winrt::hstring dspOutputLabel_; // the output in use, as the DSP cards and menu name it
     // The parameters the output groups show: the dialog's while it is open, else the output in use's.

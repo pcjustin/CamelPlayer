@@ -454,27 +454,49 @@ TEST_F(ZonesTest, EachZonesStateIsCurrentAfterCommandsToAnother) {
     EXPECT_TRUE(waitFor([position](const Snapshot& s) { return of(s, 1).playback.position > position; }));
 }
 
-TEST_F(ZonesTest, ChangingTheOutputInUseTakesTheSelectedZonesPlaybackToIt) {
+// Choosing another output in use selects its zone; every zone keeps its queue and plays on (MZ-R07).
+TEST_F(ZonesTest, ChangingTheOutputInUseSelectsItsZoneAndMovesNoQueue) {
     start(2);
     send(play(1, {track(1, 6.0), track(1, 1.0)}));
     send(play(2, {track(2, 6.0)}));
     ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1), 0.5) && playing(of(s, 2), 0.2); }));
     const auto before = server->snapshot();
+    EXPECT_EQ(before.selectedZone, zone(1));
     Settings s = nativeSettings(before.settings);
     selectOutput(s, Backend::Wasapi, device(2), before.devices);
     Command apply;
     apply.kind = CommandKind::ApplySettings;
     apply.settings = settingsDto(s);
     send(std::move(apply));
-    ASSERT_TRUE(waitFor([](const Snapshot& now) { return playing(of(now, 2)); }));
     const auto after = server->snapshot();
     EXPECT_EQ(after.selectedZone, zone(2));
-    EXPECT_EQ(of(after, 2).queue.entries, of(before, 1).queue.entries);
-    EXPECT_EQ(of(after, 2).queueEntryId, of(before, 1).queueEntryId);
-    EXPECT_GE(of(after, 2).playback.position + 4410, of(before, 1).playback.position);
-    EXPECT_TRUE(of(after, 1).queue.entries.empty());
-    EXPECT_EQ(of(after, 1).playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(of(after, 1).queue.entries, of(before, 1).queue.entries);
+    EXPECT_EQ(of(after, 2).queue.entries, of(before, 2).queue.entries);
+    EXPECT_EQ(of(after, 1).playback.state, PlaybackState::Playing);
+    EXPECT_EQ(of(after, 2).playback.state, PlaybackState::Playing);
     EXPECT_EQ(after.queueEntryId, of(after, 2).queueEntryId);
+    EXPECT_EQ(after.queue.entries, of(after, 2).queue.entries);
+    // A command naming no zone acts on the one selected now.
+    Command pause;
+    pause.kind = CommandKind::Pause;
+    send(pause);
+    EXPECT_EQ(of(server->snapshot(), 2).playback.state, PlaybackState::Paused);
+    EXPECT_EQ(of(server->snapshot(), 1).playback.state, PlaybackState::Playing);
+}
+
+TEST_F(ZonesTest, PauseAllPausesEveryZonePlaying) {
+    start(3);
+    send(play(1, {track(1, 6.0)}));
+    send(play(3, {track(3, 6.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1)) && playing(of(s, 3)); }));
+    Command all;
+    all.kind = CommandKind::PauseAll;
+    const auto s = send(all);
+    EXPECT_FALSE(s.commandError);
+    EXPECT_EQ(of(s, 1).playback.state, PlaybackState::Paused);
+    EXPECT_EQ(of(s, 2).playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(of(s, 3).playback.state, PlaybackState::Paused);
+    EXPECT_EQ(commandFromJson(toJson(all)), all);
 }
 
 TEST(ZonesApiJsonTest, ZonesAndTheZoneACommandNamesRoundTrip) {
@@ -970,7 +992,10 @@ TEST_F(ZonesTest, OtherZonesPlayOnWhileTheOutputInUseChanges) {
     apply.kind = CommandKind::ApplySettings;
     apply.settings = settingsDto(s);
     send(std::move(apply));
-    EXPECT_TRUE(waitFor([](const Snapshot& now) { return playing(of(now, 2)) && playing(of(now, 3), 0.8); }));
+    EXPECT_EQ(server->snapshot().selectedZone, zone(2));
+    EXPECT_TRUE(waitFor([](const Snapshot& now) { return playing(of(now, 1), 0.8) && playing(of(now, 3), 0.8); }));
+    EXPECT_EQ(opened(1), 1);
+    EXPECT_EQ(closed(1), 0);
     EXPECT_EQ(opened(3), 1);
     EXPECT_EQ(closed(3), 0);
 }
@@ -1067,4 +1092,62 @@ TEST_F(ZonesTest, AComputerThatCannotKeepUpPausesTheZoneStartedLastAmongThoseUps
     send(command(CommandKind::Play, 2));
     EXPECT_TRUE(waitFor(
         [](const Snapshot& now) { return of(now, 2).playback.state == PlaybackState::Playing && !of(now, 2).playback.error; }));
+}
+
+// Each output keeps its own software volume; one saved before zones takes the one level every output had then (MZ-R07).
+TEST(ZoneSettingsTest, EachOutputKeepsItsOwnSoftwareVolumeAndAnEarlierLevelBecomesEveryOutputs) {
+    Settings old = zoneSettings(2);
+    old.volume = {VolumeMode::Software, -20.0, true};
+    auto j = nlohmann::json::parse(toJson(old));
+    for (auto& output : j["outputs"]) {
+        output.erase("volumeDb");
+        output.erase("volumeMuted");
+    }
+    const Settings read = fromJson(j.dump());
+    for (size_t i = 1; i <= 2; ++i) {
+        EXPECT_EQ(savedOutput(read, i).volumeDb, -20.0) << i;
+        EXPECT_TRUE(savedOutput(read, i).volumeMuted) << i;
+    }
+    Settings changed = read;
+    changed.outputs[1].volumeDb = -35.5;
+    EXPECT_EQ(savedOutput(fromJson(toJson(changed)), 2).volumeDb, -35.5);
+    EXPECT_EQ(savedOutput(fromJson(toJson(changed)), 1).volumeDb, -20.0);
+}
+
+TEST_F(ZonesTest, EachZonePlaysAtItsOwnSoftwareVolume) {
+    start(2, [](Settings& s) {
+        s.volume = {VolumeMode::Software, -6.0, false};
+        for (auto& output : s.outputs) {
+            output.volumeMode = VolumeMode::Software;
+            output.volumeDb = output.id == device(2) ? -30.0 : -6.0;
+        }
+    });
+    send(play(1, {track(1, 6.0)}));
+    send(play(2, {track(2, 6.0)}));
+    const auto at = [](const Snapshot& s, size_t number) {
+        const auto& plan = of(s, number).playback.plan;
+        return plan ? plan->volumeDb : 1.0;
+    };
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return playing(of(s, 1)) && playing(of(s, 2)); }));
+    EXPECT_EQ(at(server->snapshot(), 1), -6.0);
+    EXPECT_EQ(at(server->snapshot(), 2), -30.0);
+
+    // Another zone's level changes in its saved output, leaving the selected one's.
+    Settings s = nativeSettings(server->snapshot().settings);
+    for (auto& output : s.outputs)
+        if (output.id == device(2)) output.volumeDb = -12.0;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(s);
+    send(apply);
+    EXPECT_TRUE(waitFor([&](const Snapshot& now) { return at(now, 2) == -12.0; }));
+    EXPECT_EQ(at(server->snapshot(), 1), -6.0);
+
+    // Selected, its level is the settings' own.
+    s = nativeSettings(server->snapshot().settings);
+    selectOutput(s, Backend::Wasapi, device(2), server->snapshot().devices);
+    apply.settings = settingsDto(s);
+    const auto selected = send(apply);
+    EXPECT_EQ(selected.settings.volume.db, -12.0);
+    EXPECT_EQ(at(selected, 1), -6.0);
 }

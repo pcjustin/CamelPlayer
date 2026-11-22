@@ -371,7 +371,8 @@ TEST_F(ServerTest, RequestedBackendRemainsVisibleWhenActivationFails) {
     requested.backend = Backend::Ks;
     Command c = command(CommandKind::ApplySettings);
     c.settings = requested;
-    s = send(c);
+    send(c);
+    s = send(select()); // in the zone selected now, Kernel Streaming's
 
     EXPECT_EQ(s.settings.backend, Backend::Ks);
     EXPECT_EQ(s.playback.backend, Backend::Ks);

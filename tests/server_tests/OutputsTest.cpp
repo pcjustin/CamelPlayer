@@ -566,6 +566,24 @@ TEST(OutputsServerTest, TheServerTakesAnOutputEnabledForTheFirstTime) {
     server.shutdown();
 }
 
+// Saved outputs keep the order the last scan found them in, so the rows before the next scan are in the order after it
+// (MZ-R07: the zone picker's rows do not move).
+TEST(OutputsTest, TheRowsBeforeADeviceScanKeepTheLastScansOrder) {
+    Settings s = fresh();
+    setOutputEnabled(s, Backend::Wasapi, "w-dave", true, catalog());
+    setOutputEnabled(s, Backend::Wasapi, "w-speakers", true, catalog()); // saved after the DAVE, found before it
+    syncOutputs(s, catalog());
+    const auto ids = [](const std::vector<OutputRow>& rows) {
+        std::vector<std::string> enabled;
+        for (const auto& r : rows)
+            if (r.enabled && r.backend == Backend::Wasapi && !r.id.empty()) enabled.push_back(r.id);
+        return enabled;
+    };
+    const auto scanned = ids(outputRows(s, catalog()));
+    EXPECT_EQ(scanned, (std::vector<std::string>{"w-speakers", "w-dave"}));
+    EXPECT_EQ(ids(outputRows(fromJson(toJson(s)), DeviceCatalog{})), scanned);
+}
+
 TEST(OutputsTest, ResettingPlaybackForgetsTheDevices) {
     Settings s = fresh();
     selectOutput(s, Backend::Asio, "a-dave", catalog());
@@ -578,26 +596,41 @@ TEST(OutputsTest, ResettingPlaybackForgetsTheDevices) {
 
 namespace {
 
-// Plays a queue of two tracks on capture devices and records which outputs the Server opens.
+// Plays a queue of two tracks on capture devices and records which outputs the Server opens. Choosing another output
+// selects its zone, every zone keeping its queue (MZ-R07).
 class OutputSwitchTest : public ::testing::Test {
 protected:
     OutputSwitchTest()
         : server_(start(), {}, [this](const Settings& s) {
+              size_t number = 0;
               {
                   std::scoped_lock lock(mutex_);
                   opened_.push_back(s.backend);
+                  number = opened_.size();
               }
               audio::CaptureOptions options;
-              options.file = testutil::tempDir() / "output-switch.raw";
+              // A file of its own, as zones play at once.
+              options.file = testutil::tempDir() / ("output-switch-" + std::to_string(number) + ".raw");
               options.realtime = true;
               return audio::createCaptureOutput(options);
           }) {
+        playHere();
+    }
+
+    // The two tracks in the selected zone.
+    void playHere() {
         const auto first = testutil::generatedFile({"output-switch-first", 44100, 16, 2, 6.0});
         const auto second = testutil::generatedFile({"output-switch-second", 44100, 16, 2, 1.0});
         Command replace;
         replace.kind = CommandKind::QueueReplace;
         replace.sources = {TrackSource(toUtf8(first.wstring())), TrackSource(toUtf8(second.wstring()))};
         server_.submit(std::move(replace));
+    }
+
+    static const ZoneSnapshot& zoneOf(const Snapshot& s, const std::string& id) {
+        const auto found = std::ranges::find(s.zones, id, &ZoneSnapshot::id);
+        if (found == s.zones.end()) throw std::runtime_error("no zone " + id);
+        return *found;
     }
 
     ~OutputSwitchTest() override { server_.shutdown(); }
@@ -644,53 +677,62 @@ protected:
 
 } // namespace
 
-TEST_F(OutputSwitchTest, WhilePlayingContinuesOnTheNewOutputFromTheAudiblePosition) {
+TEST_F(OutputSwitchTest, SelectingAnotherOutputLeavesThePlayingZoneAsItWas) {
     waitUntilPlaying();
     const Snapshot before = server_.snapshot();
+    const std::string first = before.selectedZone;
     switchTo(Backend::Asio, "a-dave");
+    const Snapshot after = server_.snapshot();
+    EXPECT_EQ(after.selectedZone, zoneId(Backend::Asio, "a-dave"));
+    EXPECT_TRUE(after.queue.entries.empty());
+    const auto& left = zoneOf(after, first);
+    EXPECT_EQ(left.playback.state, PlaybackState::Playing);
+    EXPECT_EQ(left.queue.entries, before.queue.entries);
+    EXPECT_EQ(left.queueEntryId, before.queueEntryId);
+    EXPECT_GE(left.playback.position + 4410, before.playback.position);
+    // Played in the zone selected, the tracks open its output.
+    playHere();
     ASSERT_TRUE(waitFor([](const Snapshot& s) {
         return s.playback.state == PlaybackState::Playing && s.playback.activeBackend == Backend::Asio;
     }));
-    const Snapshot after = server_.snapshot();
     EXPECT_EQ(opened().back(), Backend::Asio);
-    EXPECT_FALSE(after.playback.error) << after.playback.errorDetail;
-    EXPECT_GE(after.playback.position, before.playback.position - 4410);
-    EXPECT_LT(after.playback.position, before.playback.position + 2 * kRate);
-    EXPECT_EQ(after.queueEntryId, before.queueEntryId);
-    EXPECT_EQ(after.queue.entries, before.queue.entries);
+    EXPECT_FALSE(server_.snapshot().playback.error) << server_.snapshot().playback.errorDetail;
 }
 
-TEST_F(OutputSwitchTest, TheQueueGoesOnToTheNextTrackOnTheNewOutput) {
+TEST_F(OutputSwitchTest, TheZoneLeftGoesOnToItsNextTrack) {
     waitUntilPlaying();
-    const auto entries = server_.snapshot().queue.entries;
-    ASSERT_EQ(entries.size(), 2U);
+    const auto before = server_.snapshot();
+    ASSERT_EQ(before.queue.entries.size(), 2U);
     switchTo(Backend::Ks, "k-dave");
     Command seek;
     seek.kind = CommandKind::Seek;
+    seek.zone = before.selectedZone;
     seek.frame = 5 * kRate;
     server_.submit(std::move(seek));
-    const uint64_t second = entries[1].id;
-    EXPECT_TRUE(waitFor([second](const Snapshot& s) { return s.queueEntryId == second; }));
+    const uint64_t second = before.queue.entries[1].id;
+    EXPECT_TRUE(waitFor([&](const Snapshot& s) { return zoneOf(s, before.selectedZone).queueEntryId == second; }));
 }
 
-TEST_F(OutputSwitchTest, WhilePausedStaysPausedAtItsPosition) {
+TEST_F(OutputSwitchTest, APausedZoneStaysPausedWhileAnotherIsSelected) {
     waitUntilPlaying();
     Command pause;
     pause.kind = CommandKind::Pause;
     server_.submit(std::move(pause));
     ASSERT_TRUE(waitFor([](const Snapshot& s) { return s.playback.state == PlaybackState::Paused; }));
-    const uint64_t position = server_.snapshot().playback.position;
+    const auto before = server_.snapshot();
     switchTo(Backend::Asio, "a-dave");
-    const Snapshot after = server_.snapshot();
-    EXPECT_EQ(after.playback.state, PlaybackState::Paused);
-    EXPECT_EQ(after.settings.backend, Backend::Asio);
-    EXPECT_NEAR(double(after.playback.position), double(position), 4410.0);
+    const auto& left = zoneOf(server_.snapshot(), before.selectedZone);
+    EXPECT_EQ(left.playback.state, PlaybackState::Paused);
+    EXPECT_NEAR(double(left.playback.position), double(before.playback.position), 4410.0);
+    EXPECT_EQ(server_.snapshot().settings.backend, Backend::Asio);
 
+    switchTo(Backend::Wasapi, "");
+    EXPECT_EQ(server_.snapshot().selectedZone, before.selectedZone);
     Command play;
     play.kind = CommandKind::Play;
     server_.submit(std::move(play));
     EXPECT_TRUE(waitFor([](const Snapshot& s) {
-        return s.playback.state == PlaybackState::Playing && s.playback.activeBackend == Backend::Asio;
+        return s.playback.state == PlaybackState::Playing && s.playback.activeBackend == Backend::Wasapi;
     }));
 }
 
@@ -698,6 +740,7 @@ TEST_F(OutputSwitchTest, BetweenTwoDevicesOfOneBackendOpensTheNewDevice) {
     waitUntilPlaying();
     const size_t opens = opened().size();
     switchTo(Backend::Wasapi, "w-dave");
+    playHere();
     ASSERT_TRUE(
         waitFor([&](const Snapshot& s) { return s.playback.state == PlaybackState::Playing && opened().size() > opens; }));
     EXPECT_EQ(server_.snapshot().settings.wasapi.deviceId, "w-dave");
@@ -1063,11 +1106,14 @@ TEST_F(OutputSwitchTest, TheNewOutputPlaysWithItsOwnDsp) {
     server_.submit(std::move(apply));
     ASSERT_TRUE(waitFor(processed));
 
+    const std::string first = server_.snapshot().selectedZone;
     switchTo(Backend::Wasapi, "w-dave");
+    playHere();
     EXPECT_TRUE(waitFor([&](const Snapshot& n) {
         return n.settings.wasapi.deviceId == "w-dave" && n.playback.state == PlaybackState::Playing && n.playback.plan &&
                !processed(n);
     }));
+    EXPECT_EQ(zoneOf(server_.snapshot(), first).playback.state, PlaybackState::Playing);
     switchTo(Backend::Wasapi, "");
     EXPECT_TRUE(waitFor(processed));
 }

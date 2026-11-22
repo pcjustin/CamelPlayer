@@ -701,9 +701,14 @@ static ZoneChoices zoneFrom(const json& z) {
 }
 
 static json outputJson(const SavedOutput& o) {
-    json j = {
-        {"backend", backendId(o.backend)},         {"id", o.id}, {"name", o.name}, {"alias", o.alias}, {"enabled", o.enabled},
-        {"volumeMode", volumeModeId(o.volumeMode)}};
+    json j = {{"backend", backendId(o.backend)},
+              {"id", o.id},
+              {"name", o.name},
+              {"alias", o.alias},
+              {"enabled", o.enabled},
+              {"volumeMode", volumeModeId(o.volumeMode)},
+              {"volumeDb", o.volumeDb},
+              {"volumeMuted", o.volumeMuted}};
     j["parameters"] = o.backend == Backend::Network    ? networkJson(o.network)
                       : o.backend == Backend::AirPlay  ? airplayJson(o.airplay)
                       : o.backend == Backend::HQPlayer ? hqplayerJson(o.hqplayer)
@@ -719,9 +724,9 @@ static json outputJson(const SavedOutput& o) {
 }
 
 // An output saved before each had its own DSP takes `shared`, the one DSP of every output then, and one saved before
-// zones `sharedZone`, the one crossfade and autoplay of every output then.
+// zones `sharedZone` and `sharedVolume`, the one crossfade, autoplay and software volume of every output then.
 static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& shared, const ZoneChoices& sharedZone,
-                                             ResampleQuality quality) {
+                                             const VolumeSettings& sharedVolume, ResampleQuality quality) {
     SavedOutput saved;
     if (!o.is_object() || !backendFromId(str(o, "backend", ""), saved.backend)) return std::nullopt;
     saved.id = str(o, "id", "");
@@ -730,6 +735,8 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
     saved.alias = str(o, "alias", "");
     saved.enabled = boolean(o, "enabled", false);
     saved.volumeMode = volumeModeFromId(str(o, "volumeMode", "fixed"));
+    saved.volumeDb = num(o, "volumeDb", sharedVolume.db, VolumeSettings::kMinDb, 0.0);
+    saved.volumeMuted = boolean(o, "volumeMuted", sharedVolume.muted);
     saved.dsp = o.contains("dsp") && o["dsp"].is_object() ? dspFrom(o["dsp"]) : shared;
     saved.zone = o.contains("zone") && o["zone"].is_object() ? zoneFrom(o["zone"]) : sharedZone;
     if (o.contains("speakers") && o["speakers"].is_array())
@@ -940,7 +947,8 @@ Settings fromJson(const std::string& text) {
         const OutputDsp shared = outputDsp(s);
         const ZoneChoices sharedZone = zoneChoices(s);
         for (const auto& item : j["outputs"])
-            if (auto output = outputFrom(item, shared, sharedZone, s.resampleQuality)) s.outputs.push_back(std::move(*output));
+            if (auto output = outputFrom(item, shared, sharedZone, s.volume, s.resampleQuality))
+                s.outputs.push_back(std::move(*output));
     }
     if (j.contains("airplayGroup") && j["airplayGroup"].is_array())
         for (const auto& id : j["airplayGroup"])

@@ -433,6 +433,10 @@ struct SavedOutput {
     AirPlaySettings airplay;
     HQPlayerSettings hqplayer;
     VolumeMode volumeMode = VolumeMode::Fixed;
+    // Its software volume, as Settings::volume holds the one in use's; one saved before zones had it takes the one level
+    // every output had then.
+    double volumeDb = 0.0;
+    bool volumeMuted = false;
     OutputDsp dsp;
     ZoneChoices zone;
     // An AirPlay stereo pair's speakers by their own device IDs, which stay when pairing it again gives it a new ID.

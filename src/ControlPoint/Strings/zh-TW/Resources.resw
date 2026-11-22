@@ -733,8 +733,8 @@
   <data name="Discord_CoverFailed" xml:space="preserve"><value>封面通道無法使用：{0}</value></data>
   <data name="Settings_Outputs.Text" xml:space="preserve"><value>音訊輸出</value></data>
   <data name="Settings_OutputsNote.Text" xml:space="preserve"><value>開啟的輸出會列在播放列的輸出選單，播放中也能在那裡切換。每個輸出都有自己的設定，按該列的齒輪就能開啟。</value></data>
-  <data name="Output_Button.ToolTipService.ToolTip" xml:space="preserve"><value>輸出</value></data>
-  <data name="Output_ButtonName" xml:space="preserve"><value>輸出：{0}</value></data>
+  <data name="Output_Button.ToolTipService.ToolTip" xml:space="preserve"><value>區域</value></data>
+  <data name="Output_ButtonName" xml:space="preserve"><value>區域：{0}</value></data>
   <data name="Output_ButtonOn" xml:space="preserve"><value>{0}：{1}</value></data>
   <data name="Output_InUse" xml:space="preserve"><value>使用中</value></data>
   <data name="Output_Enabled" xml:space="preserve"><value>顯示在輸出選單</value></data>
@@ -745,13 +745,37 @@
   <data name="Output_RenameTitle" xml:space="preserve"><value>重新命名 {0}</value></data>
   <data name="Output_RenameNote" xml:space="preserve"><value>留空則使用裝置本身的名稱</value></data>
   <data name="Output_Delete" xml:space="preserve"><value>刪除</value></data>
+  <data name="Output_TurnOffTitle" xml:space="preserve"><value>要關閉 {0} 嗎？</value></data>
+  <data name="Output_TurnOffText" xml:space="preserve"><value>它正在播放。關閉後會停止並離開輸出選單；它的佇列會保留，等再開啟時使用。</value></data>
+  <data name="Output_TurnOff" xml:space="preserve"><value>關閉</value></data>
+  <data name="Output_DeleteQueueText" xml:space="preserve"><value>它的設定、名稱和輸出選單中的位置都會清除，它的佇列也會刪除。之後再找到時，會從預設值開始。</value></data>
+  <data name="Output_DeleteKeepQueue" xml:space="preserve"><value>先把它的佇列存成播放清單</value></data>
+  <data name="Output_DeletedQueueName" xml:space="preserve"><value>{0} 的佇列</value></data>
+  <data name="Output_Zone" xml:space="preserve"><value>它的區域</value></data>
+  <data name="Output_ZoneAutoplay" xml:space="preserve"><value>佇列播完時</value></data>
+  <data name="Output_ZoneAutoplayOn" xml:space="preserve"><value>從音樂庫隨機繼續播放</value></data>
+  <data name="Output_ZoneAutoplayOff" xml:space="preserve"><value>停止</value></data>
+  <data name="Output_ZoneCrossfade" xml:space="preserve"><value>淡入淡出</value></data>
+  <data name="Output_ZoneCrossfadeOn" xml:space="preserve"><value>換曲時讓曲目交疊</value></data>
+  <data name="Output_ZoneCrossfadeSeconds" xml:space="preserve"><value>長度（秒）</value></data>
   <data name="Output_DeleteTitle" xml:space="preserve"><value>要刪除 {0} 的設定嗎？</value></data>
   <data name="Output_DeleteText" xml:space="preserve"><value>它的設定、名稱和輸出選單中的位置都會清除。之後再找到時，會從預設值開始。</value></data>
   <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
   <data name="Output_Unsupported" xml:space="preserve"><value>{0}（不支援）</value></data>
   <data name="Output_InUseUnsupported" xml:space="preserve"><value>使用中；{0}</value></data>
+  <data name="Zone_PickerName" xml:space="preserve"><value>區域</value></data>
+  <data name="Zone_GroupHeading" xml:space="preserve"><value>這個群組的接收器</value></data>
+  <data name="Zone_PauseAll" xml:space="preserve"><value>全部暫停</value></data>
+  <data name="Zone_Offline" xml:space="preserve"><value>未連線</value></data>
+  <data name="Zone_InUseBy" xml:space="preserve"><value>{0} 正在使用</value></data>
+  <data name="Zone_RowName" xml:space="preserve"><value>{0}：{1}，{2}</value></data>
+  <data name="Zone_RowSelectedName" xml:space="preserve"><value>{0}，已選取：{1}，{2}</value></data>
+  <data name="Zone_NoTrack" xml:space="preserve"><value>沒有排入曲目</value></data>
+  <data name="Zone_PlayName" xml:space="preserve"><value>{0} {1}</value></data>
+  <data name="Zone_VolumeName" xml:space="preserve"><value>{0} 的音量</value></data>
+  <data name="Zone_SettingsFor" xml:space="preserve"><value>下方的自動播放與淡入淡出屬於 {0}，也就是目前選取的區域。每個區域各自保留。</value></data>
   <data name="Output_MenuSettings" xml:space="preserve"><value>音訊輸出設定…</value></data>
-  <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>輸出</value></data>
+  <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>區域</value></data>
   <data name="Settings_AboutAirPlay.Text" xml:space="preserve"><value>AirPlay 是 Apple Inc. 的商標。</value></data>
   <data name="Output_AirPlayEncrypted" xml:space="preserve"><value>不支援：只接受加密音訊</value></data>
   <data name="Output_AirPlayPassword" xml:space="preserve"><value>需要密碼：開啟後輸入</value></data>

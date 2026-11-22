@@ -119,7 +119,7 @@ std::string partsReadBackOtherwise(const SettingsDto& sent, const SettingsDto& b
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::DeleteOutput)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::PauseAll)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -843,35 +843,23 @@ private:
     }
 
     // Brings the zones in line with the settings: a zone for each output wanted, each engine given its output's settings.
-    // A change of the output in use takes the selected zone's queue and playback to the new output, which plays on from
-    // the audible position as the output menu has always done; what the new output's zone held is dropped, and the output
-    // left gets an empty zone (MZ-R07 and MZ-R09 make choosing a zone and moving a queue two things).
+    // A change of the output in use selects that output's zone, every zone keeping its queue and playback (MZ-R07); an
+    // output in use that became another, as a player back under a new identity or a receiver paired into a stereo pair,
+    // takes its zone along.
     void syncZones() {
         const auto wanted = wantedZones();
         const auto& inUse = *std::ranges::find_if(wanted, &OutputRow::selected);
         std::vector<Zone*> emptied; // their queues take their outputs' shuffle and repeat
-        Zone* moved = nullptr;      // its queue keeps its own, which become its new output's
-        const auto find = [this](Backend backend, const std::string& output) -> Zone* {
-            const auto id = zoneId(backend, output);
-            const auto found = std::ranges::find(zones_, id, &Zone::id);
-            return found == zones_.end() ? nullptr : found->get();
-        };
         std::vector<Zone*> created; // their saved queues are read back once the start's were
+        Zone* moved = nullptr;      // its queue keeps its own, which become its new output's
         std::unique_lock zones(zonesMutex_);
-        if (selected_ && (selected_->backend != inUse.backend || selected_->output != inUse.id)) {
+        const auto wants = [&](Backend backend, const std::string& output) {
+            return std::ranges::any_of(wanted, [&](const OutputRow& row) { return row.backend == backend && row.id == output; });
+        };
+        if (selected_ && (selected_->backend != inUse.backend || selected_->output != inUse.id) &&
+            !wants(selected_->backend, selected_->output) &&
+            std::ranges::none_of(zones_, [&](const auto& z) { return z->backend == inUse.backend && z->output == inUse.id; })) {
             const std::string from = selected_->id, to = zoneId(inUse.backend, inUse.id);
-            if (Zone* taken = find(inUse.backend, inUse.id)) {
-                zones.unlock();
-                finishWrite(*taken);
-                emptyZone(*taken);
-                zones.lock();
-                setKey(*taken, selected_->backend, selected_->output);
-                taken->saved = {};
-                taken->savedRows.clear();
-                taken->sessionRestored = true;
-                emptied.push_back(taken);
-            }
-            // The saved queue goes with the queue; the new output's own was dropped with it.
             finishWrite(*selected_);
             if (library_) library_->write([from, to](sqlite::Database& db) { moveSession(db, from, to); });
             setKey(*selected_, inUse.backend, inUse.id);
@@ -922,7 +910,10 @@ private:
                 ordered.back()->state.name = row.name;
                 zonesChanged_ = true;
             }
-            if (row.selected) selected_ = ordered.back().get();
+            if (row.selected && selected_ != ordered.back().get()) {
+                selected_ = ordered.back().get();
+                zonesChanged_ = true;
+            }
         }
         zones_ = std::move(ordered);
         zones.unlock();
@@ -1455,6 +1446,10 @@ private:
                 break;
             case CommandKind::DeleteOutput:
                 deleteSavedOutput(c.zone);
+                break;
+            case CommandKind::PauseAll:
+                for (auto& zone : zones_)
+                    if (zone->engine->snapshot().state == audio::PlayState::Playing) zone->engine->pause();
                 break;
             case CommandKind::ShowAirPlayCode:
                 defer([this, id = c.receiver] { showAirPlayCode(id); });

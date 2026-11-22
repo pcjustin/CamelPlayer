@@ -131,7 +131,8 @@ enum class CommandKind : uint8_t {
     SetReceiverVolume, // receiver + playerVolume: one receiver of the AirPlay group in use
     ShowAirPlayCode,   // receiver: one that pairs with a code shows it
     PairAirPlay,       // receiver + code: pairs with the password or code the user typed
-    DeleteOutput       // zone: the output it names, enabled or not; its zone's queue goes and a zone playing stops
+    DeleteOutput,      // zone: the output it names, enabled or not; its zone's queue goes and a zone playing stops
+    PauseAll           // every zone playing pauses
 };
 
 struct Command {

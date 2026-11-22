@@ -33,6 +33,9 @@ SavedOutput& savedOutput(Settings& s, Backend backend, const std::string& id) {
     const auto found = std::ranges::find_if(s.outputs, [&](const SavedOutput& o) { return o.backend == backend && o.id == id; });
     if (found != s.outputs.end()) return *found;
     SavedOutput added = newOutput(backend);
+    // A new output starts at the level playing now rather than at full volume.
+    added.volumeDb = s.volume.db;
+    added.volumeMuted = s.volume.muted;
     setId(added, id);
     return s.outputs.emplace_back(std::move(added));
 }
@@ -59,6 +62,8 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
     if (id.empty()) return;
     SavedOutput& saved = savedOutput(s, backend, id);
     saved.volumeMode = s.volume.mode;
+    saved.volumeDb = s.volume.db;
+    saved.volumeMuted = s.volume.muted;
     saved.dsp = outputDsp(s);
     saved.zone = zoneChoices(s);
     if (backend == Backend::Asio)
@@ -85,6 +90,10 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     s.backend = backend;
     s.volume.mode = source.volumeMode;
     if (isNetworkPlayer(backend) && s.volume.mode == VolumeMode::Software) s.volume.mode = VolumeMode::Player;
+    if (saved) {
+        s.volume.db = saved->volumeDb;
+        s.volume.muted = saved->volumeMuted;
+    }
     setOutputDsp(s, source.dsp);
     setZoneChoices(s, source.zone);
     if (backend == Backend::Asio) {
@@ -266,6 +275,13 @@ bool needsFirewallRule(const OutputRow& row) {
 
 void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     if (devices.revision == 0) return;
+    // In the order the scan found them, which the output menu and the zone picker show before the next scan too.
+    const auto found = [&](const SavedOutput& o) {
+        const auto& list = devicesOf(devices, o.backend);
+        const auto at = std::ranges::find(list, o.id, &DeviceInfo::id);
+        return std::pair(int(o.backend), at == list.end() ? list.size() : size_t(at - list.begin()));
+    };
+    std::ranges::stable_sort(s.outputs, {}, found);
     adoptSets(s, devices);
     followRepairedPairs(s, devices);
     mergePairedSpeakers(s, devices);
@@ -329,6 +345,8 @@ void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, 
     const bool inUse = s.backend == backend && selectedId(s) == id;
     if (inUse) {
         setOutputDsp(s, outputDsp(edited));
+        s.crossfade = edited.crossfade;
+        s.autoplay = edited.autoplay;
         if (backend == Backend::Asio)
             s.asio = edited.asio;
         else if (backend == Backend::Ks)
@@ -349,6 +367,8 @@ void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, 
     kept.outputs = s.outputs;
     const SavedOutput* saved = findOutput(s, backend, device);
     kept.volume.mode = saved ? saved->volumeMode : newOutput(backend).volumeMode;
+    kept.volume.db = saved ? saved->volumeDb : s.volume.db;
+    kept.volume.muted = saved ? saved->volumeMuted : s.volume.muted;
     // The queue's, which may have changed while the dialog was open.
     kept.shuffle = saved ? saved->zone.shuffle : false;
     kept.repeat = saved ? saved->zone.repeat : RepeatMode::Off;

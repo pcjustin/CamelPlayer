@@ -670,8 +670,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     auto moved = shown_;
     moved.revision = snapshot.revision;
     moved.playback.position = snapshot.playback.position;
+    if (moved.zones.size() == snapshot.zones.size())
+        for (size_t i = 0; i < moved.zones.size(); ++i) {
+            moved.zones[i].playback.position = snapshot.zones[i].playback.position;
+        }
     const bool onlyMoved = moved == snapshot;
     shown_ = snapshot;
+    if (!onlyMoved) showZoneRows(snapshot);
     if (onlyMoved) {
         const auto [pos, total] = showPosition(snapshot.playback);
         if (media_) media_->showPosition(pos, total);
@@ -757,8 +762,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         camel::log::info("measure: queue of %zu entries shown %.0f ms after process start", snapshot.queue.entries.size(),
                          camel::measure::sinceProcessStart());
     }
-    if (shownQueueRevision_ != snapshot.queue.revision || shownQueueMarks_ != snapshot.queue.marks) {
+    // Each zone's queue counts its own revisions, so another zone selected shows its queue whatever its revision.
+    if (shownQueueRevision_ != snapshot.queue.revision || shownQueueMarks_ != snapshot.queue.marks ||
+        shownQueueZone_ != snapshot.selectedZone) {
         shownQueueRevision_ = snapshot.queue.revision;
+        shownQueueZone_ = snapshot.selectedZone;
         shownQueueMarks_ = snapshot.queue.marks;
         shownQueueEntryId_ = snapshot.queueEntryId;
         const bool windowed = snapshot.queue.entries.size() > ui::QueueCollection::kShown;

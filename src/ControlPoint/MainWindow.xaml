@@ -411,6 +411,7 @@
                                     <FontIcon Glyph="&#xE768;" FontSize="20" />
                                     <TextBlock x:Uid="Settings_Playback" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
+                                <TextBlock x:Name="PlaybackZoneText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock x:Uid="Settings_ApplyNote" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ComboBox x:Name="ConvertCombo" x:Uid="Settings_Convert" Width="520" SelectionChanged="OnSettingChanged" />
                                 <ComboBox x:Name="ResampleQualityCombo" x:Uid="Settings_ResampleQuality" Width="360" SelectionChanged="OnSettingChanged" />
@@ -468,6 +469,7 @@
                                     <FontIcon Glyph="&#xE8D6;" FontSize="20" />
                                     <TextBlock x:Uid="Settings_Crossfade" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
+                                <TextBlock x:Name="CrossfadeZoneText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ToggleSwitch x:Name="CrossfadeSwitch" x:Uid="Settings_CrossfadeSwitch" Toggled="OnCrossfadeToggled" />
                                 <NumberBox x:Name="CrossfadeSecondsBox" x:Uid="Settings_CrossfadeSeconds" Width="170" HorizontalAlignment="Left"
                                            Minimum="1" Maximum="10" SmallChange="0.5" LargeChange="1" SpinButtonPlacementMode="Compact"

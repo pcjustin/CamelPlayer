@@ -7,9 +7,11 @@
 #include "MainWindow.xaml.h"
 #include "MainWindowParts.h"
 
+#include <filesystem>
 #include <utility>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 
+#include "ArtworkLoader.h"
 #include "DialogPlacement.h"
 #include "UiText.h"
 #include "Common/settings/Settings.h"
@@ -111,6 +113,10 @@ void MainWindow::populateOutputs() {
         const hstring forOutput = ui::format(L"Dsp_ForOutput", {std::wstring(dspOutputLabel_)});
         DspOutputText().Text(forOutput);
         VolumeOutputText().Text(forOutput);
+        // Autoplay and crossfade are the selected zone's, as its output keeps them.
+        const hstring forZone = ui::format(L"Zone_SettingsFor", {std::wstring(dspOutputLabel_)});
+        PlaybackZoneText().Text(forZone);
+        CrossfadeZoneText().Text(forZone);
         const hstring dspName = ui::format(L"Dsp_ButtonForOutput", {std::wstring(dspOutputLabel_)});
         setBadgeTip(DspButton(), dspName, dspName);
     }
@@ -253,6 +259,10 @@ void MainWindow::populateOutputs() {
                 });
                 return;
             }
+            if (!on && zonePlays(row)) {
+                askTurnOffOutput(row, label);
+                return;
+            }
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                 camel::server::setOutputEnabled(s, row.backend, row.id, on, devices);
             });
@@ -361,6 +371,7 @@ winrt::fire_and_forget MainWindow::showOutputSettings(Backend backend, std::stri
     ScrollViewer scroller;
     StackPanel content;
     content.Children().Append(panel);
+    content.Children().Append(outputZoneSection(editing));
     content.Children().Append(outputDspSection(editing, rows));
     scroller.Content(content);
     panel.Padding(ThicknessHelper::FromLengths(0, 0, 16, 0));
@@ -422,6 +433,58 @@ StackPanel MainWindow::outputDspSection(const OutputEdit& editing, const std::ve
     allOff.Content(box_value(tr(L"Output_DspAllOff")));
     allOff.Click([this](auto&&, auto&&) { changeOutputDsp({}); });
     section.Children().Append(allOff);
+    return section;
+}
+
+// The dialog's zone: what its output's zone does when the queue ends and at track changes (MZ-R07).
+StackPanel MainWindow::outputZoneSection(const OutputEdit& editing) {
+    StackPanel section;
+    section.Spacing(8);
+    section.Margin(ThicknessHelper::FromLengths(0, 16, 16, 0));
+    TextBlock header;
+    header.Text(tr(L"Output_Zone"));
+    header.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
+    section.Children().Append(header);
+    ToggleSwitch autoplay;
+    autoplay.Header(box_value(tr(L"Output_ZoneAutoplay")));
+    autoplay.OnContent(box_value(tr(L"Output_ZoneAutoplayOn")));
+    autoplay.OffContent(box_value(tr(L"Output_ZoneAutoplayOff")));
+    autoplay.IsOn(editing.parameters.autoplay);
+    autoplay.Toggled([this](Windows::Foundation::IInspectable const& sender, auto&&) {
+        if (!editingOutput_) return;
+        editingOutput_->parameters.autoplay = sender.as<ToggleSwitch>().IsOn();
+        settingsChanged();
+    });
+    section.Children().Append(autoplay);
+    ToggleSwitch crossfade;
+    crossfade.Header(box_value(tr(L"Output_ZoneCrossfade")));
+    crossfade.OnContent(box_value(tr(L"Output_ZoneCrossfadeOn")));
+    crossfade.OffContent(box_value(tr(L"Output_ZoneCrossfadeOn")));
+    crossfade.IsOn(editing.parameters.crossfade.enabled);
+    NumberBox seconds;
+    seconds.Header(box_value(tr(L"Output_ZoneCrossfadeSeconds")));
+    seconds.Minimum(camel::CrossfadeSettings::kMinSeconds);
+    seconds.Maximum(camel::CrossfadeSettings::kMaxSeconds);
+    seconds.SmallChange(0.5);
+    seconds.SpinButtonPlacementMode(NumberBoxSpinButtonPlacementMode::Inline);
+    seconds.Width(170);
+    seconds.HorizontalAlignment(HorizontalAlignment::Left);
+    seconds.Value(editing.parameters.crossfade.seconds);
+    seconds.IsEnabled(editing.parameters.crossfade.enabled);
+    crossfade.Toggled([this, weak = winrt::make_weak(seconds)](Windows::Foundation::IInspectable const& sender, auto&&) {
+        if (!editingOutput_) return;
+        editingOutput_->parameters.crossfade.enabled = sender.as<ToggleSwitch>().IsOn();
+        if (const auto box = weak.get()) box.IsEnabled(editingOutput_->parameters.crossfade.enabled);
+        settingsChanged();
+    });
+    seconds.ValueChanged([this](NumberBox const& box, auto&&) {
+        if (!editingOutput_ || std::isnan(box.Value())) return;
+        editingOutput_->parameters.crossfade.seconds = std::clamp(
+            std::round(box.Value() * 2) / 2, camel::CrossfadeSettings::kMinSeconds, camel::CrossfadeSettings::kMaxSeconds);
+        settingsChanged();
+    });
+    section.Children().Append(crossfade);
+    section.Children().Append(seconds);
     return section;
 }
 
@@ -636,96 +699,381 @@ winrt::fire_and_forget MainWindow::askAirPlayPairing(camel::server::OutputRow ro
         populateOutputs(); // a switch turned on goes back off
 }
 
-winrt::fire_and_forget MainWindow::askDeleteOutput(Backend backend, std::string id, hstring label) {
+// Whether the zone of `row` plays now, which turning the output off stops.
+bool MainWindow::zonePlays(const camel::server::OutputRow& row) const {
+    const auto snapshot = server_->snapshot();
+    const auto zone = std::ranges::find(snapshot.zones, zoneId(row.backend, row.id), &ZoneSnapshot::id);
+    return zone != snapshot.zones.end() && zone->playback.state == PlaybackState::Playing;
+}
+
+// Turning off an output whose zone plays asks once; its queue stays for when it is turned on again.
+winrt::fire_and_forget MainWindow::askTurnOffOutput(camel::server::OutputRow row, hstring label) {
     auto strong = get_strong();
     ContentDialog dialog;
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
-    dialog.Title(box_value(ui::format(L"Output_DeleteTitle", {std::wstring(label)})));
+    dialog.Title(box_value(ui::format(L"Output_TurnOffTitle", {std::wstring(label)})));
     TextBlock explanation;
-    explanation.Text(tr(L"Output_DeleteText"));
+    explanation.Text(tr(L"Output_TurnOffText"));
     explanation.TextWrapping(TextWrapping::Wrap);
     dialog.Content(explanation);
+    dialog.PrimaryButtonText(tr(L"Output_TurnOff"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Close);
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) {
+        populateOutputs(); // the switch goes back on
+        co_return;
+    }
+    changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+        camel::server::setOutputEnabled(s, row.backend, row.id, false, devices);
+    });
+}
+
+// Deleting an output deletes its zone's queue too, which the dialog offers to keep as a playlist first.
+winrt::fire_and_forget MainWindow::askDeleteOutput(Backend backend, std::string id, hstring label) {
+    auto strong = get_strong();
+    const std::string zone = zoneId(backend, id);
+    const auto snapshot = server_->snapshot();
+    const auto found = std::ranges::find(snapshot.zones, zone, &ZoneSnapshot::id);
+    const bool queued = found != snapshot.zones.end() && !found->queue.entries.empty();
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"Output_DeleteTitle", {std::wstring(label)})));
+    StackPanel content;
+    content.Spacing(12);
+    TextBlock explanation;
+    explanation.Text(tr(queued ? L"Output_DeleteQueueText" : L"Output_DeleteText"));
+    explanation.TextWrapping(TextWrapping::Wrap);
+    content.Children().Append(explanation);
+    CheckBox keep;
+    keep.Content(box_value(tr(L"Output_DeleteKeepQueue")));
+    if (queued) content.Children().Append(keep);
+    dialog.Content(content);
     dialog.PrimaryButtonText(tr(L"Output_Delete"));
     dialog.CloseButtonText(tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Close);
     if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
-    changeOutputs(
-        [&](camel::Settings& s, const DeviceCatalog& devices) { camel::server::deleteOutput(s, backend, id, devices); });
-    populateSettings();
+    if (queued && keep.IsChecked().Value()) {
+        const auto name = toUtf8(std::wstring(ui::format(L"Output_DeletedQueueName", {std::wstring(label)})));
+        auto server = server_;
+        winrt::apartment_context ui;
+        co_await resume_background();
+        std::optional<PlaylistChange> change;
+        try {
+            change = server->saveQueueAsPlaylist(name, zone);
+        } catch (const std::exception& e) {
+            camel::log::warn("save queue as playlist: %s", e.what());
+        }
+        co_await ui;
+        if (!change) {
+            showPlaylistNotice(tr(L"Queue_SaveFailed"), {}, true);
+            co_return; // nothing is deleted with its queue unsaved
+        }
+        showPlaylistChange(*change, true);
+    }
+    Command remove;
+    remove.kind = CommandKind::DeleteOutput;
+    remove.zone = zone;
+    submitCommand(std::move(remove));
 }
 
-// A new menu at every opening, and the mouse chooses on its press: WinUI at times leaves a menu where a click only
-// draws the item pressed, for the rest of the session, while the keyboard still chooses.
+// The zone picker (docs/Plan.md §5.12, §8.1): a row for each zone in the output menu's order, with its cover, track,
+// state, play or pause and volume; a click on a row selects its zone, which the whole window follows. Under the rows, the
+// receivers of the selected AirPlay group join and leave it, and Pause all pauses every zone.
 void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
-    MenuFlyout menu;
-    menu.Placement(Primitives::FlyoutPlacementMode::Top);
-    const winrt::weak_ref<MenuFlyout> weakMenu = menu;
-    const auto chosen = std::make_shared<bool>(false);
-    const auto add = [&](MenuFlyoutItem const& item, std::function<void()> choose) {
-        const auto once = [weakMenu, chosen, choose = std::move(choose)] {
-            if (*chosen) return;
-            *chosen = true;
-            if (const auto shown = weakMenu.get()) shown.Hide();
-            choose();
-        };
-        item.Click([once](auto&&, auto&&) { once(); });
-        item.AddHandler(UIElement::PointerPressedEvent(),
-                        box_value(Input::PointerEventHandler([once](auto&&, Input::PointerRoutedEventArgs const& e) {
-                            if (e.Pointer().PointerDeviceType() == Microsoft::UI::Input::PointerDeviceType::Mouse &&
-                                e.GetCurrentPoint(nullptr).Properties().IsLeftButtonPressed())
-                                once();
-                        })),
-                        true);
-        menu.Items().Append(item);
-    };
-    const auto rows = camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices);
-    const auto grouped = std::ranges::count_if(rows, &camel::server::OutputRow::grouped);
-    for (const auto& row : rows) {
-        if (!row.enabled) continue;
-        if (row.backend == Backend::AirPlay && settings_.backend == Backend::AirPlay) {
-            // Receivers join and leave the group in use; the last one stays.
-            ToggleMenuFlyoutItem item;
-            item.Text(outputMenuText(row));
-            item.IsChecked(row.grouped);
-            item.IsEnabled(row.connected && (!row.grouped || grouped >= 2));
-            add(item, [this, row] {
-                const auto join = [this, row] {
+    if (zonePicker_) zonePicker_.Hide();
+    Flyout picker;
+    picker.Placement(Primitives::FlyoutPlacementMode::Top);
+    zonePicker_ = picker;
+    zoneRows_.clear();
+    StackPanel content;
+    content.Spacing(4);
+    content.MinWidth(380);
+    content.MaxWidth(460);
+    Automation::AutomationProperties::SetName(content, tr(L"Zone_PickerName"));
+    const auto snapshot = server_->snapshot();
+    const auto outputs = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
+    StackPanel rows;
+    rows.Spacing(2);
+    for (const auto& zone : snapshot.zones) {
+        const auto output = std::ranges::find_if(
+            outputs, [&](const camel::server::OutputRow& o) { return o.backend == zone.backend && o.id == zone.output; });
+        if (output == outputs.end()) continue;
+        ZoneRow row;
+        row.zone = zone.id;
+        row.output = *output;
+        if (const auto saved = std::ranges::find_if(
+                settings_.outputs, [&](const camel::SavedOutput& o) { return o.backend == zone.backend && o.id == zone.output; });
+            saved != settings_.outputs.end()) {
+            row.volumeMode = saved->volumeMode;
+            row.volumeDb = saved->volumeDb;
+        }
+        Grid grid;
+        grid.ColumnSpacing(8);
+        for (const auto width :
+             {GridLengthHelper::FromValueAndType(1, GridUnitType::Star), GridLengthHelper::Auto(), GridLengthHelper::Auto()}) {
+            ColumnDefinition column;
+            column.Width(width);
+            grid.ColumnDefinitions().Append(column);
+        }
+        Grid face;
+        face.ColumnSpacing(10);
+        for (const auto width :
+             {GridLengthHelper::Auto(), GridLengthHelper::Auto(), GridLengthHelper::FromValueAndType(1, GridUnitType::Star)}) {
+            ColumnDefinition column;
+            column.Width(width);
+            face.ColumnDefinitions().Append(column);
+        }
+        row.mark = Shapes::Rectangle();
+        row.mark.Width(3);
+        row.mark.RadiusX(1.5);
+        row.mark.RadiusY(1.5);
+        row.mark.Fill(themeBrush(L"AccentFillColorDefaultBrush"));
+        face.Children().Append(row.mark);
+        Border frame;
+        frame.Width(40);
+        frame.Height(40);
+        frame.CornerRadius(CornerRadiusHelper::FromUniformRadius(4));
+        row.cover = Image();
+        row.cover.Stretch(Media::Stretch::UniformToFill);
+        frame.Child(row.cover);
+        Grid::SetColumn(frame, 1);
+        face.Children().Append(frame);
+        StackPanel texts;
+        texts.VerticalAlignment(VerticalAlignment::Center);
+        row.title = TextBlock();
+        row.title.TextTrimming(TextTrimming::CharacterEllipsis);
+        row.detail = TextBlock();
+        row.detail.TextTrimming(TextTrimming::CharacterEllipsis);
+        row.detail.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        row.detail.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
+        texts.Children().Append(row.title);
+        texts.Children().Append(row.detail);
+        Grid::SetColumn(texts, 2);
+        face.Children().Append(texts);
+        row.select = Button();
+        row.select.Content(face);
+        row.select.HorizontalAlignment(HorizontalAlignment::Stretch);
+        row.select.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+        row.select.Background(Media::SolidColorBrush(Microsoft::UI::Colors::Transparent()));
+        row.select.BorderThickness(ThicknessHelper::FromUniformLength(0));
+        row.select.Padding(ThicknessHelper::FromLengths(4, 4, 4, 4));
+        row.select.Click([this, id = zone.id](auto&&, auto&&) { selectZone(id); });
+        grid.Children().Append(row.select);
+        row.playIcon = SymbolIcon(Symbol::Play);
+        row.playPause = Button();
+        row.playPause.Content(row.playIcon);
+        row.playPause.VerticalAlignment(VerticalAlignment::Center);
+        row.playPause.Style(PlayPauseButton().Style());
+        row.playPause.Click([this, id = zone.id](auto&&, auto&&) {
+            Command command;
+            command.kind = CommandKind::TogglePause;
+            command.zone = id;
+            submitCommand(std::move(command));
+        });
+        Grid::SetColumn(row.playPause, 1);
+        grid.Children().Append(row.playPause);
+        row.volume = Slider();
+        row.volume.Width(96);
+        row.volume.VerticalAlignment(VerticalAlignment::Center);
+        row.volume.ValueChanged([this, id = zone.id](auto&&, Primitives::RangeBaseValueChangedEventArgs const& e) {
+            if (!showingZones_) changeZoneVolume(id, e.NewValue());
+        });
+        Grid::SetColumn(row.volume, 2);
+        grid.Children().Append(row.volume);
+        rows.Children().Append(grid);
+        zoneRows_.push_back(std::move(row));
+    }
+    content.Children().Append(rows);
+    // The selected AirPlay group's receivers, which join and leave it; the last one stays.
+    if (settings_.backend == Backend::AirPlay) {
+        const auto grouped = std::ranges::count_if(outputs, &camel::server::OutputRow::grouped);
+        StackPanel receivers;
+        for (const auto& output : outputs) {
+            if (!output.enabled || output.backend != Backend::AirPlay || output.selected) continue;
+            CheckBox join;
+            join.Content(box_value(outputMenuText(output)));
+            join.IsChecked(output.grouped);
+            join.IsEnabled(output.connected && (!output.grouped || grouped >= 2));
+            join.Click([this, output](auto&&, auto&&) {
+                const auto change = [this, output] {
                     changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
-                        camel::server::setInAirPlayGroup(s, row.id, !row.grouped, devices);
+                        camel::server::setInAirPlayGroup(s, output.id, !output.grouped, devices);
                     });
                     populateSettings();
+                    if (zonePicker_) zonePicker_.Hide();
                 };
-                if (pairable(row) && !row.grouped)
-                    askAirPlayPairing(row, outputLabel(row), join);
+                if (pairable(output) && !output.grouped)
+                    askAirPlayPairing(output, outputLabel(output), change);
                 else
-                    join();
+                    change();
             });
-            continue;
+            receivers.Children().Append(join);
         }
-        RadioMenuFlyoutItem item;
-        item.GroupName(L"Outputs");
-        item.Text(outputMenuText(row));
-        item.IsChecked(row.selected);
-        item.IsEnabled(row.connected);
-        add(item, [this, row] {
-            const auto select = [this, row] {
-                if (row.selected) return;
-                changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
-                    camel::server::selectOutput(s, row.backend, row.id, devices);
-                });
-                populateSettings();
-            };
-            if (pairable(row))
-                askAirPlayPairing(row, outputLabel(row), select);
-            else
-                select();
-        });
+        if (receivers.Children().Size()) {
+            TextBlock heading;
+            heading.Text(tr(L"Zone_GroupHeading"));
+            heading.Style(Application::Current().Resources().Lookup(box_value(L"BodyStrongTextBlockStyle")).as<Style>());
+            heading.Margin(ThicknessHelper::FromLengths(4, 8, 0, 0));
+            content.Children().Append(heading);
+            receivers.Margin(ThicknessHelper::FromLengths(4, 0, 0, 0));
+            content.Children().Append(receivers);
+        }
     }
-    menu.Items().Append(MenuFlyoutSeparator());
-    MenuFlyoutItem open;
-    open.Text(tr(L"Output_MenuSettings"));
-    add(open, [this] { showSettingsCard(OutputsCard()); });
-    menu.ShowAt(OutputButton());
+    Grid foot;
+    foot.Margin(ThicknessHelper::FromLengths(0, 8, 0, 0));
+    pauseAllButton_ = Button();
+    pauseAllButton_.Content(box_value(tr(L"Zone_PauseAll")));
+    pauseAllButton_.Click([this](auto&&, auto&&) {
+        Command command;
+        command.kind = CommandKind::PauseAll;
+        submitCommand(std::move(command));
+    });
+    foot.Children().Append(pauseAllButton_);
+    HyperlinkButton open;
+    open.Content(box_value(tr(L"Output_MenuSettings")));
+    open.HorizontalAlignment(HorizontalAlignment::Right);
+    open.Click([this](auto&&, auto&&) {
+        if (zonePicker_) zonePicker_.Hide();
+        showSettingsCard(OutputsCard());
+    });
+    foot.Children().Append(open);
+    content.Children().Append(foot);
+    picker.Content(content);
+    // One closing as the next opens leaves the next one's rows.
+    picker.Closed([this, weak = winrt::make_weak(picker)](auto&&, auto&&) {
+        if (zonePicker_ != weak.get()) return;
+        zonePicker_ = nullptr;
+        zoneRows_.clear();
+        pauseAllButton_ = nullptr;
+    });
+    showZoneRows(snapshot);
+    picker.ShowAt(OutputButton());
+}
+
+// What each row shows as the zones play: the selected one marked, its track, its state or why it cannot play, and its
+// volume where the zone has one of its own to set.
+void MainWindow::showZoneRows(const Snapshot& snapshot) {
+    if (!zonePicker_) return;
+    showingZones_ = true;
+    bool anyPlaying = false;
+    for (auto& row : zoneRows_) {
+        const auto found = std::ranges::find(snapshot.zones, row.zone, &ZoneSnapshot::id);
+        if (found == snapshot.zones.end()) continue;
+        const ZoneSnapshot& zone = *found;
+        const bool selected = zone.id == snapshot.selectedZone;
+        const auto& p = zone.playback;
+        anyPlaying = anyPlaying || p.state == PlaybackState::Playing;
+        const auto entry = std::ranges::find(zone.queue.entries, zone.queueEntryId, &QueueEntry::id);
+        const bool hasEntry = entry != zone.queue.entries.end();
+        const hstring name = outputMenuLabel(row.output);
+        hstring track;
+        if (hasEntry) {
+            track = ui::utf8(entry->title.empty() ? std::filesystem::path(toWide(entry->source.pathUtf8())).stem().string()
+                                                  : entry->title);
+            if (!entry->artist.empty()) track = track + L" · " + ui::utf8(entry->artist);
+        }
+        const hstring state = !row.output.connected ? tr(L"Zone_Offline")
+                              : !zone.inUseBy.empty()
+                                  ? ui::format(L"Zone_InUseBy", {std::wstring(zoneName(snapshot, zone.inUseBy))})
+                              : p.error            ? ui::errorTitle(*p.error)
+                              : p.bufferingSeconds ? ui::format(L"State_Buffering", {std::to_wstring(*p.bufferingSeconds)})
+                              : p.state == PlaybackState::Playing ? tr(L"State_Playing")
+                              : p.state == PlaybackState::Paused  ? tr(L"State_Paused")
+                                                                  : tr(L"State_Stopped");
+        row.title.Text(name);
+        row.title.FontWeight(selected ? Microsoft::UI::Text::FontWeights::SemiBold()
+                                      : Microsoft::UI::Text::FontWeights::Normal());
+        row.detail.Text(track.empty() ? state : track + L" · " + state);
+        row.mark.Opacity(selected ? 1.0 : 0.0);
+        row.select.IsEnabled(row.output.connected);
+        Automation::AutomationProperties::SetName(
+            row.select,
+            ui::format(selected ? L"Zone_RowSelectedName" : L"Zone_RowName",
+                       {std::wstring(name), std::wstring(track.empty() ? tr(L"Zone_NoTrack") : track), std::wstring(state)}));
+        if (const std::string cover = hasEntry ? entry->source.pathUtf8() : std::string(); cover != row.coverPath) {
+            row.coverPath = cover;
+            row.cover.Source(nullptr);
+            if (!cover.empty()) ui::loadArtwork(row.cover, server_, {ArtworkKind::Track, 0, cover}, {});
+        }
+        const bool playing = p.state == PlaybackState::Playing || p.bufferingSeconds;
+        row.playIcon.Symbol(playing ? Symbol::Pause : Symbol::Play);
+        const hstring action = tr(playing ? L"Tip_Pause" : L"Tip_Play");
+        ToolTipService::SetToolTip(row.playPause, box_value(action));
+        Automation::AutomationProperties::SetName(row.playPause,
+                                                  ui::format(L"Zone_PlayName", {std::wstring(action), std::wstring(name)}));
+        row.playPause.IsEnabled(hasEntry && row.output.connected);
+        // Its volume: the player's own, else the software volume this zone keeps; none while fixed.
+        const auto mode = selected ? settings_.volume.mode : row.volumeMode;
+        if (p.playerVolume) {
+            row.volume.Minimum(0);
+            row.volume.Maximum(100);
+            row.volume.StepFrequency(1);
+            row.volume.Value(double(*p.playerVolume));
+            row.volume.Visibility(Visibility::Visible);
+        } else if (mode == camel::VolumeMode::Software) {
+            row.volume.Minimum(camel::VolumeSettings::kMinDb);
+            row.volume.Maximum(0);
+            row.volume.StepFrequency(0.5);
+            row.volume.Value(selected ? settings_.volume.db : row.volumeDb);
+            row.volume.Visibility(Visibility::Visible);
+        } else {
+            row.volume.Visibility(Visibility::Collapsed);
+        }
+        Automation::AutomationProperties::SetName(row.volume, ui::format(L"Zone_VolumeName", {std::wstring(name)}));
+    }
+    if (pauseAllButton_) pauseAllButton_.IsEnabled(anyPlaying);
+    showingZones_ = false;
+}
+
+hstring MainWindow::zoneName(const Snapshot& snapshot, const std::string& id) const {
+    const auto found = std::ranges::find(snapshot.zones, id, &ZoneSnapshot::id);
+    return found == snapshot.zones.end() ? ui::utf8(id) : ui::utf8(found->name);
+}
+
+// Selecting a zone makes its output the one in use; every zone keeps its queue and playback.
+void MainWindow::selectZone(const std::string& id) {
+    const auto row = std::ranges::find(zoneRows_, id, &ZoneRow::zone);
+    if (row == zoneRows_.end()) return;
+    const auto output = row->output;
+    if (zonePicker_) zonePicker_.Hide();
+    if (output.selected) return;
+    const auto select = [this, output] {
+        changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+            camel::server::selectOutput(s, output.backend, output.id, devices);
+        });
+        populateSettings();
+    };
+    if (pairable(output))
+        askAirPlayPairing(output, outputLabel(output), select);
+    else
+        select();
+}
+
+// A row's slider: the player's own volume, or the software volume of its zone, the selected one's as the bar's slider sets
+// it, another's in its saved output.
+void MainWindow::changeZoneVolume(const std::string& id, double value) {
+    const auto row = std::ranges::find(zoneRows_, id, &ZoneRow::zone);
+    if (row == zoneRows_.end()) return;
+    const auto snapshot = server_->snapshot();
+    const auto zone = std::ranges::find(snapshot.zones, id, &ZoneSnapshot::id);
+    if (zone == snapshot.zones.end()) return;
+    if (zone->playback.playerVolume) {
+        Command command;
+        command.kind = CommandKind::SetPlayerVolume;
+        command.zone = id;
+        command.playerVolume = uint32_t(std::lround(value));
+        submitCommand(std::move(command));
+        return;
+    }
+    const double db = std::round(value * 2) / 2;
+    if (id == snapshot.selectedZone) {
+        VolumeSlider().Value(db);
+        return;
+    }
+    for (auto& saved : settings_.outputs)
+        if (saved.backend == row->output.backend && saved.id == row->output.id) saved.volumeDb = db;
+    row->volumeDb = db;
+    if (!eqTimer_.IsRunning()) eqTimer_.Start();
 }
 
 } // namespace winrt::CamelPlayer::implementation
