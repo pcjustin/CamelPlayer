@@ -22,7 +22,8 @@
 
 namespace camel::server {
 
-inline constexpr uint32_t kApiVersion = 1;
+// Version 2 has zones (docs/Plan.md §5.12).
+inline constexpr uint32_t kApiVersion = 2;
 
 struct FrameRange {
     uint64_t first = 0;
@@ -154,8 +155,14 @@ struct Command {
     std::optional<bool> playerMute;
     std::string receiver; // an AirPlay receiver's device ID
     std::string code;     // a password or code an AirPlay receiver asks for
+    // The zone a playback, queue or output command acts on, as ZoneSnapshot::id; empty for the selected zone. Other
+    // commands name none.
+    std::string zone;
     bool operator==(const Command&) const = default;
 };
+
+// Whether a command of `kind` acts on one zone.
+bool actsOnZone(CommandKind kind);
 
 enum class PlaybackState : uint8_t { Stopped, Playing, Paused };
 
@@ -337,14 +344,33 @@ struct FinishedWork {
     bool operator==(const FinishedWork&) const = default;
 };
 
-struct Snapshot {
-    uint32_t apiVersion = kApiVersion;
-    uint64_t revision = 0;
-    CommandStamp command;
+// A zone (docs/Plan.md §5.12): an enabled output, or the AirPlay group in use, with a queue and playback of its own.
+struct ZoneSnapshot {
+    std::string id; // zoneId() of its output
+    Backend backend = Backend::Wasapi;
+    std::string output;        // the output's ID; empty on WASAPI is "Windows default device"
+    std::string name;          // as the output menu shows it
     uint64_t queueEntryId = 0; // current queue entry; 0 when none
     std::optional<TrackSource> track;
     QueueSnapshot queue;
     PlaybackSnapshot playback;
+    bool operator==(const ZoneSnapshot&) const = default;
+};
+
+// "<backend ID>:<output ID>", the zone of that output.
+std::string zoneId(Backend backend, const std::string& output);
+
+struct Snapshot {
+    uint32_t apiVersion = kApiVersion;
+    uint64_t revision = 0;
+    CommandStamp command;
+    // The selected zone's, as `zones` has them: the zone the window follows.
+    uint64_t queueEntryId = 0; // current queue entry; 0 when none
+    std::optional<TrackSource> track;
+    QueueSnapshot queue;
+    PlaybackSnapshot playback;
+    std::vector<ZoneSnapshot> zones; // in the output menu's order
+    std::string selectedZone;        // the zone of the output in use
     SettingsDto settings;
     DeviceCatalog devices;
     std::optional<Failure> commandError;

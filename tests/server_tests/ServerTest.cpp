@@ -157,7 +157,7 @@ TEST(SnapshotCursorTest, RejectsStaleRevisionCommandGenerationQueueAndVersion) {
     s.command = {4, 2, 1};
     EXPECT_FALSE(cursor.accept(s));
     s.command = {4, 2, 2};
-    s.apiVersion = 2;
+    s.apiVersion = kApiVersion + 1;
     EXPECT_FALSE(cursor.accept(s));
     s.apiVersion = kApiVersion;
     EXPECT_TRUE(cursor.accept(s));
@@ -171,7 +171,7 @@ TEST(SnapshotCursorTest, RejectsStaleRevisionCommandGenerationQueueAndVersion) {
 
 TEST_F(ServerTest, RejectsInvalidCommandsBeforeAllocatingIds) {
     Command c;
-    c.apiVersion = 2;
+    c.apiVersion = kApiVersion + 1;
     EXPECT_THROW(server->submit(c), std::invalid_argument);
     c = command(CommandKind::Load);
     EXPECT_THROW(server->submit(c), std::invalid_argument);

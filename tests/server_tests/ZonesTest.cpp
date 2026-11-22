@@ -1,0 +1,473 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// Zones on one Server (docs/Plan.md §5.12): every enabled output plays a queue of its own, and what one zone does leaves
+// the others as they were.
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <atomic>
+#include <fstream>
+#include <functional>
+#include <map>
+#include <mutex>
+#include <thread>
+
+#include "Common/util/Text.h"
+#include "Engine/SamplePacker.h"
+#include "OutputBridge/CaptureOutput.h"
+#include "Server/Api/ApiJson.h"
+#include "Server/Playback/LocalServer.h"
+#include "Server/Playback/Outputs.h"
+#include "TestUtil.h"
+
+using namespace camel;
+using namespace camel::audio;
+using namespace camel::server;
+using namespace std::chrono_literals;
+
+namespace {
+
+std::string device(size_t number) {
+    return "zone-" + std::to_string(number);
+}
+
+std::string zone(size_t number) {
+    return zoneId(Backend::Wasapi, device(number));
+}
+
+// `count` WASAPI outputs enabled, the first in use.
+Settings zoneSettings(size_t count) {
+    Settings s;
+    s.autoplay = false;
+    s.wasapi.deviceId = device(1);
+    for (size_t i = 1; i <= count; ++i) {
+        SavedOutput output;
+        output.backend = Backend::Wasapi;
+        output.id = output.wasapi.deviceId = device(i);
+        output.name = "Zone " + std::to_string(i);
+        output.enabled = true;
+        s.outputs.push_back(output);
+    }
+    return fromJson(toJson(s)); // as a settings file holds them
+}
+
+class ZonesTest;
+
+// A capture device that counts its opens and closes and can fail as an unplugged device does.
+class ZoneOutput final : public IOutput {
+public:
+    ZoneOutput(ZonesTest& test, std::string device, std::unique_ptr<IOutput> inner);
+    ~ZoneOutput() override;
+    bool supports(const DeviceFormat& f) override { return inner_->supports(f); }
+    void open(const DeviceFormat& f, IRenderSource* source) override;
+    void start() override { inner_->start(); }
+    void pause() override { inner_->pause(); }
+    void close() override;
+    OutputStatus status() const override { return inner_->status(); }
+    void fail() { raiseError(Error(ErrorCode::DeviceLost, "the test unplugged the device")); }
+
+private:
+    ZonesTest& test_;
+    std::string device_;
+    std::unique_ptr<IOutput> inner_;
+    bool open_ = false;
+};
+
+class ZonesTest : public ::testing::Test {
+public:
+    std::mutex mutex;
+    std::map<std::string, int> opens, closes;
+    std::map<std::string, ZoneOutput*> live;
+
+protected:
+    std::filesystem::path dir;
+    std::unique_ptr<LocalServer> server;
+
+    void start(size_t count, const std::function<void(Settings&)>& change = {}) {
+        dir = testutil::tempDir() / "zones" /
+              (std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()) + "-" +
+               std::to_string(GetCurrentProcessId()));
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+        Settings settings = zoneSettings(count);
+        if (change) change(settings);
+        settings = fromJson(toJson(settings));
+        server = std::make_unique<LocalServer>(settings, std::filesystem::path{}, [this](const Settings& s) {
+            CaptureOptions options;
+            options.file = capture(s.wasapi.deviceId);
+            options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
+            options.realtime = true;
+            return std::make_unique<ZoneOutput>(*this, s.wasapi.deviceId, createCaptureOutput(options));
+        });
+    }
+
+    void TearDown() override {
+        server.reset();
+        std::error_code ignored;
+        std::filesystem::remove_all(dir, ignored);
+    }
+
+    std::filesystem::path capture(const std::string& name) const { return dir / (name + ".raw"); }
+
+    static Command command(CommandKind kind, size_t number) {
+        Command c;
+        c.kind = kind;
+        c.zone = zone(number);
+        return c;
+    }
+
+    static Command play(size_t number, const std::vector<std::filesystem::path>& files) {
+        Command c = command(CommandKind::QueueReplace, number);
+        for (const auto& file : files) c.sources.emplace_back(toUtf8(file.wstring()));
+        return c;
+    }
+
+    Snapshot send(Command c) {
+        server->submit(std::move(c));
+        server->waitIdle();
+        return server->snapshot();
+    }
+
+    static const ZoneSnapshot& of(const Snapshot& s, size_t number) {
+        const auto found = std::ranges::find(s.zones, zone(number), &ZoneSnapshot::id);
+        if (found == s.zones.end()) throw std::runtime_error("no zone " + zone(number));
+        return *found;
+    }
+
+    bool waitFor(const std::function<bool(const Snapshot&)>& check, std::chrono::milliseconds time = 20s) {
+        const auto deadline = std::chrono::steady_clock::now() + time * testutil::kSlowdown;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (check(server->snapshot())) return true;
+            std::this_thread::sleep_for(10ms);
+        }
+        return false;
+    }
+
+    static bool playing(const ZoneSnapshot& z, double seconds = 0.2) {
+        return z.playback.state == PlaybackState::Playing && z.playback.source &&
+               z.playback.position > uint64_t(seconds * z.playback.source->sampleRate);
+    }
+
+    static bool ended(const ZoneSnapshot& z) {
+        return !z.queue.entries.empty() && z.queueEntryId == z.queue.entries.back().id &&
+               z.playback.state == PlaybackState::Stopped;
+    }
+
+    // What the zone's device was handed, as 24-bit samples.
+    std::vector<int32_t> captured(size_t number) const {
+        std::ifstream in(capture(device(number)), std::ios::binary | std::ios::ate);
+        if (!in) return {};
+        std::vector<uint8_t> bytes(size_t(in.tellg()));
+        in.seekg(0);
+        in.read(reinterpret_cast<char*>(bytes.data()), std::streamsize(bytes.size()));
+        std::vector<int32_t> samples(bytes.size() / 4);
+        unpackSamples(bytes.data(), samples.size(), 24, SampleType::Int32, samples.data());
+        return samples;
+    }
+
+    static std::vector<int32_t> reference(const std::vector<std::filesystem::path>& files) {
+        std::vector<int32_t> samples;
+        for (const auto& file : files) {
+            const auto decoded = testaudio::referenceDecode(file);
+            EXPECT_TRUE(decoded.error.empty()) << decoded.error;
+            samples.insert(samples.end(), decoded.samples.begin(), decoded.samples.end());
+        }
+        return samples;
+    }
+
+    void fail(size_t number) {
+        std::scoped_lock lock(mutex);
+        live.at(device(number))->fail();
+    }
+
+    int opened(size_t number) {
+        std::scoped_lock lock(mutex);
+        return opens[device(number)];
+    }
+
+    int closed(size_t number) {
+        std::scoped_lock lock(mutex);
+        return closes[device(number)];
+    }
+};
+
+ZoneOutput::ZoneOutput(ZonesTest& test, std::string device, std::unique_ptr<IOutput> inner)
+    : test_(test), device_(std::move(device)), inner_(std::move(inner)) {}
+
+ZoneOutput::~ZoneOutput() {
+    std::scoped_lock lock(test_.mutex);
+    if (test_.live[device_] == this) test_.live.erase(device_);
+}
+
+void ZoneOutput::open(const DeviceFormat& f, IRenderSource* source) {
+    inner_->open(f, source);
+    std::scoped_lock lock(test_.mutex);
+    ++test_.opens[device_];
+    test_.live[device_] = this;
+    open_ = true;
+}
+
+void ZoneOutput::close() {
+    inner_->close();
+    std::scoped_lock lock(test_.mutex);
+    if (std::exchange(open_, false)) ++test_.closes[device_];
+}
+
+// Formats of their own, so that no two zones' tracks hold the same samples.
+std::filesystem::path track(size_t number, double seconds) {
+    static constexpr uint32_t kRates[] = {44100, 48000, 88200, 96000, 176400, 192000};
+    const uint32_t rate = kRates[(number - 1) % std::size(kRates)];
+    return testutil::generatedFile(
+        {"zone-track-" + std::to_string(number) + "-" + std::to_string(int(seconds * 10)), rate, 24, 2, seconds});
+}
+
+} // namespace
+
+TEST_F(ZonesTest, EveryEnabledOutputIsAZoneInTheOutputMenusOrder) {
+    start(3);
+    const auto s = server->snapshot();
+    ASSERT_EQ(s.zones.size(), 3U);
+    for (size_t i = 1; i <= 3; ++i) {
+        EXPECT_EQ(s.zones[i - 1].id, zone(i));
+        EXPECT_EQ(s.zones[i - 1].backend, Backend::Wasapi);
+        EXPECT_EQ(s.zones[i - 1].output, device(i));
+        EXPECT_EQ(s.zones[i - 1].name, "Zone " + std::to_string(i));
+    }
+    EXPECT_EQ(s.selectedZone, zone(1));
+}
+
+TEST_F(ZonesTest, TwoZonesPlayDifferentTracksAtOnce) {
+    start(2);
+    const std::vector one{track(1, 1.5)}, two{track(2, 1.5)};
+    send(play(1, one));
+    send(play(2, two));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1)) && playing(of(s, 2)); }));
+    const auto both = server->snapshot();
+    EXPECT_EQ(of(both, 1).playback.pathUtf8, toUtf8(one[0].wstring()));
+    EXPECT_EQ(of(both, 2).playback.pathUtf8, toUtf8(two[0].wstring()));
+    // The window follows the selected zone, the first.
+    EXPECT_EQ(both.queueEntryId, of(both, 1).queueEntryId);
+    EXPECT_EQ(both.playback.pathUtf8, of(both, 1).playback.pathUtf8);
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return ended(of(s, 1)) && ended(of(s, 2)); }));
+    EXPECT_EQ(captured(1), reference(one));
+    EXPECT_EQ(captured(2), reference(two));
+}
+
+TEST_F(ZonesTest, SixZonesPlayDifferentTracksAtOnce) {
+    start(6);
+    std::vector<std::vector<std::filesystem::path>> tracks;
+    for (size_t i = 1; i <= 6; ++i) {
+        tracks.push_back({track(i, 1.5)});
+        send(play(i, tracks.back()));
+    }
+    EXPECT_TRUE(waitFor(
+        [](const Snapshot& s) { return std::ranges::all_of(s.zones, [](const ZoneSnapshot& z) { return playing(z); }); }));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return std::ranges::all_of(s.zones, ended); }));
+    const auto s = server->snapshot();
+    for (size_t i = 1; i <= 6; ++i) {
+        EXPECT_FALSE(of(s, i).playback.error) << of(s, i).playback.errorDetail;
+        EXPECT_EQ(captured(i), reference(tracks[i - 1])) << zone(i);
+    }
+}
+
+TEST_F(ZonesTest, EachZonePlaysItsQueueGaplessly) {
+    start(2);
+    const std::vector one{track(1, 0.8), track(1, 0.3), track(1, 0.6)};
+    const std::vector two{track(4, 0.5), track(4, 0.7)};
+    send(play(1, one));
+    send(play(2, two));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return ended(of(s, 1)) && ended(of(s, 2)); }));
+    EXPECT_EQ(opened(1), 1);
+    EXPECT_EQ(opened(2), 1);
+    EXPECT_EQ(captured(1), reference(one));
+    EXPECT_EQ(captured(2), reference(two));
+}
+
+TEST_F(ZonesTest, EachZoneCrossfadesItsOwnTracks) {
+    start(2, [](Settings& s) {
+        s.crossfade.enabled = true;
+        s.crossfade.seconds = 1.0;
+    });
+    const std::vector one{track(2, 2.0), track(2, 2.5)};
+    const std::vector two{track(5, 2.0), track(5, 2.5)};
+    send(play(1, one));
+    send(play(2, two));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return ended(of(s, 1)) && ended(of(s, 2)); }, 30s));
+    // Each zone's second track came in a second before its first ended.
+    for (size_t i = 1; i <= 2; ++i) {
+        const double seconds = double(captured(i).size()) / 2 / (i == 1 ? 48000 : 176400);
+        EXPECT_NEAR(seconds, 3.5, 0.25) << zone(i);
+    }
+}
+
+TEST_F(ZonesTest, ASeekNextStopAndErrorInOneZoneLeaveTheOthersAsTheyWere) {
+    start(4);
+    for (size_t i = 1; i <= 4; ++i) send(play(i, {track(i, 7.0), track(i, 6.0)}));
+    ASSERT_TRUE(waitFor(
+        [](const Snapshot& s) { return std::ranges::all_of(s.zones, [](const ZoneSnapshot& z) { return playing(z, 0.5); }); }));
+    Snapshot before = server->snapshot();
+    // Played on from where it was: no jump back and none further than the time that passed.
+    const auto unchanged = [&](size_t number) {
+        const auto now = server->snapshot();
+        const auto& was = of(before, number);
+        const auto& is = of(now, number);
+        EXPECT_EQ(is.queueEntryId, was.queueEntryId) << zone(number);
+        EXPECT_EQ(is.queue.entries, was.queue.entries) << zone(number);
+        EXPECT_EQ(is.playback.state, PlaybackState::Playing) << zone(number);
+        EXPECT_FALSE(is.playback.error) << zone(number) << ": " << is.playback.errorDetail;
+        const uint64_t rate = was.playback.source->sampleRate;
+        EXPECT_GE(is.playback.position + rate / 10, was.playback.position) << zone(number);
+        EXPECT_LT(is.playback.position, was.playback.position + 3 * rate) << zone(number);
+    };
+
+    Command seek = command(CommandKind::Seek, 1);
+    constexpr uint64_t kFourSeconds = uint64_t{4} * 44100;
+    seek.frame = kFourSeconds;
+    send(std::move(seek));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return of(s, 1).playback.position >= kFourSeconds; }));
+    for (const size_t other : {2, 3, 4}) unchanged(other);
+
+    before = server->snapshot();
+    send(command(CommandKind::Next, 2));
+    const uint64_t second = of(before, 2).queue.entries[1].id;
+    ASSERT_TRUE(waitFor([second](const Snapshot& s) { return of(s, 2).queueEntryId == second && playing(of(s, 2)); }));
+    for (const size_t other : {1, 3, 4}) unchanged(other);
+
+    before = server->snapshot();
+    EXPECT_EQ(send(command(CommandKind::Stop, 3)).zones[2].playback.state, PlaybackState::Stopped);
+    for (const size_t other : {1, 2, 4}) unchanged(other);
+
+    before = server->snapshot();
+    Command missing = command(CommandKind::OpenAndPlay, 4);
+    missing.source.emplace(toUtf8((dir / "missing.flac").wstring()));
+    send(std::move(missing));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return of(s, 4).playback.error == ErrorCode::FileOpen; }));
+    for (const size_t other : {1, 2}) unchanged(other);
+    EXPECT_EQ(of(server->snapshot(), 3).playback.state, PlaybackState::Stopped);
+}
+
+TEST_F(ZonesTest, ADeviceFaultInOneZoneLeavesTheOthersPlaying) {
+    start(3);
+    for (size_t i = 1; i <= 3; ++i) send(play(i, {track(i, 6.0)}));
+    ASSERT_TRUE(waitFor(
+        [](const Snapshot& s) { return std::ranges::all_of(s.zones, [](const ZoneSnapshot& z) { return playing(z, 0.3); }); }));
+    fail(2);
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return of(s, 2).playback.state == PlaybackState::Paused; }));
+    const auto s = server->snapshot();
+    EXPECT_EQ(of(s, 2).playback.error, ErrorCode::DeviceLost);
+    for (const size_t other : {1, 3}) {
+        EXPECT_EQ(of(s, other).playback.state, PlaybackState::Playing) << zone(other);
+        EXPECT_FALSE(of(s, other).playback.error) << zone(other);
+    }
+    const uint64_t one = of(s, 1).playback.position;
+    EXPECT_TRUE(waitFor([one](const Snapshot& now) { return of(now, 1).playback.position > one + 44100 / 2; }));
+}
+
+TEST_F(ZonesTest, AZoneThatIsNotPlayingHoldsNoDevice) {
+    start(3);
+    send(play(2, {track(2, 4.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 2)); }));
+    EXPECT_EQ(opened(1), 0);
+    EXPECT_EQ(opened(3), 0);
+    send(command(CommandKind::Stop, 2));
+    EXPECT_EQ(opened(2), 1);
+    EXPECT_EQ(closed(2), 1);
+}
+
+TEST_F(ZonesTest, ACommandForAZoneThatIsNotThereChangesNothing) {
+    start(2);
+    send(play(1, {track(1, 4.0)}));
+    Command next = command(CommandKind::Next, 1);
+    next.zone = zoneId(Backend::Asio, "not-enabled");
+    const auto s = send(std::move(next));
+    ASSERT_TRUE(s.commandError);
+    EXPECT_NE(s.commandError->detail.find("no such zone"), std::string::npos) << s.commandError->detail;
+    EXPECT_EQ(of(s, 1).queue.entries.size(), 1U);
+    EXPECT_NE(of(s, 1).playback.state, PlaybackState::Stopped);
+}
+
+TEST_F(ZonesTest, OnlyPlaybackQueueAndOutputCommandsNameAZone) {
+    start(2);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = server->snapshot().settings;
+    apply.zone = zone(2);
+    EXPECT_THROW(server->submit(apply), std::invalid_argument);
+    apply.zone.clear();
+    EXPECT_NO_THROW(server->submit(apply));
+}
+
+TEST_F(ZonesTest, EachZonesStateIsCurrentAfterCommandsToAnother) {
+    start(2);
+    send(play(1, {track(1, 6.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1)); }));
+    const auto before = server->snapshot();
+    send(play(2, {track(2, 0.5)}));
+    for (int i = 0; i < 20; ++i) {
+        Command add = command(CommandKind::QueueAdd, 2);
+        add.sources.emplace_back(toUtf8(track(2, 0.5).wstring()));
+        server->submit(std::move(add));
+    }
+    server->waitIdle();
+    const auto after = server->snapshot();
+    EXPECT_EQ(of(after, 2).queue.entries.size(), 21U);
+    EXPECT_EQ(of(after, 1).queue, of(before, 1).queue);
+    EXPECT_GT(after.revision, before.revision);
+    // Zone 1 goes on being published while zone 2 takes commands.
+    const uint64_t position = of(after, 1).playback.position;
+    EXPECT_TRUE(waitFor([position](const Snapshot& s) { return of(s, 1).playback.position > position; }));
+}
+
+TEST_F(ZonesTest, ChangingTheOutputInUseTakesTheSelectedZonesPlaybackToIt) {
+    start(2);
+    send(play(1, {track(1, 6.0), track(1, 1.0)}));
+    send(play(2, {track(2, 6.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1), 0.5) && playing(of(s, 2), 0.2); }));
+    const auto before = server->snapshot();
+    Settings s = nativeSettings(before.settings);
+    selectOutput(s, Backend::Wasapi, device(2), before.devices);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(s);
+    send(std::move(apply));
+    ASSERT_TRUE(waitFor([](const Snapshot& now) { return playing(of(now, 2)); }));
+    const auto after = server->snapshot();
+    EXPECT_EQ(after.selectedZone, zone(2));
+    EXPECT_EQ(of(after, 2).queue.entries, of(before, 1).queue.entries);
+    EXPECT_EQ(of(after, 2).queueEntryId, of(before, 1).queueEntryId);
+    EXPECT_GE(of(after, 2).playback.position + 4410, of(before, 1).playback.position);
+    EXPECT_TRUE(of(after, 1).queue.entries.empty());
+    EXPECT_EQ(of(after, 1).playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(after.queueEntryId, of(after, 2).queueEntryId);
+}
+
+TEST(ZonesApiJsonTest, ZonesAndTheZoneACommandNamesRoundTrip) {
+    Snapshot s;
+    s.revision = 7;
+    for (size_t i = 1; i <= 2; ++i) {
+        ZoneSnapshot z;
+        z.id = zone(i);
+        z.output = device(i);
+        z.name = "Zone " + std::to_string(i);
+        z.queueEntryId = i;
+        z.track.emplace("C:/music/" + std::to_string(i) + ".flac");
+        z.playback.state = i == 1 ? PlaybackState::Playing : PlaybackState::Paused;
+        z.playback.position = 1000 * i;
+        s.zones.push_back(z);
+    }
+    s.selectedZone = zone(2);
+    s.queueEntryId = s.zones[1].queueEntryId;
+    s.track = s.zones[1].track;
+    s.queue = s.zones[1].queue;
+    s.playback = s.zones[1].playback;
+    const auto j = toJson(s);
+    EXPECT_FALSE(j.contains("queue")); // the selected zone's state is not repeated
+    EXPECT_EQ(snapshotFromJson(j), s);
+
+    Command c;
+    c.kind = CommandKind::Pause;
+    c.zone = zone(2);
+    EXPECT_EQ(commandFromJson(toJson(c)), c);
+}

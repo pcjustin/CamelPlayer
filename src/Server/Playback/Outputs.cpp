@@ -248,6 +248,10 @@ std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& device
     return rows;
 }
 
+const std::string& outputInUse(const Settings& s) {
+    return selectedId(s);
+}
+
 bool needsFirewallRule(const OutputRow& row) {
     if (row.backend != Backend::HQPlayer) return isNetworkPlayer(row.backend);
     std::string host;

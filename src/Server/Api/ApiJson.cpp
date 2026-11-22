@@ -4,6 +4,7 @@
 
 #include "Server/Api/ApiJson.h"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -501,7 +502,8 @@ json toJson(const Command& c) {
             {"playerVolume", c.playerVolume ? json(*c.playerVolume) : json(nullptr)},
             {"playerMute", c.playerMute ? json(*c.playerMute) : json(nullptr)},
             {"receiver", c.receiver},
-            {"code", c.code}};
+            {"code", c.code},
+            {"zone", c.zone}};
 }
 
 Command commandFromJson(const json& j) {
@@ -541,30 +543,74 @@ Command commandFromJson(const json& j) {
     });
     if (j.contains("receiver") || c.kind == CommandKind::SetReceiverVolume) c.receiver = value<std::string>(j, "receiver");
     if (j.contains("code") || c.kind == CommandKind::PairAirPlay) c.code = value<std::string>(j, "code");
+    if (j.contains("zone")) c.zone = value<std::string>(j, "zone");
     return c;
 }
 
+namespace {
+
+json toJson(const ZoneSnapshot& z) {
+    return {{"id", z.id},
+            {"backend", backendId(z.backend)},
+            {"output", z.output},
+            {"name", z.name},
+            {"queueEntryId", z.queueEntryId},
+            {"track", optionalJson(z.track)},
+            {"queue", toJson(z.queue)},
+            {"playback", toJson(z.playback)}};
+}
+
+ZoneSnapshot zoneFrom(const json& j) {
+    ZoneSnapshot z;
+    z.id = value<std::string>(j, "id");
+    z.backend = backendFrom(field(j, "backend"));
+    z.output = value<std::string>(j, "output");
+    z.name = value<std::string>(j, "name");
+    z.queueEntryId = value<uint64_t>(j, "queueEntryId");
+    z.track = optional<TrackSource>(j, "track", trackSourceFrom);
+    z.queue = queueFrom(field(j, "queue"));
+    z.playback = playbackFrom(field(j, "playback"));
+    return z;
+}
+
+const ZoneSnapshot* selectedZone(const Snapshot& s) {
+    const auto found = std::ranges::find(s.zones, s.selectedZone, &ZoneSnapshot::id);
+    return found == s.zones.end() ? nullptr : &*found;
+}
+
+} // namespace
+
+// The selected zone's state is not repeated outside `zones`, as its queue can be long.
 json toJson(const Snapshot& s) {
-    return {{"apiVersion", s.apiVersion},
-            {"revision", s.revision},
-            {"command", toJson(s.command)},
-            {"queueEntryId", s.queueEntryId},
-            {"track", optionalJson(s.track)},
-            {"queue", toJson(s.queue)},
-            {"playback", toJson(s.playback)},
-            {"settings", toJson(s.settings)},
-            {"devices",
-             {{"revision", s.devices.revision},
-              {"wasapi", toJson(s.devices.wasapi)},
-              {"asio", toJson(s.devices.asio)},
-              {"ks", toJson(s.devices.ks)},
-              {"network", toJson(s.devices.network)},
-              {"airplay", toJson(s.devices.airplay)},
-              {"hqplayer", toJson(s.devices.hqplayer)},
-              {"defaultWasapi", s.devices.defaultWasapi}}},
-            {"commandError", optionalJson(s.commandError)},
-            {"finished", {{"command", s.finished.command}, {"failure", optionalJson(s.finished.failure)}}},
-            {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
+    json zones = json::array();
+    for (const auto& z : s.zones) zones.push_back(toJson(z));
+    json j = {{"apiVersion", s.apiVersion},
+              {"revision", s.revision},
+              {"command", toJson(s.command)},
+              {"zones", zones},
+              {"selectedZone", s.selectedZone},
+              {"settings", toJson(s.settings)},
+              {"devices",
+               {{"revision", s.devices.revision},
+                {"wasapi", toJson(s.devices.wasapi)},
+                {"asio", toJson(s.devices.asio)},
+                {"ks", toJson(s.devices.ks)},
+                {"network", toJson(s.devices.network)},
+                {"airplay", toJson(s.devices.airplay)},
+                {"hqplayer", toJson(s.devices.hqplayer)},
+                {"defaultWasapi", s.devices.defaultWasapi}}},
+              {"commandError", optionalJson(s.commandError)},
+              {"finished", {{"command", s.finished.command}, {"failure", optionalJson(s.finished.failure)}}},
+              {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
+    const ZoneSnapshot* shown = selectedZone(s);
+    if (shown && shown->queueEntryId == s.queueEntryId && shown->track == s.track && shown->queue == s.queue &&
+        shown->playback == s.playback)
+        return j;
+    j["queueEntryId"] = s.queueEntryId;
+    j["track"] = optionalJson(s.track);
+    j["queue"] = toJson(s.queue);
+    j["playback"] = toJson(s.playback);
+    return j;
 }
 
 Snapshot snapshotFromJson(const json& j) {
@@ -572,10 +618,19 @@ Snapshot snapshotFromJson(const json& j) {
     s.apiVersion = value<uint32_t>(j, "apiVersion");
     s.revision = value<uint64_t>(j, "revision");
     s.command = commandStampFromJson(field(j, "command"));
-    s.queueEntryId = value<uint64_t>(j, "queueEntryId");
-    s.track = optional<TrackSource>(j, "track", trackSourceFrom);
-    s.queue = queueFrom(field(j, "queue"));
-    s.playback = playbackFrom(field(j, "playback"));
+    for (const auto& z : array(j, "zones")) s.zones.push_back(zoneFrom(z));
+    s.selectedZone = value<std::string>(j, "selectedZone");
+    if (const ZoneSnapshot* shown = selectedZone(s); shown && !j.contains("queue")) {
+        s.queueEntryId = shown->queueEntryId;
+        s.track = shown->track;
+        s.queue = shown->queue;
+        s.playback = shown->playback;
+    } else {
+        s.queueEntryId = value<uint64_t>(j, "queueEntryId");
+        s.track = optional<TrackSource>(j, "track", trackSourceFrom);
+        s.queue = queueFrom(field(j, "queue"));
+        s.playback = playbackFrom(field(j, "playback"));
+    }
     s.settings = settingsFrom(field(j, "settings"));
     const json& devices = field(j, "devices");
     s.devices.revision = value<uint64_t>(devices, "revision");

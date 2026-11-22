@@ -141,7 +141,8 @@ void validate(const Command& c) {
         c.albums.empty() == (c.kind == CommandKind::SetAlbumFavorite) ||
         c.artists.empty() == (c.kind == CommandKind::SetArtistFavorite) ||
         (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite &&
-         c.kind != CommandKind::SetArtistFavorite))
+         c.kind != CommandKind::SetArtistFavorite) ||
+        (!c.zone.empty() && !actsOnZone(c.kind)))
         throw std::invalid_argument("invalid Server command payload");
     if (std::ranges::any_of(c.artists, [](const LibraryGroupFilter& a) {
             return (a.field != LibraryGroupField::Artist && a.field != LibraryGroupField::Composer) || a.value.empty() ||
@@ -217,6 +218,40 @@ TrackSource::TrackSource(std::string pathUtf8, FrameRange range, std::optional<a
         throw std::invalid_argument("invalid TrackSource decoder");
 }
 
+bool actsOnZone(CommandKind kind) {
+    switch (kind) {
+    case CommandKind::OpenAndPlay:
+    case CommandKind::Load:
+    case CommandKind::Play:
+    case CommandKind::Pause:
+    case CommandKind::TogglePause:
+    case CommandKind::Stop:
+    case CommandKind::Seek:
+    case CommandKind::ShowControlPanel:
+    case CommandKind::QueueReplace:
+    case CommandKind::QueueReorder:
+    case CommandKind::QueueSelect:
+    case CommandKind::Next:
+    case CommandKind::Previous:
+    case CommandKind::SetShuffle:
+    case CommandKind::SetRepeat:
+    case CommandKind::QueueAdd:
+    case CommandKind::QueuePlayNext:
+    case CommandKind::QueueRemove:
+    case CommandKind::QueueClear:
+    case CommandKind::SetPlayerVolume:
+    case CommandKind::SetPlayerMute:
+    case CommandKind::SetReceiverVolume:
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::string zoneId(Backend backend, const std::string& output) {
+    return backendId(backend) + std::string(":") + output;
+}
+
 void SnapshotCursor::expect(CommandStamp command) {
     expected_.id = std::max(expected_.id, command.id);
     expected_.generation = std::max(expected_.generation, command.generation);
@@ -232,20 +267,24 @@ bool SnapshotCursor::accept(const Snapshot& s) {
 }
 
 class LocalServer::Impl {
+    struct Zone;
+
 public:
-    _No_competing_thread_ Impl(const Settings& settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
-        : settings_(settings), settingsFile_(std::move(settingsFile)),
+    _No_competing_thread_ Impl(Settings settings, std::filesystem::path settingsFile, audio::OutputFactory factory)
+        : settings_(std::move(settings)), settingsFile_(std::move(settingsFile)),
           factory_([this, given = std::move(factory)](const Settings& s) {
               return s.backend == Backend::Network    ? networkOutput(s)
                      : s.backend == Backend::AirPlay  ? airplayOutput(s)
                      : s.backend == Backend::HQPlayer ? hqplayerOutput(s)
                                                       : given(s);
           }),
-          engine_(std::make_unique<audio::PlaybackEngine>(settings, factory_)),
           airplayPairings_(std::make_shared<AirPlayPairings>(
               settingsFile_.empty() ? std::filesystem::path() : settingsFile_.parent_path() / L"airplay-pairings.dat")) {
-        published_.settings = settingsDto(settings_);
-        published_.playback = playback(engine_->snapshot());
+        syncZones();
+        for (auto& zone : zones_) refreshZoneState(*zone);
+        collectZones();
+        state_.settings = settingsDto(settings_);
+        published_ = state_;
         const auto directory =
             settingsFile_.empty() ? std::filesystem::path{} : std::filesystem::absolute(settingsFile_).parent_path();
         if (!directory.empty() && std::filesystem::is_directory(directory)) {
@@ -266,8 +305,7 @@ public:
                 int64_t swept = -1;
                 auto albumsSeen = library_->albumChanges();
                 const auto busy = [this, &stop] {
-                    return stop.stop_requested() || engine_->snapshot().state == audio::PlayState::Playing ||
-                           coversInFlight_.load() > 0;
+                    return stop.stop_requested() || anyZonePlaying() || coversInFlight_.load() > 0;
                 };
                 while (!stop.stop_requested()) {
                     for (int i = 0; i < 300 && !stop.stop_requested() && library_->albumChanges() == albumsSeen; ++i)
@@ -427,7 +465,8 @@ public:
         input.appVersion = appVersion;
         input.snapshot = snapshot();
         if (library_) input.roots = server::libraryRoots(*library_);
-        if (input.snapshot.playback.state != PlaybackState::Stopped) {
+        if (std::ranges::any_of(input.snapshot.zones,
+                                [](const ZoneSnapshot& z) { return z.playback.state != PlaybackState::Stopped; })) {
             input.capabilities = "Format support was not probed: the device was in use.\n";
         } else {
             const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -630,42 +669,162 @@ private:
     // command thread for about 10 ms: they are saved once they have settled.
     void persistSoon() { settingsDue_ = std::chrono::steady_clock::now() + kSettingsSettle; }
 
-    void resumePlayback() {
-        if (entries_.empty() && autoplayAllowed() && appendAutoplay()) {
-            startEntry(policy_.select(entries_.front().id), true);
+    // The zone of the output in use, which commands that name no zone act on.
+    Zone& selected() const { return *selected_; }
+
+    Zone& zoneFor(const Command& c) {
+        if (c.zone.empty()) return selected();
+        for (auto& zone : zones_)
+            if (zone->id == c.zone) return *zone;
+        throw std::invalid_argument("no such zone: " + c.zone);
+    }
+
+    // The AirPlay group in use; other receivers become zones of their own once several groups play (MZ-R05).
+    Zone* airplayZone() const { return selected_ && selected_->backend == Backend::AirPlay ? selected_ : nullptr; }
+
+    // Every enabled output in the output menu's order, the one in use among them. The AirPlay group in use is one zone,
+    // under the receiver in use.
+    std::vector<OutputRow> wantedZones() const {
+        std::vector<OutputRow> wanted;
+        for (auto& row : outputRows(settings_, state_.devices))
+            if (row.selected || (row.enabled && row.backend != Backend::AirPlay)) wanted.push_back(std::move(row));
+        if (std::ranges::none_of(wanted, &OutputRow::selected)) {
+            OutputRow inUse;
+            inUse.backend = settings_.backend;
+            inUse.id = outputInUse(settings_);
+            inUse.selected = true;
+            wanted.insert(wanted.begin(), std::move(inUse));
+        }
+        return wanted;
+    }
+
+    static void setKey(Zone& z, Backend backend, const std::string& output) {
+        z.backend = backend;
+        z.output = output;
+        z.id = zoneId(backend, output);
+        z.state.id = z.id;
+        z.state.backend = backend;
+        z.state.output = output;
+    }
+
+    // Stopped, its device closed, with no queue.
+    void emptyZone(Zone& z) {
+        z.engine->stop();
+        z.engine->waitIdle();
+        if (z.q.session && library_) z.q.session->persist(*library_);
+        const auto playback = z.engine->snapshot();
+        z.q = ZoneQueue();
+        z.chain.clear();
+        z.attempted = {};
+        z.checked = {};
+        z.seenTrackEnds = playback.trackEnds;
+        z.seenTransitions = playback.transitions;
+        z.queueChanged = true;
+        std::lock_guard lock(readsMutex_);
+        z.queuedRead.clear();
+    }
+
+    // Brings the zones in line with the settings: a zone for each output wanted, each engine given its output's settings.
+    // A change of the output in use takes the selected zone's queue and playback to the new output, which plays on from
+    // the audible position as the output menu has always done; what the new output's zone held is dropped, and the output
+    // left gets an empty zone (MZ-R07 and MZ-R09 make choosing a zone and moving a queue two things).
+    void syncZones() {
+        const auto wanted = wantedZones();
+        const auto& inUse = *std::ranges::find_if(wanted, &OutputRow::selected);
+        const auto find = [this](Backend backend, const std::string& output) -> Zone* {
+            const auto id = zoneId(backend, output);
+            const auto found = std::ranges::find(zones_, id, &Zone::id);
+            return found == zones_.end() ? nullptr : found->get();
+        };
+        std::unique_lock zones(zonesMutex_);
+        if (selected_ && (selected_->backend != inUse.backend || selected_->output != inUse.id)) {
+            if (Zone* taken = find(inUse.backend, inUse.id)) {
+                zones.unlock();
+                emptyZone(*taken);
+                zones.lock();
+                setKey(*taken, selected_->backend, selected_->output);
+            }
+            setKey(*selected_, inUse.backend, inUse.id);
+            zonesChanged_ = true;
+        }
+        for (auto it = zones_.begin(); it != zones_.end();) {
+            const bool kept = std::ranges::any_of(
+                wanted, [&](const OutputRow& row) { return row.backend == (*it)->backend && row.id == (*it)->output; });
+            if (kept) {
+                ++it;
+                continue;
+            }
+            zones.unlock();
+            emptyZone(**it);
+            zones.lock();
+            it = zones_.erase(it);
+            zonesChanged_ = true;
+        }
+        std::vector<std::unique_ptr<Zone>> ordered;
+        ordered.reserve(wanted.size());
+        for (const auto& row : wanted) {
+            const auto found = std::ranges::find_if(zones_, [&](const std::unique_ptr<Zone>& z) {
+                return z && z->backend == row.backend && z->output == row.id; // taken ones are left empty
+            });
+            Settings settings = withOutputParameters(settings_, row.backend, row.id, state_.devices);
+            if (found == zones_.end()) {
+                auto zone = std::make_unique<Zone>();
+                setKey(*zone, row.backend, row.id);
+                zone->settings = settings;
+                zone->engine = std::make_unique<audio::PlaybackEngine>(zone->settings, factory_);
+                zone->state.playback = playback(zone->engine->snapshot());
+                ordered.push_back(std::move(zone));
+                zonesChanged_ = true;
+            } else {
+                (*found)->settings = std::move(settings);
+                (*found)->engine->applySettings((*found)->settings);
+                ordered.push_back(std::move(*found));
+            }
+            if (ordered.back()->state.name != row.name) {
+                ordered.back()->state.name = row.name;
+                zonesChanged_ = true;
+            }
+            if (row.selected) selected_ = ordered.back().get();
+        }
+        zones_ = std::move(ordered);
+    }
+
+    void resumePlayback(Zone& z) {
+        if (z.q.entries.empty() && autoplayAllowed(z) && appendAutoplay(z)) {
+            startEntry(z, z.q.policy.select(z.q.entries.front().id), true);
             return;
         }
-        const auto current = policy_.current();
-        if (engine_->snapshot().state == audio::PlayState::Stopped && !entries_.empty() &&
-            (!current || policy_.unavailable(current->entryId))) {
-            const auto next = policy_.next(false);
+        const auto current = z.q.policy.current();
+        if (z.engine->snapshot().state == audio::PlayState::Stopped && !z.q.entries.empty() &&
+            (!current || z.q.policy.unavailable(current->entryId))) {
+            const auto next = z.q.policy.next(false);
             if (!next) throw std::invalid_argument("queue entries are unavailable");
-            startEntry(*next, true);
+            startEntry(z, *next, true);
         } else
-            engine_->play();
+            z.engine->play();
     }
 
     // The restored current entry opens its file only now, at the position it was left at.
-    void resumeRestored(uint64_t position) {
-        const auto current = policy_.current();
-        restored_.reset();
-        if (!current || policy_.unavailable(current->entryId)) {
-            resumePlayback();
+    void resumeRestored(Zone& z, uint64_t position) {
+        const auto current = z.q.policy.current();
+        z.q.restored.reset();
+        if (!current || z.q.policy.unavailable(current->entryId)) {
+            resumePlayback(z);
             return;
         }
-        startEntry(*current, false);
-        if (position) engine_->seek(position);
-        engine_->play();
+        startEntry(z, *current, false);
+        if (position) z.engine->seek(position);
+        z.engine->play();
     }
 
     // Library entries are found by their file, wherever it moved, so restoring reads only the library database
     // (docs/Plan.md §7); an unavailable file stays in the queue, marked unavailable.
-    void restoreQueueSession() {
+    void restoreQueueSession(Zone& z) {
         sessionRestored_ = true;
         const auto started = measure::now();
         auto measured = wil::scope_exit([&] {
             if (measure::measuring())
-                log::info("measure: queue of %zu entries restored in %.0f ms", entries_.size(),
+                log::info("measure: queue of %zu entries restored in %.0f ms", z.q.entries.size(),
                           measure::milliseconds(started, measure::now()));
         });
         auto reader = library_->openReader();
@@ -706,7 +865,7 @@ private:
             entry.artist = files.text(4);
             entry.album = files.text(5);
             entry.albumId = files.integer(6);
-            libraryEntries_[entry.id] = {key, item.file, false, false, spelled};
+            z.q.libraryEntries[entry.id] = {key, item.file, false, false, spelled};
         }
         if (!libraryReader_) libraryReader_.emplace(library_->openReader());
         QueuePolicyState state;
@@ -717,32 +876,32 @@ private:
         if (saved->current) state.current = entries[*saved->current].id;
         state.shuffle = saved->shuffle;
         state.repeat = saved->repeat;
-        policy_.restore(std::move(state));
-        applyMarks(entries);
-        entries_ = std::move(entries);
-        if (const auto current = policy_.current()) {
-            state_.queueEntryId = current->entryId;
-            state_.track = entries_[current->index].source;
-            restored_ = saved->track;
+        z.q.policy.restore(std::move(state));
+        applyMarks(z, entries);
+        z.q.entries = std::move(entries);
+        if (const auto current = z.q.policy.current()) {
+            z.q.entryId = current->entryId;
+            z.q.track = z.q.entries[current->index].source;
+            z.q.restored = saved->track;
         }
-        libraryVersion_ = 0;
-        refreshLibraryAvailability();
-        queueChanged_ = true;
-        auto policy = policy_.state();
+        z.q.libraryVersion = 0;
+        refreshLibraryAvailability(z);
+        z.queueChanged = true;
+        auto policy = z.q.policy.state();
         saved_ = {std::move(policy.entries),
                   std::move(policy.order),
                   std::move(policy.history),
                   policy.current,
                   policy.shuffle,
                   policy.repeat,
-                  restored_.value_or(SavedTrack{}),
-                  engine_->snapshot().state,
+                  z.q.restored.value_or(SavedTrack{}),
+                  z.engine->snapshot().state,
                   std::chrono::steady_clock::now()};
     }
 
-    SavedTrack currentTrack(const audio::EngineSnapshot& playback) const {
-        if (restored_) return *restored_;
-        if (!state_.queueEntryId || !playback.source) return {};
+    SavedTrack currentTrack(const Zone& z, const audio::EngineSnapshot& playback) const {
+        if (z.q.restored) return *z.q.restored;
+        if (!z.q.entryId || !playback.source) return {};
         SavedTrack track{playback.position, playback.total, playback.source, playback.format};
         track.source->md5.reset();
         return track;
@@ -750,7 +909,7 @@ private:
 
     // Written when the queue, its order or the current entry changes, on pause and stop, every 5 seconds while playing
     // (what a crash can lose) and at exit. Large queues are rewritten only when their entries or order change.
-    void saveQueueSession(bool final) {
+    void saveQueueSession(Zone& z, bool final) {
         if (!library_ || !sessionRestored_) return;
         if (sessionWrite_.valid()) {
             if (!final && sessionWrite_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
@@ -762,19 +921,19 @@ private:
                 savedRows_.clear();
             }
         }
-        const auto playback = engine_->snapshot();
+        const auto playback = z.engine->snapshot();
         const auto now = std::chrono::steady_clock::now();
-        auto policy = policy_.state();
+        auto policy = z.q.policy.state();
         SessionParts parts{policy.entries != saved_.entries, policy.order != saved_.order};
-        const auto track = currentTrack(playback);
+        const auto track = currentTrack(z, playback);
         const bool changed =
             parts.entries || parts.order || policy.current != saved_.current || policy.history != saved_.history ||
             policy.shuffle != saved_.shuffle || policy.repeat != saved_.repeat || playback.state != saved_.playState ||
             (playback.state == audio::PlayState::Playing ? now - saved_.at >= std::chrono::seconds(5) : track != saved_.track);
         if (!changed && !final) return;
         std::unordered_map<uint64_t, size_t> index;
-        index.reserve(entries_.size());
-        for (size_t i = 0; i < entries_.size(); ++i) index.emplace(entries_[i].id, i);
+        index.reserve(z.q.entries.size());
+        for (size_t i = 0; i < z.q.entries.size(); ++i) index.emplace(z.q.entries[i].id, i);
         const auto indexes = [&](const std::vector<uint64_t>& ids) {
             std::vector<size_t> result;
             for (const auto id : ids)
@@ -783,12 +942,12 @@ private:
         };
         SavedSession session;
         if (parts.entries) {
-            for (const auto& entry : entries_) {
-                const auto binding = libraryEntries_.find(entry.id);
+            for (const auto& entry : z.q.entries) {
+                const auto binding = z.q.libraryEntries.find(entry.id);
                 const auto title = entry.title.empty()
                                        ? toUtf8(std::filesystem::path(toWide(entry.source.pathUtf8())).stem().wstring())
                                        : entry.title;
-                session.entries.push_back({entry.source, binding == libraryEntries_.end() ? 0 : binding->second.file,
+                session.entries.push_back({entry.source, binding == z.q.libraryEntries.end() ? 0 : binding->second.file,
                                            entry.artist.empty() ? title : title + " · " + entry.artist, entry.automatic});
             }
             std::vector<size_t> rows;
@@ -829,12 +988,14 @@ private:
     void execute(const Pending& pending) {
         const auto& c = pending.command;
         state_.command = pending.stamp;
-        attempted_ = {}; // a command may restart the stream, so the upcoming entry may be queued again
-        checked_ = {};
         state_.commandError.reset();
         state_.controlPanelOpened.reset();
+        // A command of no zone may add or remove zones, so it uses none after that.
+        Zone& z = zoneFor(c);
+        z.attempted = {}; // a command may restart the stream, so the upcoming entry may be queued again
+        z.checked = {};
         if (pending.restore && !c.source) {
-            restoreQueueSession();
+            restoreQueueSession(z);
             return;
         }
         if (c.source) {
@@ -842,60 +1003,61 @@ private:
                 std::error_code ec;
                 if (!std::filesystem::exists(std::filesystem::path(toWide(c.source->pathUtf8())), ec)) return;
             }
-            const auto ids = replaceQueue({*c.source});
-            startEntry(policy_.select(ids.front()), c.kind == CommandKind::OpenAndPlay);
+            const auto ids = replaceQueue(z, {*c.source});
+            startEntry(z, z.q.policy.select(ids.front()), c.kind == CommandKind::OpenAndPlay);
         } else {
             switch (c.kind) {
             case CommandKind::QueueReplace: {
-                const auto ids = replaceQueue(c.sources, size_t(c.index));
-                startEntry(policy_.select(ids[size_t(c.index)]), true);
+                const auto ids = replaceQueue(z, c.sources, size_t(c.index));
+                startEntry(z, z.q.policy.select(ids[size_t(c.index)]), true);
                 break;
             }
             case CommandKind::QueueReorder:
-                reorderQueue(c.entryIds);
+                reorderQueue(z, c.entryIds);
                 break;
             case CommandKind::QueueAdd:
-                appendQueue(c.sources, false);
+                appendQueue(z, c.sources, false);
                 break;
             case CommandKind::QueuePlayNext:
-                appendQueue(c.sources, true);
+                appendQueue(z, c.sources, true);
                 break;
             case CommandKind::QueueRemove:
-                removeQueue(c.entryIds);
+                removeQueue(z, c.entryIds);
                 break;
             case CommandKind::QueueClear:
-                clearQueue();
+                clearQueue(z);
                 break;
             case CommandKind::QueueSelect:
-                startEntry(policy_.select(c.entryId), true);
+                startEntry(z, z.q.policy.select(c.entryId), true);
                 break;
             case CommandKind::Next:
-                if (const auto next = policy_.next(false))
-                    startEntry(*next, true);
-                else if (const auto picked = autoplayAllowed() && appendAutoplay() ? policy_.next(false) : std::nullopt)
-                    startEntry(*picked, true);
+                if (const auto next = z.q.policy.next(false))
+                    startEntry(z, *next, true);
+                else if (const auto picked = autoplayAllowed(z) && appendAutoplay(z) ? z.q.policy.next(false) : std::nullopt)
+                    startEntry(z, *picked, true);
                 else
-                    engine_->stop();
+                    z.engine->stop();
                 break;
             case CommandKind::Previous: {
-                const auto playback = engine_->snapshot();
+                const auto playback = z.engine->snapshot();
                 const auto previous =
-                    restored_ ? policy_.previous(restored_->position, restored_->source ? restored_->source->sampleRate : 0)
-                              : policy_.previous(playback.position, playback.source ? playback.source->sampleRate : 0);
+                    z.q.restored
+                        ? z.q.policy.previous(z.q.restored->position, z.q.restored->source ? z.q.restored->source->sampleRate : 0)
+                        : z.q.policy.previous(playback.position, playback.source ? playback.source->sampleRate : 0);
                 if (!previous) break;
-                if (previous->entryId == state_.queueEntryId && restored_)
-                    restored_->position = 0;
-                else if (previous->entryId == state_.queueEntryId)
-                    engine_->seek(0);
+                if (previous->entryId == z.q.entryId && z.q.restored)
+                    z.q.restored->position = 0;
+                else if (previous->entryId == z.q.entryId)
+                    z.engine->seek(0);
                 else
-                    startEntry(*previous, true);
+                    startEntry(z, *previous, true);
                 break;
             }
             case CommandKind::SetShuffle:
-                if (c.shuffle) policy_.setShuffle(*c.shuffle);
+                if (c.shuffle) z.q.policy.setShuffle(*c.shuffle);
                 break;
             case CommandKind::SetRepeat:
-                if (c.repeat) policy_.setRepeat(*c.repeat);
+                if (c.repeat) z.q.policy.setRepeat(*c.repeat);
                 break;
             case CommandKind::AddLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
@@ -906,51 +1068,58 @@ private:
             case CommandKind::RemoveLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
                 defer([this, root = c.rootId] { LibraryScanner(*library_).removeRoot(root); },
-                      [this] { refreshLibraryAvailability(); });
+                      [this] {
+                          for (auto& zone : zones_) refreshLibraryAvailability(*zone);
+                      });
                 break;
             case CommandKind::Play:
-                if (restored_)
-                    resumeRestored(restored_->position);
+                if (z.q.restored)
+                    resumeRestored(z, z.q.restored->position);
                 else
-                    resumePlayback();
+                    resumePlayback(z);
                 break;
             case CommandKind::Pause:
-                engine_->pause();
+                z.engine->pause();
                 break;
             case CommandKind::TogglePause:
-                if (restored_)
-                    resumeRestored(restored_->position);
-                else if (engine_->snapshot().state == audio::PlayState::Stopped)
-                    resumePlayback();
+                if (z.q.restored)
+                    resumeRestored(z, z.q.restored->position);
+                else if (z.engine->snapshot().state == audio::PlayState::Stopped)
+                    resumePlayback(z);
                 else
-                    engine_->togglePause();
+                    z.engine->togglePause();
                 break;
             case CommandKind::Stop:
-                engine_->stop();
-                if (restored_) restored_->position = 0;
+                z.engine->stop();
+                if (z.q.restored) z.q.restored->position = 0;
                 break;
             case CommandKind::Seek:
-                if (restored_) {
-                    restored_->position = restored_->total ? std::min(c.frame, restored_->total) : c.frame;
+                if (z.q.restored) {
+                    z.q.restored->position = z.q.restored->total ? std::min(c.frame, z.q.restored->total) : c.frame;
                     break;
                 }
-                if (session_) session_->interrupt();
-                engine_->seek(c.frame);
+                if (z.q.session) z.q.session->interrupt();
+                z.engine->seek(c.frame);
                 break;
+            // A player's own volume is followed for the output in use only (MZ-R05 follows every zone's).
             case CommandKind::SetPlayerVolume:
-                if (playerVolume_)
+                if (&z != &selected())
+                    break;
+                else if (playerVolume_)
                     playerVolume_->setLevel(*c.playerVolume);
                 else if (receiverVolumeWanted())
                     changeReceiverLevel([&](AirPlayLevel& level) { level.level = *c.playerVolume; });
                 break;
             case CommandKind::SetPlayerMute:
-                if (playerVolume_)
+                if (&z != &selected())
+                    break;
+                else if (playerVolume_)
                     playerVolume_->setMuted(*c.playerMute);
                 else if (receiverVolumeWanted())
                     changeReceiverLevel([&](AirPlayLevel& level) { level.muted = *c.playerMute; });
                 break;
             case CommandKind::SetReceiverVolume:
-                if (receiverVolumeWanted() && c.playerVolume &&
+                if (&z == &selected() && receiverVolumeWanted() && c.playerVolume &&
                     std::ranges::find(settings_.airplayGroup, c.receiver) != settings_.airplayGroup.end()) {
                     settings_.airplayLevels.try_emplace(c.receiver).first->second.level = std::min(*c.playerVolume, 100u);
                     groupBaseline_.reset();
@@ -960,8 +1129,10 @@ private:
             case CommandKind::ResetPlayStatistics:
             case CommandKind::ResetAllPlayStatistics:
                 if (!library_) throw std::logic_error("Server library is not configured");
-                if (session_ && (c.tracks.empty() || std::ranges::find(c.tracks, session_->track()) != c.tracks.end()))
-                    session_->discard();
+                for (auto& zone : zones_)
+                    if (auto& session = zone->q.session;
+                        session && (c.tracks.empty() || std::ranges::find(c.tracks, session->track()) != c.tracks.end()))
+                        session->discard();
                 defer([this, tracks = c.tracks] { resetPlayStatistics(*library_, tracks); });
                 break;
             case CommandKind::SetFavorite:
@@ -976,9 +1147,11 @@ private:
                             setAlbumFavorite(*library_, albums, favorite);
                     },
                     [this] {
-                        applyMarks(entries_);
+                        for (auto& zone : zones_) {
+                            applyMarks(*zone, zone->q.entries);
+                            zone->queueChanged = true;
+                        }
                         ++marks_;
-                        queueChanged_ = true;
                     });
                 break;
             case CommandKind::SetArtistFavorite:
@@ -988,7 +1161,6 @@ private:
             case CommandKind::ApplySettings: {
                 if (c.settings) {
                     const auto lastFile = settings_.lastFile;
-                    const auto replayGain = settings_.replayGain;
                     const auto crossfade = settings_.crossfade;
                     const bool adoptOutputSets = settings_.adoptOutputSets;
                     const auto outputs = settings_.outputs;
@@ -1006,16 +1178,22 @@ private:
                     forgetDeletedReceivers(outputs);
                     checkEnabledReceivers(outputs);
                     followAirPlayGroup();
-                    engine_->applySettings(settings_);
+                    std::vector<std::pair<std::string, ReplayGainSettings>> gains;
+                    gains.reserve(zones_.size());
+                    for (const auto& zone : zones_) gains.emplace_back(zone->id, zone->settings.replayGain);
+                    syncZones();
                     discord_->configure(settings_.discord);
                     shareLoudnessInputs();
                     // A queued track took the old gain and crossfade; it is queued again with the new ones. The playing
                     // one keeps its.
-                    if ((settings_.replayGain != replayGain || settings_.crossfade != crossfade) && !chain_.empty() &&
-                        engine_->clearNext()) {
-                        chain_.pop_back();
-                        attempted_ = {};
-                        checked_ = {};
+                    for (auto& zone : zones_) {
+                        const auto was = std::ranges::find(gains, zone->id, &std::pair<std::string, ReplayGainSettings>::first);
+                        const bool gain = was != gains.end() && was->second != zone->settings.replayGain;
+                        if ((gain || settings_.crossfade != crossfade) && !zone->chain.empty() && zone->engine->clearNext()) {
+                            zone->chain.pop_back();
+                            zone->attempted = {};
+                            zone->checked = {};
+                        }
                     }
                     persist();
                 }
@@ -1032,7 +1210,7 @@ private:
                 break;
             case CommandKind::ShowControlPanel:
                 try {
-                    state_.controlPanelOpened = engine_->showControlPanel();
+                    state_.controlPanelOpened = z.engine->showControlPanel();
                 } catch (const audio::Error& e) {
                     state_.controlPanelOpened = false;
                     state_.commandError = Failure{e.code(), e.what()};
@@ -1042,32 +1220,35 @@ private:
                 break;
             }
         }
-        waitForEngine();
+        if (actsOnZone(c.kind) || pending.restore)
+            waitForEngine(z);
+        else
+            for (auto& zone : zones_) waitForEngine(*zone);
     }
 
-    std::vector<uint64_t> replaceQueue(const std::vector<TrackSource>& sources, size_t selected = 0) {
-        libraryEntries_.clear();
-        auto entries = buildQueueEntries(sources);
+    std::vector<uint64_t> replaceQueue(Zone& z, const std::vector<TrackSource>& sources, size_t selected = 0) {
+        z.q.libraryEntries.clear();
+        auto entries = buildQueueEntries(z, sources);
         std::vector<uint64_t> ids;
         ids.reserve(entries.size());
         for (const auto& e : entries) ids.push_back(e.id);
-        policy_.replace(ids);
-        entries_ = std::move(entries);
-        libraryVersion_ = 0;
-        refreshLibraryAvailability();
-        if (policy_.unavailable(ids[selected])) {
-            engine_->stop();
-            engine_->waitIdle();
-            state_.queueEntryId = 0;
-            state_.track.reset();
-            restored_.reset();
-            chain_.clear();
+        z.q.policy.replace(ids);
+        z.q.entries = std::move(entries);
+        z.q.libraryVersion = 0;
+        refreshLibraryAvailability(z);
+        if (z.q.policy.unavailable(ids[selected])) {
+            z.engine->stop();
+            z.engine->waitIdle();
+            z.q.entryId = 0;
+            z.q.track.reset();
+            z.q.restored.reset();
+            z.chain.clear();
             throw std::invalid_argument("queue entry is unavailable");
         }
         return ids;
     }
 
-    std::vector<QueueEntry> buildQueueEntries(const std::vector<TrackSource>& sources) {
+    std::vector<QueueEntry> buildQueueEntries(Zone& z, const std::vector<TrackSource>& sources) {
         std::vector<QueueEntry> entries;
         entries.reserve(sources.size());
         if (library_ && !libraryReader_) libraryReader_.emplace(library_->openReader());
@@ -1089,7 +1270,7 @@ private:
             entries.push_back({id, source});
             if (lookup) {
                 try {
-                    auto& binding = libraryEntries_[id];
+                    auto& binding = z.q.libraryEntries[id];
                     const std::filesystem::path given(toWide(source.pathUtf8()));
                     auto& file = *lookup;
                     file.reset();
@@ -1116,12 +1297,12 @@ private:
                 }
             }
         }
-        applyMarks(entries);
+        applyMarks(z, entries);
         return entries;
     }
 
     // The entries' library files and their favorite marks.
-    void applyMarks(std::vector<QueueEntry>& entries) {
+    void applyMarks(Zone& z, std::vector<QueueEntry>& entries) {
         if (!library_) return;
         std::unordered_set<int64_t> favorites;
         try {
@@ -1133,102 +1314,104 @@ private:
             return;
         }
         for (auto& entry : entries) {
-            const auto binding = libraryEntries_.find(entry.id);
-            entry.file = binding == libraryEntries_.end() ? 0 : binding->second.file;
+            const auto binding = z.q.libraryEntries.find(entry.id);
+            entry.file = binding == z.q.libraryEntries.end() ? 0 : binding->second.file;
             entry.favorite = entry.file && favorites.contains(entry.file);
         }
     }
 
-    void appendQueue(const std::vector<TrackSource>& sources, bool playNext) {
+    void appendQueue(Zone& z, const std::vector<TrackSource>& sources, bool playNext) {
         // The user's tracks play next, so automatic entries that have not started yet go (docs/Plan.md §8.1).
         const auto playing =
-            std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
+            std::find_if(z.q.entries.begin(), z.q.entries.end(), [&](const QueueEntry& e) { return e.id == z.q.entryId; });
         std::vector<uint64_t> pending;
-        for (auto it = playing == entries_.end() ? entries_.begin() : playing + 1; it != entries_.end(); ++it)
+        for (auto it = playing == z.q.entries.end() ? z.q.entries.begin() : playing + 1; it != z.q.entries.end(); ++it)
             if (it->automatic) pending.push_back(it->id);
-        if (!pending.empty()) removeQueue(pending);
-        auto entries = buildQueueEntries(sources);
+        if (!pending.empty()) removeQueue(z, pending);
+        auto entries = buildQueueEntries(z, sources);
         std::vector<uint64_t> ids;
         ids.reserve(entries.size());
         for (const auto& e : entries) ids.push_back(e.id);
-        policy_.append(ids, playNext);
-        auto at = entries_.end();
+        z.q.policy.append(ids, playNext);
+        auto at = z.q.entries.end();
         if (playNext)
-            if (const auto current = std::find_if(entries_.begin(), entries_.end(),
-                                                  [&](const QueueEntry& e) { return e.id == state_.queueEntryId; });
-                current != entries_.end())
+            if (const auto current = std::find_if(z.q.entries.begin(), z.q.entries.end(),
+                                                  [&](const QueueEntry& e) { return e.id == z.q.entryId; });
+                current != z.q.entries.end())
                 at = current + 1;
-        entries_.insert(at, std::make_move_iterator(entries.begin()), std::make_move_iterator(entries.end()));
-        libraryVersion_ = 0;
-        refreshLibraryAvailability();
+        z.q.entries.insert(at, std::make_move_iterator(entries.begin()), std::make_move_iterator(entries.end()));
+        z.q.libraryVersion = 0;
+        refreshLibraryAvailability(z);
     }
 
     // The Engine may already decode entries about to leave the queue; it drops them while the queue still knows them,
     // so a transition already heard becomes current first.
-    void discardPreloads(const std::function<bool(uint64_t)>& leaving) {
-        if (std::ranges::none_of(chain_, leaving)) return;
-        engine_->discardPreloads();
-        commitTransition();
-        chain_.clear();
-        attempted_ = {};
-        checked_ = {};
+    void discardPreloads(Zone& z, const std::function<bool(uint64_t)>& leaving) {
+        if (std::ranges::none_of(z.chain, leaving)) return;
+        z.engine->discardPreloads();
+        commitTransition(z);
+        z.chain.clear();
+        z.attempted = {};
+        z.checked = {};
     }
 
-    void removeQueue(const std::vector<uint64_t>& ids) {
+    void removeQueue(Zone& z, const std::vector<uint64_t>& ids) {
         const std::unordered_set<uint64_t> leaving(ids.begin(), ids.end());
-        discardPreloads([&](uint64_t id) { return leaving.contains(id); });
-        policy_.remove(ids);
-        if (restored_ && leaving.contains(state_.queueEntryId)) {
-            restored_.reset();
-            state_.queueEntryId = 0;
-            state_.track.reset();
+        discardPreloads(z, [&](uint64_t id) { return leaving.contains(id); });
+        z.q.policy.remove(ids);
+        if (z.q.restored && leaving.contains(z.q.entryId)) {
+            z.q.restored.reset();
+            z.q.entryId = 0;
+            z.q.track.reset();
         }
-        std::erase_if(entries_, [&](const QueueEntry& e) { return leaving.contains(e.id); });
-        for (const auto id : ids) libraryEntries_.erase(id);
+        std::erase_if(z.q.entries, [&](const QueueEntry& e) { return leaving.contains(e.id); });
+        for (const auto id : ids) z.q.libraryEntries.erase(id);
     }
 
-    void clearQueue() {
-        discardPreloads([](uint64_t) { return true; });
-        const uint64_t current = state_.queueEntryId;
-        const auto keep = std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == current; });
-        policy_.clearExcept(keep == entries_.end() ? std::nullopt : std::optional(current));
-        if (keep == entries_.end())
-            entries_.clear();
+    void clearQueue(Zone& z) {
+        discardPreloads(z, [](uint64_t) { return true; });
+        const uint64_t current = z.q.entryId;
+        const auto keep =
+            std::find_if(z.q.entries.begin(), z.q.entries.end(), [&](const QueueEntry& e) { return e.id == current; });
+        z.q.policy.clearExcept(keep == z.q.entries.end() ? std::nullopt : std::optional(current));
+        if (keep == z.q.entries.end())
+            z.q.entries.clear();
         else {
             QueueEntry currentEntry = *keep;
-            entries_ = {std::move(currentEntry)};
+            z.q.entries = {std::move(currentEntry)};
         }
-        std::erase_if(libraryEntries_, [&](const auto& item) { return item.first != current; });
+        std::erase_if(z.q.libraryEntries, [&](const auto& item) { return item.first != current; });
     }
 
     // `idle` passes may skip a large queue for up to a second, since a scan changes the library many times a second.
-    void refreshLibraryAvailability(bool idle = false) {
-        if (!libraryReader_ || libraryEntries_.empty()) return;
+    void refreshLibraryAvailability(Zone& z, bool idle = false) {
+        if (!libraryReader_ || z.q.libraryEntries.empty()) return;
         auto& reader = *libraryReader_;
         const auto version = reader.scalar("PRAGMA data_version").value();
-        if (version == libraryVersion_) return;
-        const bool large = libraryEntries_.size() > 2000;
+        if (version == z.q.libraryVersion) return;
+        const bool large = z.q.libraryEntries.size() > 2000;
         const auto now = std::chrono::steady_clock::now();
         // Availability comes from files and roots alone, and a large queue reads all of files: other commits, such as
         // the queue session saved every 5 s while playing, are left for the once-a-minute pass.
         const auto fileChanges = library_->fileChanges();
-        if (large && libraryVersion_ && fileChanges == availabilityFiles_ && now - availabilityChecked_ < std::chrono::minutes(1))
+        if (large && z.q.libraryVersion && fileChanges == z.q.availabilityFiles &&
+            now - z.q.availabilityChecked < std::chrono::minutes(1))
             return;
-        if (idle && large && now - availabilityChecked_ < std::chrono::seconds(1)) return;
-        availabilityChecked_ = now;
-        availabilityFiles_ = fileChanges;
-        libraryVersion_ = version;
+        if (idle && large && now - z.q.availabilityChecked < std::chrono::seconds(1)) return;
+        z.q.availabilityChecked = now;
+        z.q.availabilityFiles = fileChanges;
+        z.q.libraryVersion = version;
         std::vector<uint64_t> deleted;
-        if (const auto deletions = libraryDeletions(reader); deletions != libraryDeletions_) {
-            libraryDeletions_ = deletions;
+        if (const auto deletions = libraryDeletions(reader); deletions != z.q.libraryDeletions) {
+            z.q.libraryDeletions = deletions;
             auto exists = reader.prepare("SELECT 1 FROM files WHERE id=?");
-            for (const auto& [id, binding] : libraryEntries_) {
+            for (const auto& [id, binding] : z.q.libraryEntries) {
                 exists.reset();
                 if (binding.file && !exists.bind(1, binding.file).step()) deleted.push_back(id);
             }
             if (!deleted.empty()) {
-                removeQueue(deleted);
-                queueChanged_ = true;
+                removeQueue(z, deleted);
+                z.queueChanged = true;
             }
         }
         std::vector<std::wstring> removed;
@@ -1248,7 +1431,7 @@ private:
         }
         auto file = reader.prepare("SELECT f.available,r.online,r.removed FROM files f "
                                    "JOIN roots r ON r.id=f.root_id WHERE f.id=?");
-        for (auto& [id, binding] : libraryEntries_) {
+        for (auto& [id, binding] : z.q.libraryEntries) {
             bool unavailable = binding.detached;
             if (binding.file && large) {
                 unavailable = gone.contains(binding.file);
@@ -1259,38 +1442,38 @@ private:
                 for (const auto& root : removed)
                     if (binding.path.starts_with(root)) binding.detached = unavailable = true;
             }
-            queueChanged_ = policy_.setUnavailable(id, unavailable) || queueChanged_;
+            z.queueChanged = z.q.policy.setUnavailable(id, unavailable) || z.queueChanged;
         }
-        discardPreloads([&](uint64_t id) { return policy_.unavailable(id); });
+        discardPreloads(z, [&](uint64_t id) { return z.q.policy.unavailable(id); });
     }
 
-    void reorderQueue(const std::vector<uint64_t>& ids) {
-        policy_.reorder(ids);
+    void reorderQueue(Zone& z, const std::vector<uint64_t>& ids) {
+        z.q.policy.reorder(ids);
         std::unordered_map<uint64_t, QueueEntry*> byId;
-        byId.reserve(entries_.size());
-        for (auto& entry : entries_) byId.emplace(entry.id, &entry);
+        byId.reserve(z.q.entries.size());
+        for (auto& entry : z.q.entries) byId.emplace(entry.id, &entry);
         std::vector<QueueEntry> entries;
         entries.reserve(ids.size());
         for (const auto id : ids) entries.push_back(std::move(*byId.at(id)));
-        entries_ = std::move(entries);
+        z.q.entries = std::move(entries);
     }
 
-    const QueueEntry& entry(uint64_t id) const {
-        return *std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == id; });
+    const QueueEntry& entry(const Zone& z, uint64_t id) const {
+        return *std::find_if(z.q.entries.begin(), z.q.entries.end(), [&](const QueueEntry& e) { return e.id == id; });
     }
 
     // Library sources arrive as lowercase index keys; the file opens and shows under its on-disk spelling, which is
     // set once, when the entry is first opened. The scan stored it, so a share is asked only for a file it did not: a
     // NAS busy reading the playing file took most of a second to answer, before the next track could open.
-    const TrackSource& playable(uint64_t id) {
-        auto& queued = *std::find_if(entries_.begin(), entries_.end(), [&](const QueueEntry& e) { return e.id == id; });
-        const auto binding = libraryEntries_.find(id);
-        if (binding != libraryEntries_.end() && binding->second.file && !binding->second.spelled) {
+    const TrackSource& playable(Zone& z, uint64_t id) {
+        auto& queued = *std::find_if(z.q.entries.begin(), z.q.entries.end(), [&](const QueueEntry& e) { return e.id == id; });
+        const auto binding = z.q.libraryEntries.find(id);
+        if (binding != z.q.libraryEntries.end() && binding->second.file && !binding->second.spelled) {
             binding->second.spelled = true;
             auto spelled = libraryReader_ ? libraryStoredPath(*libraryReader_, binding->second.file) : std::nullopt;
             if (!spelled) spelled = libraryDisplayPath(queued.source.pathUtf8());
             queued.source = TrackSource(*spelled, queued.source.range(), queued.source.decoder());
-            queueChanged_ = true;
+            z.queueChanged = true;
         }
         return queued.source;
     }
@@ -1298,60 +1481,60 @@ private:
     // Ends of the previous entry that are still pending belong to playback this call supersedes.
     // `afterEnd`: the previous entry ended naturally. Changing to another entry otherwise is manual and crossfades while
     // crossfade is on (docs/Plan.md §5.4); restarting the same entry does not.
-    void startEntry(const QueuePosition& position, bool play, bool afterEnd = false) {
-        if (policy_.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
-        restored_.reset();
-        if (!afterEnd) failuresInARow_ = 0;
-        engine_->waitIdle();
-        const auto before = engine_->snapshot();
-        seenTrackEnds_ = before.trackEnds;
-        seenTransitions_ = before.transitions;
-        chain_.clear();
-        const auto& source = playable(position.entryId);
+    void startEntry(Zone& z, const QueuePosition& position, bool play, bool afterEnd = false) {
+        if (z.q.policy.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
+        z.q.restored.reset();
+        if (!afterEnd) z.q.failuresInARow = 0;
+        z.engine->waitIdle();
+        const auto before = z.engine->snapshot();
+        z.seenTrackEnds = before.trackEnds;
+        z.seenTransitions = before.transitions;
+        z.chain.clear();
+        const auto& source = playable(z, position.entryId);
         const std::filesystem::path path(toWide(source.pathUtf8()));
-        shareLibraryLength(position.entryId);
-        const bool manualChange = !afterEnd && state_.queueEntryId && state_.queueEntryId != position.entryId;
-        state_.track = source;
-        state_.queueEntryId = position.entryId;
-        settings_.lastFile = path.wstring();
+        shareLibraryLength(z, position.entryId);
+        const bool manualChange = !afterEnd && z.q.entryId && z.q.entryId != position.entryId;
+        z.q.track = source;
+        z.q.entryId = position.entryId;
+        if (&z == &selected()) settings_.lastFile = path.wstring();
         if (play && manualChange && settings_.crossfade.enabled)
-            engine_->crossfadeTo(path, source.decoder(), gainFor(position.entryId));
+            z.engine->crossfadeTo(path, source.decoder(), gainFor(z, position.entryId));
         else if (play)
-            engine_->openAndPlay(path, source.decoder(), gainFor(position.entryId), afterEnd);
+            z.engine->openAndPlay(path, source.decoder(), gainFor(z, position.entryId), afterEnd);
         else
-            engine_->load(path, source.decoder(), gainFor(position.entryId));
-        waitForEngine(); // the next snapshot pairs this entry with its own playback state
+            z.engine->load(path, source.decoder(), gainFor(z, position.entryId));
+        waitForEngine(z); // the next snapshot pairs this entry with its own playback state
         persistSoon();
     }
 
     // A gapless transition already plays the queued entry; it becomes current without reopening anything.
-    void commitTransition() {
-        const auto playback = engine_->snapshot();
-        if (playback.transitions == seenTransitions_) return;
-        auto heard = playback.transitions - seenTransitions_;
-        seenTransitions_ = playback.transitions;
-        for (; heard && !chain_.empty(); --heard) {
-            const auto id = chain_.front();
-            chain_.pop_front();
-            auto position = policy_.next(true);
-            if (!position || position->entryId != id) position = policy_.select(id, true);
-            const auto& source = entry(position->entryId).source;
-            state_.track = source;
-            state_.queueEntryId = position->entryId;
-            settings_.lastFile = toWide(source.pathUtf8());
-            queueChanged_ = true;
+    void commitTransition(Zone& z) {
+        const auto playback = z.engine->snapshot();
+        if (playback.transitions == z.seenTransitions) return;
+        auto heard = playback.transitions - z.seenTransitions;
+        z.seenTransitions = playback.transitions;
+        for (; heard && !z.chain.empty(); --heard) {
+            const auto id = z.chain.front();
+            z.chain.pop_front();
+            auto position = z.q.policy.next(true);
+            if (!position || position->entryId != id) position = z.q.policy.select(id, true);
+            const auto& source = entry(z, position->entryId).source;
+            z.q.track = source;
+            z.q.entryId = position->entryId;
+            if (&z == &selected()) settings_.lastFile = toWide(source.pathUtf8());
+            z.queueChanged = true;
         }
         persistSoon();
     }
 
     // mpg123 scans the whole stream while it plays, so its length, once known, replaces a scan-time estimate.
-    void recordPlaybackLength() {
-        if (!library_ || !state_.queueEntryId) return;
-        const auto binding = libraryEntries_.find(state_.queueEntryId);
-        if (binding == libraryEntries_.end() || !binding->second.file || binding->second.lengthRecorded) return;
-        const auto playback = engine_->snapshot();
+    void recordPlaybackLength(Zone& z) {
+        if (!library_ || !z.q.entryId) return;
+        const auto binding = z.q.libraryEntries.find(z.q.entryId);
+        if (binding == z.q.libraryEntries.end() || !binding->second.file || binding->second.lengthRecorded) return;
+        const auto playback = z.engine->snapshot();
         if (!playback.source || !playback.source->totalFrames || playback.decoder != audio::DecoderKind::Mpg123 ||
-            playback.file != toWide(entry(state_.queueEntryId).source.pathUtf8()))
+            playback.file != toWide(entry(z, z.q.entryId).source.pathUtf8()))
             return;
         binding->second.lengthRecorded = true;
         LibraryScanner(*library_).recordExactLength(binding->second.file, playback.source->sampleRate,
@@ -1359,70 +1542,71 @@ private:
     }
 
     // A play session lasts while one library entry stays current (docs/Plan.md §7.8).
-    void updatePlaySession() {
+    void updatePlaySession(Zone& z) {
         if (!library_) return;
-        const auto playback = engine_->snapshot();
+        const auto playback = z.engine->snapshot();
         const auto now = std::chrono::steady_clock::now();
         // Audio the device can have played since the previous pass; larger jumps are seeks or restarts.
         const auto reachable = [&](uint32_t rate) {
-            return uint64_t((std::chrono::duration<double>(now - sessionSeen_).count() * 1.25 + 0.25) * rate);
+            return uint64_t((std::chrono::duration<double>(now - z.q.sessionSeen).count() * 1.25 + 0.25) * rate);
         };
-        if (session_) {
-            const bool current = playback.transitions == sessionTransitions_ && playback.trackEnds == sessionTrackEnds_ &&
-                                 state_.queueEntryId == sessionEntry_ && playback.file == sessionFile_;
+        if (z.q.session) {
+            const bool current = playback.transitions == z.q.sessionTransitions && playback.trackEnds == z.q.sessionTrackEnds &&
+                                 z.q.entryId == z.q.sessionEntry && playback.file == z.q.sessionFile;
             if (!current || playback.state == audio::PlayState::Stopped) {
                 // A gapless transition or natural end heard the rest of the track; a failure keeps what was observed.
-                if (playback.transitions != sessionTransitions_ || (playback.trackEnds != sessionTrackEnds_ && !playback.error))
-                    session_->finish();
-                session_->persist(*library_);
-                session_.reset();
+                if (playback.transitions != z.q.sessionTransitions ||
+                    (playback.trackEnds != z.q.sessionTrackEnds && !playback.error))
+                    z.q.session->finish();
+                z.q.session->persist(*library_);
+                z.q.session.reset();
             } else if (playback.state == audio::PlayState::Playing) {
                 // Rendering can move into a queued file before the engine publishes the transition; a jump back
                 // to its start belongs to the next file, so this session waits for the transition instead.
-                const auto last = session_->position();
-                const bool nextFile =
-                    playback.queuedFiles > 0 && last && playback.position < *last && playback.position <= reachable(sessionRate_);
-                if (!nextFile) session_->observe(playback.position, reachable(sessionRate_));
+                const auto last = z.q.session->position();
+                const bool nextFile = playback.queuedFiles > 0 && last && playback.position < *last &&
+                                      playback.position <= reachable(z.q.sessionRate);
+                if (!nextFile) z.q.session->observe(playback.position, reachable(z.q.sessionRate));
             } else {
-                session_->interrupt();
+                z.q.session->interrupt();
             }
         }
-        if (!session_ && state_.queueEntryId && playback.state != audio::PlayState::Stopped && playback.source &&
+        if (!z.q.session && z.q.entryId && playback.state != audio::PlayState::Stopped && playback.source &&
             playback.source->sampleRate) {
-            const auto binding = libraryEntries_.find(state_.queueEntryId);
-            if (binding != libraryEntries_.end() && binding->second.file &&
-                playback.file == toWide(entry(state_.queueEntryId).source.pathUtf8())) {
-                session_.emplace(LibraryTrackKey{binding->second.file}, playback.source->sampleRate, playback.total);
-                sessionEntry_ = state_.queueEntryId;
-                sessionFile_ = playback.file;
-                sessionTransitions_ = playback.transitions;
-                sessionTrackEnds_ = playback.trackEnds;
-                sessionRate_ = playback.source->sampleRate;
-                sessionPersisted_ = now;
-                sessionCountPersisted_ = false;
+            const auto binding = z.q.libraryEntries.find(z.q.entryId);
+            if (binding != z.q.libraryEntries.end() && binding->second.file &&
+                playback.file == toWide(entry(z, z.q.entryId).source.pathUtf8())) {
+                z.q.session.emplace(LibraryTrackKey{binding->second.file}, playback.source->sampleRate, playback.total);
+                z.q.sessionEntry = z.q.entryId;
+                z.q.sessionFile = playback.file;
+                z.q.sessionTransitions = playback.transitions;
+                z.q.sessionTrackEnds = playback.trackEnds;
+                z.q.sessionRate = playback.source->sampleRate;
+                z.q.sessionPersisted = now;
+                z.q.sessionCountPersisted = false;
                 // A track that started since the previous pass is credited from its first frame.
                 if (playback.state == audio::PlayState::Playing) {
-                    session_->observe(0, 0);
-                    session_->observe(playback.position, reachable(sessionRate_));
+                    z.q.session->observe(0, 0);
+                    z.q.session->observe(playback.position, reachable(z.q.sessionRate));
                 }
             }
         }
-        sessionSeen_ = now;
-        if (!session_) return;
-        if (now - sessionPersisted_ >= std::chrono::seconds(30) || (session_->counted() && !sessionCountPersisted_)) {
-            session_->persist(*library_);
-            sessionPersisted_ = now;
-            sessionCountPersisted_ = session_->counted();
+        z.q.sessionSeen = now;
+        if (!z.q.session) return;
+        if (now - z.q.sessionPersisted >= std::chrono::seconds(30) || (z.q.session->counted() && !z.q.sessionCountPersisted)) {
+            z.q.session->persist(*library_);
+            z.q.sessionPersisted = now;
+            z.q.sessionCountPersisted = z.q.session->counted();
         }
     }
 
     // Keeps the entries that follow queued in the engine while a stream is open, so they play gaplessly. The engine
     // takes one more as soon as its decoder moves on to the previous one, seconds before that one is heard.
-    void ensureNextQueued() {
-        const auto playback = engine_->snapshot();
-        if (playback.transitions != seenTransitions_) return; // committed on the next pass
-        if (playback.queuedFiles == 0) chain_.clear();        // a restarted stream forgets queued files
-        if (!playback.output || !state_.queueEntryId || !state_.track) return;
+    void ensureNextQueued(Zone& z) {
+        const auto playback = z.engine->snapshot();
+        if (playback.transitions != z.seenTransitions) return; // committed on the next pass
+        if (playback.queuedFiles == 0) z.chain.clear();        // a restarted stream forgets queued files
+        if (!playback.output || !z.q.entryId || !z.q.track) return;
         // Opening the next file while mpg123 scans this one would wait behind the scan's reads, and this thread with it,
         // which holds back every command: it waits for the scan, or for the last seconds of the track.
         if (playback.decoder == audio::DecoderKind::Mpg123 && playback.source && !playback.source->totalFrames) {
@@ -1431,69 +1615,81 @@ private:
             if (left > kLastSeconds * playback.source->sampleRate) return;
         }
         // Predicting copies the policy, which is costly for a large queue; it is redone only when its inputs changed.
-        const QueueCheck check{policy_.revision(), state_.queueEntryId, {chain_.begin(), chain_.end()}, playback.nextSlotFree};
-        if (check == checked_) return;
-        checked_ = check;
-        auto copy = policy_;
-        for (size_t i = 0; i < chain_.size(); ++i) {
+        const QueueCheck check{z.q.policy.revision(), z.q.entryId, {z.chain.begin(), z.chain.end()}, playback.nextSlotFree};
+        if (check == z.checked) return;
+        z.checked = check;
+        auto copy = z.q.policy;
+        for (size_t i = 0; i < z.chain.size(); ++i) {
             const auto predicted = copy.next(true);
-            if (predicted && predicted->entryId == chain_[i]) continue;
+            if (predicted && predicted->entryId == z.chain[i]) continue;
             // The order changed: withdraw a file still waiting in the slot; one already decoding plays regardless.
-            if (i + 1 == chain_.size() && !playback.nextSlotFree && engine_->clearNext()) {
-                chain_.pop_back();
+            if (i + 1 == z.chain.size() && !playback.nextSlotFree && z.engine->clearNext()) {
+                z.chain.pop_back();
                 return;
             }
-            copy.select(chain_[i]);
+            copy.select(z.chain[i]);
         }
-        if (!playback.nextSlotFree || chain_.size() >= 2) return;
+        if (!playback.nextSlotFree || z.chain.size() >= 2) return;
         const auto upcoming = copy.next(true); // the copy is the prediction's own, so upcoming() would copy it again
         if (!upcoming) return;
-        const QueueAttempt attempt{state_.queueEntryId, upcoming->entryId, policy_.revision(), chain_.size()};
-        if (attempt == attempted_) return;
-        attempted_ = attempt;
-        const auto& source = playable(upcoming->entryId);
-        if (source.decoder() != state_.track->decoder()) return;
-        const auto from = chain_.empty() ? state_.queueEntryId : chain_.back();
-        shareLibraryLength(upcoming->entryId);
+        const QueueAttempt attempt{z.q.entryId, upcoming->entryId, z.q.policy.revision(), z.chain.size()};
+        if (attempt == z.attempted) return;
+        z.attempted = attempt;
+        const auto& source = playable(z, upcoming->entryId);
+        if (source.decoder() != z.q.track->decoder()) return;
+        const auto from = z.chain.empty() ? z.q.entryId : z.chain.back();
+        shareLibraryLength(z, upcoming->entryId);
         const std::filesystem::path file(toWide(source.pathUtf8()));
-        if (engine_->queueNext(file, source.decoder(), gainFor(upcoming->entryId), crossfadeMs(from, upcoming->entryId))) {
-            chain_.push_back(upcoming->entryId);
+        if (z.engine->queueNext(file, source.decoder(), gainFor(z, upcoming->entryId), crossfadeMs(z, from, upcoming->entryId))) {
+            z.chain.push_back(upcoming->entryId);
             std::lock_guard lock(readsMutex_);
-            queuedRead_ = file;
+            z.queuedRead = file;
         }
     }
 
-    // What playback reads, for the library's background work (docs/Plan.md §7.7): any thread may ask.
+    // What playback reads, for the library's background work (docs/Plan.md §7.7): any thread may ask. Ahead while
+    // every playing zone is.
     PlaybackReads playbackReads() const {
-        const auto playback = engine_->snapshot();
         PlaybackReads reads;
-        if (playback.state != audio::PlayState::Playing) return reads;
-        reads.files.emplace_back(playback.file);
-        if (playback.queuedFiles) {
-            std::lock_guard lock(readsMutex_);
-            reads.files.push_back(queuedRead_);
+        bool ahead = true;
+        std::shared_lock zones(zonesMutex_);
+        for (const auto& zone : zones_) {
+            const auto playback = zone->engine->snapshot();
+            if (playback.state != audio::PlayState::Playing) continue;
+            reads.files.emplace_back(playback.file);
+            if (playback.queuedFiles) {
+                std::lock_guard lock(readsMutex_);
+                reads.files.push_back(zone->queuedRead);
+            }
+            ahead = ahead && playback.ahead;
         }
-        reads.ahead = playback.ahead;
+        reads.ahead = !reads.files.empty() && ahead;
         return reads;
+    }
+
+    bool anyZonePlaying() const {
+        std::shared_lock zones(zonesMutex_);
+        return std::ranges::any_of(zones_,
+                                   [](const auto& zone) { return zone->engine->snapshot().state == audio::PlayState::Playing; });
     }
 
     // The crossfade from one entry into the next (docs/Plan.md §5.4): none while an album plays in order, the next
     // entry from the same album with shuffle off.
-    uint32_t crossfadeMs(uint64_t from, uint64_t to) const {
+    uint32_t crossfadeMs(const Zone& z, uint64_t from, uint64_t to) const {
         if (!settings_.crossfade.enabled) return 0;
-        const auto album = [this](uint64_t id) {
-            const auto at = std::ranges::find(entries_, id, &QueueEntry::id);
-            return at == entries_.end() ? int64_t{0} : at->albumId;
+        const auto album = [&z](uint64_t id) {
+            const auto at = std::ranges::find(z.q.entries, id, &QueueEntry::id);
+            return at == z.q.entries.end() ? int64_t{0} : at->albumId;
         };
-        if (!policy_.shuffle() && album(from) != 0 && album(from) == album(to)) return 0;
+        if (!z.q.policy.shuffle() && album(from) != 0 && album(from) == album(to)) return 0;
         return uint32_t(std::lround(settings_.crossfade.seconds * 1000.0));
     }
 
     // The length the library knows for the entry's MP3, exact or estimated, which the MP3 decoders show at once and place
     // early seeks by.
-    void shareLibraryLength(uint64_t entryId) {
-        const auto at = std::ranges::find(entries_, entryId, &QueueEntry::id);
-        if (at == entries_.end() || !at->file || !libraryReader_) return;
+    void shareLibraryLength(Zone& z, uint64_t entryId) {
+        const auto at = std::ranges::find(z.q.entries, entryId, &QueueEntry::id);
+        if (at == z.q.entries.end() || !at->file || !libraryReader_) return;
         try {
             auto row = libraryReader_->prepare(
                 "SELECT total_frames,length_estimated FROM tracks WHERE file_id=? AND format='mp3' AND total_frames>0");
@@ -1506,11 +1702,11 @@ private:
 
     // The ReplayGain of a queue entry from its library values (docs/Plan.md §5.9). Auto takes the album's while the
     // queue plays the album in order: a neighbor in the queue is from the same album and shuffle is off.
-    double gainFor(uint64_t entryId) {
-        if (settings_.replayGain.mode == ReplayGainMode::Off) return 0.0;
-        const auto at = std::ranges::find(entries_, entryId, &QueueEntry::id);
+    double gainFor(Zone& z, uint64_t entryId) {
+        if (z.settings.replayGain.mode == ReplayGainMode::Off) return 0.0;
+        const auto at = std::ranges::find(z.q.entries, entryId, &QueueEntry::id);
         TrackLoudness loudness;
-        if (at != entries_.end() && at->file && libraryReader_) {
+        if (at != z.q.entries.end() && at->file && libraryReader_) {
             try {
                 loudness = trackLoudness(*libraryReader_, at->file);
             } catch (const std::exception& e) {
@@ -1518,23 +1714,31 @@ private:
             }
         }
         bool album = false;
-        if (at != entries_.end() && at->albumId != 0 && !policy_.shuffle()) {
-            album = (at != entries_.begin() && std::prev(at)->albumId == at->albumId) ||
-                    (std::next(at) != entries_.end() && std::next(at)->albumId == at->albumId);
+        if (at != z.q.entries.end() && at->albumId != 0 && !z.q.policy.shuffle()) {
+            album = (at != z.q.entries.begin() && std::prev(at)->albumId == at->albumId) ||
+                    (std::next(at) != z.q.entries.end() && std::next(at)->albumId == at->albumId);
         }
-        return replayGainDb(settings_.replayGain, loudness, album);
+        return replayGainDb(z.settings.replayGain, loudness, album);
     }
 
     // What the audio analysis reads from another thread: the ReplayGain and waveform settings, the decoders, the files of
     // the current and next queue entries, which it analyzes first, and the playing track and the next for their waveforms.
+    // Every zone's, the selected zone's first.
     void shareLoudnessInputs() {
         std::vector<int64_t> files;
         std::vector<LoudnessAnalyzer::PlayingTrack> playing;
-        auto at = std::ranges::find(entries_, state_.queueEntryId, &QueueEntry::id);
-        if (at == entries_.end()) at = entries_.begin();
-        for (; at != entries_.end() && files.size() < 20; ++at) {
-            if (at->file) files.push_back(at->file);
-            if (playing.size() < 2) playing.push_back({at->file, std::filesystem::path(toWide(at->source.pathUtf8()))});
+        std::vector<const Zone*> order{&selected()};
+        for (const auto& zone : zones_)
+            if (zone.get() != order.front()) order.push_back(zone.get());
+        for (const Zone* zone : order) {
+            const auto& entries = zone->q.entries;
+            auto at = std::ranges::find(entries, zone->q.entryId, &QueueEntry::id);
+            if (at == entries.end()) at = entries.begin();
+            size_t taken = 0, shown = 0;
+            for (; at != entries.end() && taken < 20; ++at, ++taken) {
+                if (at->file) files.push_back(at->file);
+                if (shown++ < 2) playing.push_back({at->file, std::filesystem::path(toWide(at->source.pathUtf8()))});
+            }
         }
         if (library_) library_->setScanSpeed(settings_.scanSpeed);
         std::lock_guard lock(loudnessMutex_);
@@ -1546,38 +1750,38 @@ private:
     }
 
     // Natural completion plays the next eligible entry; a track-local failure marks the entry and skips it.
-    void advanceAfterTrackEnd() {
-        const auto playback = engine_->snapshot();
-        if (playback.trackEnds == seenTrackEnds_) return;
-        seenTrackEnds_ = playback.trackEnds;
-        if (!state_.queueEntryId) return;
+    void advanceAfterTrackEnd(Zone& z) {
+        const auto playback = z.engine->snapshot();
+        if (playback.trackEnds == z.seenTrackEnds) return;
+        z.seenTrackEnds = playback.trackEnds;
+        if (!z.q.entryId) return;
         if (playback.error) {
             if (!trackLocal(*playback.error)) return;
-            policy_.markFailed(state_.queueEntryId);
-            queueChanged_ = true;
-            ++failuresInARow_;
+            z.q.policy.markFailed(z.q.entryId);
+            z.queueChanged = true;
+            ++z.q.failuresInARow;
         } else {
-            failuresInARow_ = 0;
+            z.q.failuresInARow = 0;
         }
         // Autoplay gives up on tracks that keep failing, as when the output takes none of the library's formats.
-        const bool autoplay = autoplayAllowed() && failuresInARow_ < kAutoplayFailuresInARow;
-        if (const auto next = policy_.next(true))
-            startEntry(*next, true, true);
-        else if (const auto picked = autoplay && appendAutoplay() ? policy_.next(true) : std::nullopt)
-            startEntry(*picked, true, true);
+        const bool autoplay = autoplayAllowed(z) && z.q.failuresInARow < kAutoplayFailuresInARow;
+        if (const auto next = z.q.policy.next(true))
+            startEntry(z, *next, true, true);
+        else if (const auto picked = autoplay && appendAutoplay(z) ? z.q.policy.next(true) : std::nullopt)
+            startEntry(z, *picked, true, true);
     }
 
     // Autoplay (docs/Plan.md §8.1): once the last entry plays, a random library track follows it, so it preloads
     // for gapless playback. Each entry gets one try; a repeat mode never ends the queue.
-    bool autoplayAllowed() const { return settings_.autoplay && library_ && policy_.repeat() == RepeatMode::Off; }
+    bool autoplayAllowed(const Zone& z) const { return settings_.autoplay && library_ && z.q.policy.repeat() == RepeatMode::Off; }
 
-    void extendWithAutoplay() {
-        if (!autoplayAllowed() || !state_.queueEntryId || autoplayTried_ == state_.queueEntryId) return;
-        if (engine_->snapshot().state != audio::PlayState::Playing) return;
-        autoplayTried_ = state_.queueEntryId;
-        if (policy_.upcoming()) return;
+    void extendWithAutoplay(Zone& z) {
+        if (!autoplayAllowed(z) || !z.q.entryId || z.q.autoplayTried == z.q.entryId) return;
+        if (z.engine->snapshot().state != audio::PlayState::Playing) return;
+        z.q.autoplayTried = z.q.entryId;
+        if (z.q.policy.upcoming()) return;
         try {
-            appendAutoplay();
+            appendAutoplay(z);
         } catch (const std::exception& e) {
             log::warn("autoplay: %s", e.what());
         }
@@ -1585,10 +1789,10 @@ private:
 
     // A random available library track not played in the last 7 days and not in the queue; when every track was
     // played that recently, the one played longest ago.
-    std::optional<TrackSource> pickAutoplayTrack() {
+    std::optional<TrackSource> pickAutoplayTrack(Zone& z) {
         if (!libraryReader_) libraryReader_.emplace(library_->openReader());
         nlohmann::json queued = nlohmann::json::array();
-        for (const auto& [id, binding] : libraryEntries_)
+        for (const auto& [id, binding] : z.q.libraryEntries)
             if (binding.file) queued.push_back(binding.file);
         const auto now =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
@@ -1607,86 +1811,117 @@ private:
         return std::nullopt;
     }
 
-    bool appendAutoplay() {
-        const auto source = pickAutoplayTrack();
+    bool appendAutoplay(Zone& z) {
+        const auto source = pickAutoplayTrack(z);
         if (!source) return false;
-        auto entries = buildQueueEntries({*source});
+        auto entries = buildQueueEntries(z, {*source});
         entries.front().automatic = true;
-        policy_.append({entries.front().id}, false);
-        entries_.push_back(std::move(entries.front()));
-        libraryVersion_ = 0;
-        refreshLibraryAvailability();
-        queueChanged_ = true;
+        z.q.policy.append({entries.front().id}, false);
+        z.q.entries.push_back(std::move(entries.front()));
+        z.q.libraryVersion = 0;
+        refreshLibraryAvailability(z);
+        z.queueChanged = true;
         // Played automatic entries beyond the latest 100 go, oldest first; the user's entries stay.
         std::vector<uint64_t> played;
-        for (const auto& entry : entries_) {
-            if (entry.id == state_.queueEntryId) break;
+        for (const auto& entry : z.q.entries) {
+            if (entry.id == z.q.entryId) break;
             if (entry.automatic) played.push_back(entry.id);
         }
         if (played.size() > kAutoplayKept) {
             played.resize(played.size() - kAutoplayKept);
-            removeQueue(played);
+            removeQueue(z, played);
         }
         return true;
     }
 
-    QueueSnapshot queueSnapshot() const {
+    QueueSnapshot queueSnapshot(const Zone& z) const {
         QueueSnapshot queue;
-        queue.revision = policy_.revision();
+        queue.revision = z.q.policy.revision();
         queue.marks = marks_;
-        queue.entries = entries_;
-        if (const auto upcoming = policy_.upcoming()) queue.upcomingEntryId = upcoming->entryId;
-        queue.shuffle = policy_.shuffle();
-        queue.repeat = policy_.repeat();
+        queue.entries = z.q.entries;
+        if (const auto upcoming = z.q.policy.upcoming()) queue.upcomingEntryId = upcoming->entryId;
+        queue.shuffle = z.q.policy.shuffle();
+        queue.repeat = z.q.policy.repeat();
         return queue;
     }
 
-    void publish(bool completed) {
-        // Settings share them when applied; here only a change to the queue or its current entry does.
-        const std::pair shared{policy_.revision(), state_.queueEntryId};
-        if (queueChanged_ || shared != loudnessShared_) {
-            loudnessShared_ = shared;
-            shareLoudnessInputs();
-        }
-        auto p = playback(engine_->snapshot());
-        if (settings_.backend == Backend::AirPlay) {
+    // Builds what the zone publishes; true when it changed.
+    bool refreshZoneState(Zone& z) {
+        auto p = playback(z.engine->snapshot());
+        const bool inUse = &z == &selected();
+        if (z.backend == Backend::AirPlay) {
             std::scoped_lock lock(groupMutex_);
             p.receivers = airplayStates_;
             p.receiverAsking = askingName();
         }
-        p.receiverLeft = receiverLeft_;
-        if (receiverVolumeWanted()) {
+        if (inUse || z.backend == Backend::AirPlay) p.receiverLeft = receiverLeft_;
+        if (inUse && receiverVolumeWanted()) {
             const auto level = receiverLevel();
             p.playerVolume = level.level;
             p.playerMuted = level.muted;
-        } else if (const auto level = playerVolume_ ? playerVolume_->current() : std::nullopt) {
+        } else if (const auto level = inUse && playerVolume_ ? playerVolume_->current() : std::nullopt) {
             p.playerVolume = level->level;
             p.playerVolumeDb = level->db;
             p.playerMuted = level->muted;
         }
-        if (restored_ && p.state == PlaybackState::Stopped && state_.track) {
+        if (z.q.restored && p.state == PlaybackState::Stopped && z.q.track) {
             p.state = PlaybackState::Paused;
-            p.pathUtf8 = state_.track->pathUtf8();
-            p.position = restored_->position;
-            p.total = restored_->total;
-            p.source = restored_->source;
-            p.format = restored_->format;
+            p.pathUtf8 = z.q.track->pathUtf8();
+            p.position = z.q.restored->position;
+            p.total = z.q.restored->total;
+            p.source = z.q.restored->source;
+            p.format = z.q.restored->format;
         }
-        if (!completed && !queueChanged_ && p.revision == state_.playback.revision && p.position == state_.playback.position &&
-            p.underruns == state_.playback.underruns && p.playerVolume == state_.playback.playerVolume &&
-            p.playerVolumeDb == state_.playback.playerVolumeDb && p.playerMuted == state_.playback.playerMuted &&
-            p.receivers == state_.playback.receivers && p.receiverLeft == state_.playback.receiverLeft &&
-            p.receiverAsking == state_.playback.receiverAsking && state_.devices.revision == published_.devices.revision &&
-            state_.finished == published_.finished)
-            return;
-        state_.playback = p;
-        state_.settings = settingsDto(settings_);
+        const auto& was = z.state.playback;
+        bool changed = z.queueChanged || p.revision != was.revision || p.position != was.position ||
+                       p.underruns != was.underruns || p.playerVolume != was.playerVolume ||
+                       p.playerVolumeDb != was.playerVolumeDb || p.playerMuted != was.playerMuted ||
+                       p.receivers != was.receivers || p.receiverLeft != was.receiverLeft ||
+                       p.receiverAsking != was.receiverAsking || z.state.queueEntryId != z.q.entryId;
+        z.state.playback = std::move(p);
         // Rebuilt only when it changed: a large queue is not copied on every position update.
-        if (queueChanged_ || state_.queue.revision != policy_.revision() || publishedEntry_ != state_.queueEntryId) {
-            state_.queue = queueSnapshot();
-            publishedEntry_ = state_.queueEntryId;
+        if (z.queueChanged || z.state.queue.revision != z.q.policy.revision() || z.publishedEntry != z.q.entryId) {
+            z.state.queue = queueSnapshot(z);
+            z.publishedEntry = z.q.entryId;
+            changed = true;
         }
-        queueChanged_ = false;
+        z.state.queueEntryId = z.q.entryId;
+        z.state.track = z.q.track;
+        z.queueChanged = false;
+        return changed;
+    }
+
+    // Every zone's state into state_, the selected zone's also as the window's.
+    void collectZones() {
+        state_.zones.clear();
+        state_.zones.reserve(zones_.size());
+        for (const auto& zone : zones_) state_.zones.push_back(zone->state);
+        const Zone& shown = selected();
+        state_.selectedZone = shown.id;
+        state_.queueEntryId = shown.state.queueEntryId;
+        state_.track = shown.state.track;
+        state_.queue = shown.state.queue;
+        state_.playback = shown.state.playback;
+    }
+
+    void publish(bool completed) {
+        // Settings share them when applied; here only a change to a queue or its current entry does.
+        std::vector<std::pair<uint64_t, uint64_t>> shared;
+        bool queues = false;
+        for (const auto& zone : zones_) {
+            shared.emplace_back(zone->q.policy.revision(), zone->q.entryId);
+            queues = queues || zone->queueChanged;
+        }
+        if (queues || shared != loudnessShared_) {
+            loudnessShared_ = std::move(shared);
+            shareLoudnessInputs();
+        }
+        bool changed = completed || std::exchange(zonesChanged_, false) ||
+                       state_.devices.revision != published_.devices.revision || state_.finished != published_.finished;
+        for (auto& zone : zones_) changed = refreshZoneState(*zone) || changed;
+        if (!changed) return;
+        collectZones();
+        state_.settings = settingsDto(settings_);
         Event event;
         std::function<void(const Event&)> listener;
         {
@@ -1724,9 +1959,9 @@ private:
 
     // An output opening waits on a receiver that asks its user, and this thread on the output: meanwhile only that
     // changes in what was published.
-    void waitForEngine() {
-        engine_->waitIdle(std::chrono::milliseconds(50), [this] {
-            if (settings_.backend != Backend::AirPlay) return;
+    void waitForEngine(Zone& z) {
+        z.engine->waitIdle(std::chrono::milliseconds(50), [this, &z] {
+            if (z.backend != Backend::AirPlay) return;
             std::string asking;
             {
                 std::scoped_lock lock(groupMutex_);
@@ -1736,8 +1971,10 @@ private:
             std::function<void(const Event&)> listener;
             {
                 std::lock_guard lock(mutex_);
-                if (published_.playback.receiverAsking == asking) return;
-                published_.playback.receiverAsking = asking;
+                const auto shown = std::ranges::find(published_.zones, z.id, &ZoneSnapshot::id);
+                if (shown == published_.zones.end() || shown->playback.receiverAsking == asking) return;
+                shown->playback.receiverAsking = asking;
+                if (published_.selectedZone == z.id) published_.playback.receiverAsking = asking;
                 ++published_.revision;
                 event = {EventKind::StateChanged, published_};
                 listener = listener_;
@@ -1764,7 +2001,7 @@ private:
         // Speakers paired while one of them played: the pair is in use now and plays on once it can.
         if (!receiver.empty() && settings_.airplay.deviceId != receiver) pairedAt_ = std::chrono::steady_clock::now();
         if (settings_.outputs == outputs && settings_.followedDefault == followed) return;
-        engine_->applySettings(settings_);
+        syncZones();
         persist();
     }
 
@@ -1928,7 +2165,7 @@ private:
     }
 
     // The receivers of the group in use as the output asks for them, from any thread (AirPlayOutput.h).
-    std::unique_ptr<audio::IOutput> airplayOutput(const Settings&) {
+    std::unique_ptr<audio::IOutput> airplayOutput(const Settings& settings) {
         waitForChecks();
         // A group refused, by its access setting or by its answer, is asked again at the Play its message asks for: the
         // user may just have let this computer in, which the finder learns only when it asks.
@@ -1993,7 +2230,8 @@ private:
             std::scoped_lock lock(groupMutex_);
             airplayLeft_.emplace_back(id, why);
         };
-        options.commanded = [this](const std::string& id, const airplay::ReceiverEvent& event) { followReceiver(id, event); };
+        options.commanded = [this, zone = zoneId(Backend::AirPlay, settings.airplay.deviceId)](
+                                const std::string& id, const airplay::ReceiverEvent& event) { followReceiver(zone, id, event); };
         options.askingUser = [this](const std::string& id, bool asking) {
             std::scoped_lock lock(groupMutex_);
             if (asking)
@@ -2030,7 +2268,7 @@ private:
     }
 
     // An AirPlay 2 receiver's own buttons act as the same buttons in CamelPlayer; its volume is taken on the Server's thread.
-    void followReceiver(const std::string& id, const airplay::ReceiverEvent& event) {
+    void followReceiver(const std::string& zone, const std::string& id, const airplay::ReceiverEvent& event) {
         using airplay::ReceiverCommand;
         if (event.command == ReceiverCommand::Volume) {
             std::scoped_lock lock(groupMutex_);
@@ -2042,6 +2280,7 @@ private:
                        : event.command == ReceiverCommand::Next      ? CommandKind::Next
                        : event.command == ReceiverCommand::Previous  ? CommandKind::Previous
                                                                      : CommandKind::Pause;
+        command.zone = zone;
         try {
             enqueue(std::move(command));
         } catch (const std::exception& e) {
@@ -2110,13 +2349,13 @@ private:
     // that left while the others play on leaves the group, which says why.
     // The stream to the speaker ends as it goes into the pair, before or after the pair is found: within a while of the
     // pairing, a stream that ended so plays on as the pair once the pair can take it.
-    void resumeAsPairOnceFound() {
+    void resumeAsPairOnceFound(Zone& z) {
         if (!pairedAt_) return;
         if (std::chrono::steady_clock::now() - *pairedAt_ > kResumeAsPairWithin) {
             pairedAt_.reset();
             return;
         }
-        const auto playback = engine_->snapshot();
+        const auto playback = z.engine->snapshot();
         if (playback.state != audio::PlayState::Paused ||
             (playback.error != audio::ErrorCode::DeviceChanged && playback.error != audio::ErrorCode::DeviceInUse))
             return;
@@ -2125,7 +2364,7 @@ private:
             if (std::ranges::none_of(airplayMembers_, [](const AirPlayMember& m) { return m.receiver.has_value(); })) return;
         }
         pairedAt_.reset();
-        resumePlayback();
+        resumePlayback(z);
     }
 
     void followAirPlayGroup() {
@@ -2156,7 +2395,7 @@ private:
             receiverLeft_ =
                 ReceiverLeft{receiverLeft_ ? receiverLeft_->serial + 1 : 1, receiverName(id, found), why.code(), why.what()};
             setInAirPlayGroup(settings_, id, false, state_.devices);
-            engine_->applySettings(settings_);
+            syncZones();
             persist();
         }
         std::vector<AirPlayMember> members;
@@ -2200,14 +2439,19 @@ private:
         options.gapless = settings.network.gapless;
         return createNetworkOutput(
             *player, [this](const std::wstring& file) { return trackDetails(file); },
-            [this](const PlayerEvent& event) { followPlayer(event); }, options);
+            [this, zone = zoneId(Backend::Network, settings.network.udn)](const PlayerEvent& event) {
+                followPlayer(zone, event);
+            },
+            options);
     }
 
     std::unique_ptr<audio::IOutput> hqplayerOutput(const Settings& settings) {
         if (settings.hqplayer.address.empty()) throw audio::Error(audio::ErrorCode::DeviceNotFound, "no HQPlayer chosen");
         return createHQPlayerOutput(
             settings.hqplayer.address, [this](const std::wstring& file) { return trackDetails(file); },
-            [this](const PlayerEvent& event) { followPlayer(event); });
+            [this, zone = zoneId(Backend::HQPlayer, settings.hqplayer.address)](const PlayerEvent& event) {
+                followPlayer(zone, event);
+            });
     }
 
     // The chosen player's own volume is followed from when it is chosen, whether it plays or not.
@@ -2244,12 +2488,14 @@ private:
         TrackDetails details;
         const std::string path = toUtf8(file);
         const auto now = snapshot();
-        const auto entry =
-            std::ranges::find_if(now.queue.entries, [&](const QueueEntry& e) { return e.source.pathUtf8() == path; });
-        if (entry != now.queue.entries.end()) {
+        for (const auto& zone : now.zones) {
+            const auto& entries = zone.queue.entries;
+            const auto entry = std::ranges::find_if(entries, [&](const QueueEntry& e) { return e.source.pathUtf8() == path; });
+            if (entry == entries.end()) continue;
             details.title = entry->title;
             details.artist = entry->artist;
             details.album = entry->album;
+            break;
         }
         if (details.title.empty()) details.title = toUtf8(std::filesystem::path(file).stem().wstring());
         try {
@@ -2272,7 +2518,7 @@ private:
     }
 
     // What a network player did by itself, from its remote or app (docs/Plan.md §5.10).
-    void followPlayer(const PlayerEvent& event) {
+    void followPlayer(const std::string& zone, const PlayerEvent& event) {
         Command command;
         switch (event.kind) {
         case PlayerEventKind::Playing:
@@ -2288,7 +2534,10 @@ private:
             command.kind = CommandKind::Previous;
             break;
         case PlayerEventKind::Seeked: {
-            const auto source = snapshot().playback.source;
+            const auto now = snapshot();
+            const auto shown = std::ranges::find(now.zones, zone, &ZoneSnapshot::id);
+            if (shown == now.zones.end()) return;
+            const auto source = shown->playback.source;
             if (!source) return;
             command.kind = CommandKind::Seek;
             command.frame = event.positionMs * source->sampleRate / 1000;
@@ -2297,6 +2546,7 @@ private:
         default:
             return;
         }
+        command.zone = zone;
         // It runs on the output's own thread, which an exception would leave; one that comes while closing is dropped.
         try {
             enqueue(std::move(command));
@@ -2386,8 +2636,10 @@ private:
             }
             if (pending) {
                 try {
-                    updatePlaySession();
-                    refreshLibraryAvailability();
+                    for (auto& zone : zones_) {
+                        updatePlaySession(*zone);
+                        refreshLibraryAvailability(*zone);
+                    }
                     followAirPlayGroup();
                     executing_ = pending->stamp.id;
                     execute(*pending);
@@ -2399,18 +2651,24 @@ private:
                     state_.commandError = Failure{audio::ErrorCode::Other, "unknown Server command failure"};
                 }
             }
+            for (auto& zone : zones_) {
+                try {
+                    commitTransition(*zone);
+                    refreshLibraryAvailability(*zone, true);
+                    advanceAfterTrackEnd(*zone);
+                    extendWithAutoplay(*zone);
+                    ensureNextQueued(*zone);
+                    recordPlaybackLength(*zone);
+                    updatePlaySession(*zone);
+                } catch (const std::exception& e) {
+                    log::error("Server queue advance failed in zone %s: %s", zone->id.c_str(), e.what());
+                }
+            }
             try {
-                commitTransition();
-                refreshLibraryAvailability(true);
-                advanceAfterTrackEnd();
-                extendWithAutoplay();
-                ensureNextQueued();
-                recordPlaybackLength();
-                updatePlaySession();
                 refreshDevicesAfterChange();
                 followPlayerVolume();
                 followAirPlayGroup();
-                resumeAsPairOnceFound();
+                if (Zone* airplay = airplayZone()) resumeAsPairOnceFound(*airplay);
             } catch (const std::exception& e) {
                 log::error("Server queue advance failed: %s", e.what());
             }
@@ -2428,7 +2686,7 @@ private:
                 state_.finished = {done->command, std::move(done->failure)};
             }
             if (settingsDue_ && std::chrono::steady_clock::now() >= *settingsDue_) persist();
-            saveQueueSession(false);
+            saveQueueSession(selected(), false);
             publish(pending.has_value());
             if (pending || done) {
                 {
@@ -2454,20 +2712,82 @@ private:
             hqplayerFinder_.reset();
         }
         if (settingsDue_) persist();
-        if (session_) session_->persist(*library_);
-        saveQueueSession(true);
+        for (const auto& zone : zones_)
+            if (zone->q.session) zone->q.session->persist(*library_);
+        saveQueueSession(selected(), true);
         queueSaved_.set_value();
         backgroundStopped_.get_future().wait();
-        engine_.reset();
+        {
+            std::unique_lock zones(zonesMutex_);
+            zones_.clear();
+        }
         if (SUCCEEDED(initialized)) CoUninitialize();
     }
+
+    struct LibraryEntry {
+        std::wstring path;
+        int64_t file = 0;
+        bool detached = false;
+        bool lengthRecorded = false;
+        bool spelled = false;
+    };
+    // Gapless: the entry queued in the engine, and the last situation already tried so it is not retried every poll.
+    struct QueueAttempt {
+        uint64_t current = 0, upcoming = 0, revision = 0;
+        size_t depth = 0;
+        bool operator==(const QueueAttempt&) const = default;
+    };
+    struct QueueCheck {
+        uint64_t revision = 0, current = 0;
+        std::vector<uint64_t> chain;
+        bool slotFree = false;
+        bool operator==(const QueueCheck&) const = default;
+    };
+    // A zone's queue and what follows it, which goes with the queue to another output.
+    struct ZoneQueue {
+        QueuePolicy policy;
+        std::vector<QueueEntry> entries;
+        std::map<uint64_t, LibraryEntry> libraryEntries;
+        uint64_t entryId = 0; // the current entry; 0 when none
+        std::optional<TrackSource> track;
+        std::optional<SavedTrack> restored; // the current entry restored (M5-R01) or left paused, not opened yet
+        uint64_t autoplayTried = 0;         // the entry whose start autoplay already extended the queue for
+        int failuresInARow = 0;             // tracks that failed one after another since one played or the user chose one
+        std::optional<PlaySession> session;
+        uint64_t sessionEntry = 0, sessionTransitions = 0, sessionTrackEnds = 0;
+        std::wstring sessionFile;
+        uint32_t sessionRate = 0;
+        std::chrono::steady_clock::time_point sessionSeen = std::chrono::steady_clock::now(), sessionPersisted;
+        bool sessionCountPersisted = false;
+        int64_t libraryVersion = 0;
+        int64_t libraryDeletions = -1; // entries whose files left the library leave the queue
+        std::chrono::steady_clock::time_point availabilityChecked;
+        uint64_t availabilityFiles = 0;
+    };
+    // An enabled output, or the AirPlay group in use, playing with an Engine session, output and queue of its own
+    // (docs/Plan.md §5.12).
+    struct Zone {
+        Backend backend = Backend::Wasapi;
+        std::string output; // empty on WASAPI is "Windows default device"
+        std::string id;     // zoneId(backend, output)
+        Settings settings;  // the Server's with this output in use, as its engine has them
+        std::unique_ptr<audio::PlaybackEngine> engine;
+        ZoneQueue q;
+        uint64_t seenTrackEnds = 0, seenTransitions = 0;
+        std::deque<uint64_t> chain; // entries queued in the engine, in playback order
+        QueueAttempt attempted;
+        QueueCheck checked;
+        bool queueChanged = false;            // queue state changed without a command or playback change
+        uint64_t publishedEntry = UINT64_MAX; // the current entry `state.queue` was built for
+        ZoneSnapshot state;                   // as last built for publishing
+        std::filesystem::path queuedRead;     // the file last queued in the engine to follow; under readsMutex_
+    };
 
     Settings settings_;
     std::filesystem::path settingsFile_;
     static constexpr auto kSettingsSettle = std::chrono::seconds(1);
     std::optional<std::chrono::steady_clock::time_point> settingsDue_; // when a change kept by persistSoon() is saved
     audio::OutputFactory factory_;
-    std::unique_ptr<audio::PlaybackEngine> engine_;
     mutable std::atomic<int> coversInFlight_{0}; // covers being read for the window; read by scan workers, so declared first
     std::unique_ptr<ArtworkCache> artwork_;
     std::unique_ptr<LibraryStore> library_;
@@ -2484,27 +2804,8 @@ private:
     _Guarded_by_(loudnessMutex_) std::vector<LoudnessAnalyzer::PlayingTrack> playingTracks_;
     std::unique_ptr<LoudnessAnalyzer> loudness_; // uses the four above, library_ and engine_
     std::optional<sqlite::Database> libraryReader_;
-    int64_t libraryVersion_ = 0;
-    int64_t libraryDeletions_ = -1; // entries whose files left the library leave the queue
-    mutable std::mutex readsMutex_;
-    _Guarded_by_(readsMutex_) std::filesystem::path queuedRead_; // the file last queued in the engine to follow
-    std::chrono::steady_clock::time_point availabilityChecked_;
-    uint64_t availabilityFiles_ = 0;
-    struct LibraryEntry {
-        std::wstring path;
-        int64_t file = 0;
-        bool detached = false;
-        bool lengthRecorded = false;
-        bool spelled = false;
-    };
-    std::map<uint64_t, LibraryEntry> libraryEntries_;
+    mutable std::mutex readsMutex_; // each zone's queuedRead
     uint64_t marks_ = 0;
-    std::optional<PlaySession> session_;
-    uint64_t sessionEntry_ = 0, sessionTransitions_ = 0, sessionTrackEnds_ = 0;
-    std::wstring sessionFile_;
-    uint32_t sessionRate_ = 0;
-    std::chrono::steady_clock::time_point sessionSeen_ = std::chrono::steady_clock::now(), sessionPersisted_;
-    bool sessionCountPersisted_ = false;
     mutable std::mutex mutex_;
     std::condition_variable cv_, idle_;
     _Guarded_by_(mutex_) std::deque<Pending> queue_;
@@ -2529,35 +2830,16 @@ private:
     uint64_t executing_ = 0; // the command being executed, on the command thread
     std::promise<void> queueSaved_, backgroundStopped_;
     Snapshot published_, state_;
-    QueuePolicy policy_;
-    std::vector<QueueEntry> entries_;
-    uint64_t lastEntryId_ = 0;
-    uint64_t seenTrackEnds_ = 0;
-    bool queueChanged_ = false;  // queue state changed without a command or playback change
-    uint64_t autoplayTried_ = 0; // the entry whose start autoplay already extended the queue for
+    uint64_t lastEntryId_ = 0; // queue entry IDs are unique across zones
     static constexpr size_t kAutoplayKept = 100;
-    int failuresInARow_ = 0; // tracks that failed one after another since one played or the user chose one
     static constexpr int kAutoplayFailuresInARow = 3;
-    uint64_t publishedEntry_ = UINT64_MAX;                                 // the current entry state_.queue was built for
-    std::pair<uint64_t, uint64_t> loudnessShared_{UINT64_MAX, UINT64_MAX}; // queue revision and entry last shared
-    // Gapless: the entry queued in the engine, and the last situation already tried so it is not retried every poll.
-    struct QueueAttempt {
-        uint64_t current = 0, upcoming = 0, revision = 0;
-        size_t depth = 0;
-        bool operator==(const QueueAttempt&) const = default;
-    };
-    uint64_t seenTransitions_ = 0;
-    std::deque<uint64_t> chain_; // entries queued in the engine, in playback order
-    QueueAttempt attempted_;
-    struct QueueCheck {
-        uint64_t revision = 0, current = 0;
-        std::vector<uint64_t> chain;
-        bool slotFree = false;
-        bool operator==(const QueueCheck&) const = default;
-    };
-    QueueCheck checked_;
-    // The saved session (M5-R01): the current entry restored but not opened yet, and what was last written.
-    std::optional<SavedTrack> restored_;
+    std::vector<std::pair<uint64_t, uint64_t>> loudnessShared_; // each zone's queue revision and entry last shared
+    // Changed on the command thread, which alone writes it; other threads read it shared.
+    mutable std::shared_mutex zonesMutex_;
+    std::vector<std::unique_ptr<Zone>> zones_; // in the output menu's order
+    bool zonesChanged_ = false;                // zones added, removed or moved to another output since the last publish
+    Zone* selected_ = nullptr;                 // the zone of the output in use at the last syncZones()
+    // The saved session (M5-R01) is the selected zone's: what was last written of it.
     bool sessionRestored_ = false; // nothing is saved before the saved session is read back
     struct SavedState {
         std::vector<uint64_t> entries, order, history;

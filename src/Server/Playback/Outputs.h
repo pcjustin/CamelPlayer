@@ -31,6 +31,9 @@ struct OutputRow {
 // Every device found and every saved one, by backend; "Windows default device" first.
 std::vector<OutputRow> outputRows(const Settings& s, const DeviceCatalog& devices);
 
+// The output in use's ID, as its row has it.
+const std::string& outputInUse(const Settings& s);
+
 // Fetches the stream from another computer, through the Windows Firewall rule.
 bool needsFirewallRule(const OutputRow& row);
 
