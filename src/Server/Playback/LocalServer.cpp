@@ -2347,7 +2347,7 @@ private:
             Deferred item;
             {
                 std::unique_lock lock(deferredMutex_);
-                deferredWake_.wait(lock, [&] { return deferredStopping_ || !deferredQueue_.empty(); });
+                while (!deferredStopping_ && deferredQueue_.empty()) deferredWake_.wait(lock);
                 if (deferredQueue_.empty()) return;
                 item = std::move(deferredQueue_.front());
                 deferredQueue_.pop_front();
