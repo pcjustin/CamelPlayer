@@ -205,7 +205,7 @@ TEST(SettingsMigration, GlobalDecoderChoiceBecomesTheFlacChoiceAndNewSettingsUse
             EXPECT_EQ(migrated.backend, Backend::Ks);
             EXPECT_EQ(migrated.decoderByFormat, flacChoice(decoder));
             const auto saved = toJson(migrated);
-            EXPECT_NE(saved.find(R"("schema": 4)"), std::string::npos);
+            EXPECT_NE(saved.find(R"("schema": )" + std::to_string(Settings::kSchemaVersion)), std::string::npos);
             EXPECT_EQ(saved.find(R"("decoder")"), std::string::npos);
         }
 
@@ -299,7 +299,7 @@ TEST(SettingsMigration, LoadingV1PersistsTheMigratedSchema) {
     std::stringstream contents;
     contents << in.rdbuf();
     in.close();
-    EXPECT_NE(contents.str().find(R"("schema": 4)"), std::string::npos);
+    EXPECT_NE(contents.str().find(R"("schema": )" + std::to_string(Settings::kSchemaVersion)), std::string::npos);
     EXPECT_NE(contents.str().find(R"("flac": "drflac")"), std::string::npos);
     std::filesystem::remove(file);
 }
@@ -476,6 +476,8 @@ TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
                                               "volume",
                                               "replayGain",
                                               "crossfade",
+                                              "shuffle",
+                                              "repeat",
                                               "scanSpeed",
                                               "followedDefault",
                                               "adoptOutputSets"};

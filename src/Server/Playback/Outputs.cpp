@@ -60,6 +60,7 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
     SavedOutput& saved = savedOutput(s, backend, id);
     saved.volumeMode = s.volume.mode;
     saved.dsp = outputDsp(s);
+    saved.zone = zoneChoices(s);
     if (backend == Backend::Asio)
         saved.asio = s.asio;
     else if (backend == Backend::Ks)
@@ -84,6 +85,7 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     s.volume.mode = source.volumeMode;
     if (isNetworkPlayer(backend) && s.volume.mode == VolumeMode::Software) s.volume.mode = VolumeMode::Player;
     setOutputDsp(s, source.dsp);
+    setZoneChoices(s, source.zone);
     if (backend == Backend::Asio) {
         s.asio = source.asio;
         s.asio.driverClsid = std::move(selected);
@@ -294,6 +296,20 @@ Settings withOutputParameters(Settings s, Backend backend, const std::string& id
     return s;
 }
 
+void keepQueueChoices(Settings& s, Backend backend, const std::string& id, bool shuffle, RepeatMode repeat,
+                      const DeviceCatalog& devices) {
+    if (s.backend == backend && selectedId(s) == id) {
+        s.shuffle = shuffle;
+        s.repeat = repeat;
+        return;
+    }
+    const std::string device = parameterDevice(devices, backend, id);
+    if (device.empty()) return;
+    SavedOutput& saved = savedOutput(s, backend, device);
+    saved.zone.shuffle = shuffle;
+    saved.zone.repeat = repeat;
+}
+
 void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, const std::string& id,
                           const DeviceCatalog& devices) {
     const bool inUse = s.backend == backend && selectedId(s) == id;
@@ -319,6 +335,9 @@ void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, 
     kept.outputs = s.outputs;
     const SavedOutput* saved = findOutput(s, backend, device);
     kept.volume.mode = saved ? saved->volumeMode : newOutput(backend).volumeMode;
+    // The queue's, which may have changed while the dialog was open.
+    kept.shuffle = saved ? saved->zone.shuffle : false;
+    kept.repeat = saved ? saved->zone.repeat : RepeatMode::Off;
     keepParameters(kept, backend, device);
     s.outputs = std::move(kept.outputs);
 }

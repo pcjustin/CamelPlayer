@@ -367,12 +367,14 @@ public:
             queue_.push_back({Command{}, next, true});
             issued_ = next;
         } else if (!settings_.lastFile.empty()) {
+            settings_.adoptQueueChoices = false; // no saved queue had any
             sessionRestored_ = true;
             Command restore;
             restore.kind = CommandKind::Load;
             restore.source.emplace(toUtf8(settings_.lastFile));
             enqueue(std::move(restore), true);
         } else {
+            settings_.adoptQueueChoices = false;
             sessionRestored_ = true;
         }
         // Discord's cover comes from the file or its folder, as the playback bar's does, at 512 px; cloudflared lives in
@@ -731,6 +733,8 @@ private:
     void syncZones() {
         const auto wanted = wantedZones();
         const auto& inUse = *std::ranges::find_if(wanted, &OutputRow::selected);
+        std::vector<Zone*> emptied; // their queues take their outputs' shuffle and repeat
+        Zone* moved = nullptr;      // its queue keeps its own, which become its new output's
         const auto find = [this](Backend backend, const std::string& output) -> Zone* {
             const auto id = zoneId(backend, output);
             const auto found = std::ranges::find(zones_, id, &Zone::id);
@@ -743,8 +747,10 @@ private:
                 emptyZone(*taken);
                 zones.lock();
                 setKey(*taken, selected_->backend, selected_->output);
+                emptied.push_back(taken);
             }
             setKey(*selected_, inUse.backend, inUse.id);
+            moved = selected_;
             zonesChanged_ = true;
         }
         for (auto it = zones_.begin(); it != zones_.end();) {
@@ -773,6 +779,7 @@ private:
                 zone->settings = settings;
                 zone->engine = std::make_unique<audio::PlaybackEngine>(zone->settings, factory_);
                 zone->state.playback = playback(zone->engine->snapshot());
+                emptied.push_back(zone.get());
                 ordered.push_back(std::move(zone));
                 zonesChanged_ = true;
             } else {
@@ -787,6 +794,41 @@ private:
             if (row.selected) selected_ = ordered.back().get();
         }
         zones_ = std::move(ordered);
+        zones.unlock();
+        for (Zone* zone : emptied) {
+            zone->q.policy.setShuffle(zone->settings.shuffle);
+            zone->q.policy.setRepeat(zone->settings.repeat);
+        }
+        if (moved) rememberQueueChoices(*moved);
+    }
+
+    // Before zones, the saved queue's shuffle and repeat were every output's: they become every zone's (MZ-R02).
+    void adoptQueueChoices(const Zone& restored) {
+        settings_.adoptQueueChoices = false;
+        const bool shuffle = restored.q.policy.shuffle();
+        const RepeatMode repeat = restored.q.policy.repeat();
+        settings_.shuffle = shuffle;
+        settings_.repeat = repeat;
+        for (auto& output : settings_.outputs) {
+            output.zone.shuffle = shuffle;
+            output.zone.repeat = repeat;
+        }
+        for (auto& zone : zones_) {
+            zone->settings.shuffle = shuffle;
+            zone->settings.repeat = repeat;
+            if (zone.get() == &restored) continue;
+            zone->q.policy.setShuffle(shuffle);
+            zone->q.policy.setRepeat(repeat);
+        }
+        persist();
+    }
+
+    // A zone's shuffle and repeat are kept with its output (MZ-R02).
+    void rememberQueueChoices(Zone& z) {
+        z.settings.shuffle = z.q.policy.shuffle();
+        z.settings.repeat = z.q.policy.repeat();
+        keepQueueChoices(settings_, z.backend, z.output, z.settings.shuffle, z.settings.repeat, state_.devices);
+        persistSoon();
     }
 
     void resumePlayback(Zone& z) {
@@ -877,6 +919,7 @@ private:
         state.shuffle = saved->shuffle;
         state.repeat = saved->repeat;
         z.q.policy.restore(std::move(state));
+        if (settings_.adoptQueueChoices) adoptQueueChoices(z);
         applyMarks(z, entries);
         z.q.entries = std::move(entries);
         if (const auto current = z.q.policy.current()) {
@@ -1055,9 +1098,11 @@ private:
             }
             case CommandKind::SetShuffle:
                 if (c.shuffle) z.q.policy.setShuffle(*c.shuffle);
+                rememberQueueChoices(z);
                 break;
             case CommandKind::SetRepeat:
                 if (c.repeat) z.q.policy.setRepeat(*c.repeat);
+                rememberQueueChoices(z);
                 break;
             case CommandKind::AddLibraryRoot:
                 if (!library_) throw std::logic_error("Server library is not configured");
@@ -1161,12 +1206,23 @@ private:
             case CommandKind::ApplySettings: {
                 if (c.settings) {
                     const auto lastFile = settings_.lastFile;
-                    const auto crossfade = settings_.crossfade;
                     const bool adoptOutputSets = settings_.adoptOutputSets;
+                    const bool adoptQueueChoices = settings_.adoptQueueChoices;
+                    const auto queueChoices = std::pair{settings_.shuffle, settings_.repeat};
                     const auto outputs = settings_.outputs;
                     auto airplayLevels = std::move(settings_.airplayLevels);
                     settings_ = nativeSettings(*c.settings);
                     settings_.airplayLevels = std::move(airplayLevels);
+                    // Shuffle and repeat are the queues', which only queue commands change.
+                    std::tie(settings_.shuffle, settings_.repeat) = queueChoices;
+                    for (auto& output : settings_.outputs)
+                        if (const auto was = std::ranges::find_if(
+                                outputs, [&](const SavedOutput& o) { return o.backend == output.backend && o.id == output.id; });
+                            was != outputs.end()) {
+                            output.zone.shuffle = was->zone.shuffle;
+                            output.zone.repeat = was->zone.repeat;
+                        }
+                    settings_.adoptQueueChoices = adoptQueueChoices;
                     std::erase_if(settings_.airplayLevels, [&](const auto& entry) {
                         return std::ranges::none_of(settings_.outputs, [&](const SavedOutput& o) {
                             return o.backend == Backend::AirPlay && o.id == entry.first;
@@ -1178,18 +1234,25 @@ private:
                     forgetDeletedReceivers(outputs);
                     checkEnabledReceivers(outputs);
                     followAirPlayGroup();
-                    std::vector<std::pair<std::string, ReplayGainSettings>> gains;
-                    gains.reserve(zones_.size());
-                    for (const auto& zone : zones_) gains.emplace_back(zone->id, zone->settings.replayGain);
+                    struct Fades {
+                        std::string zone;
+                        ReplayGainSettings gain;
+                        CrossfadeSettings crossfade;
+                    };
+                    std::vector<Fades> fades;
+                    fades.reserve(zones_.size());
+                    for (const auto& zone : zones_)
+                        fades.push_back({zone->id, zone->settings.replayGain, zone->settings.crossfade});
                     syncZones();
                     discord_->configure(settings_.discord);
                     shareLoudnessInputs();
                     // A queued track took the old gain and crossfade; it is queued again with the new ones. The playing
                     // one keeps its.
                     for (auto& zone : zones_) {
-                        const auto was = std::ranges::find(gains, zone->id, &std::pair<std::string, ReplayGainSettings>::first);
-                        const bool gain = was != gains.end() && was->second != zone->settings.replayGain;
-                        if ((gain || settings_.crossfade != crossfade) && !zone->chain.empty() && zone->engine->clearNext()) {
+                        const auto was = std::ranges::find(fades, zone->id, &Fades::zone);
+                        const bool changed = was != fades.end() && (was->gain != zone->settings.replayGain ||
+                                                                    was->crossfade != zone->settings.crossfade);
+                        if (changed && !zone->chain.empty() && zone->engine->clearNext()) {
                             zone->chain.pop_back();
                             zone->attempted = {};
                             zone->checked = {};
@@ -1497,7 +1560,7 @@ private:
         z.q.track = source;
         z.q.entryId = position.entryId;
         if (&z == &selected()) settings_.lastFile = path.wstring();
-        if (play && manualChange && settings_.crossfade.enabled)
+        if (play && manualChange && z.settings.crossfade.enabled)
             z.engine->crossfadeTo(path, source.decoder(), gainFor(z, position.entryId));
         else if (play)
             z.engine->openAndPlay(path, source.decoder(), gainFor(z, position.entryId), afterEnd);
@@ -1676,13 +1739,13 @@ private:
     // The crossfade from one entry into the next (docs/Plan.md §5.4): none while an album plays in order, the next
     // entry from the same album with shuffle off.
     uint32_t crossfadeMs(const Zone& z, uint64_t from, uint64_t to) const {
-        if (!settings_.crossfade.enabled) return 0;
+        if (!z.settings.crossfade.enabled) return 0;
         const auto album = [&z](uint64_t id) {
             const auto at = std::ranges::find(z.q.entries, id, &QueueEntry::id);
             return at == z.q.entries.end() ? int64_t{0} : at->albumId;
         };
         if (!z.q.policy.shuffle() && album(from) != 0 && album(from) == album(to)) return 0;
-        return uint32_t(std::lround(settings_.crossfade.seconds * 1000.0));
+        return uint32_t(std::lround(z.settings.crossfade.seconds * 1000.0));
     }
 
     // The length the library knows for the entry's MP3, exact or estimated, which the MP3 decoders show at once and place
@@ -1773,7 +1836,9 @@ private:
 
     // Autoplay (docs/Plan.md §8.1): once the last entry plays, a random library track follows it, so it preloads
     // for gapless playback. Each entry gets one try; a repeat mode never ends the queue.
-    bool autoplayAllowed(const Zone& z) const { return settings_.autoplay && library_ && z.q.policy.repeat() == RepeatMode::Off; }
+    bool autoplayAllowed(const Zone& z) const {
+        return z.settings.autoplay && library_ && z.q.policy.repeat() == RepeatMode::Off;
+    }
 
     void extendWithAutoplay(Zone& z) {
         if (!autoplayAllowed(z) || !z.q.entryId || z.q.autoplayTried == z.q.entryId) return;

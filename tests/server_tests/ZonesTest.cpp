@@ -48,6 +48,7 @@ Settings zoneSettings(size_t count) {
         output.id = output.wasapi.deviceId = device(i);
         output.name = "Zone " + std::to_string(i);
         output.enabled = true;
+        output.zone.autoplay = false;
         s.outputs.push_back(output);
     }
     return fromJson(toJson(s)); // as a settings file holds them
@@ -85,23 +86,42 @@ protected:
     std::filesystem::path dir;
     std::unique_ptr<LocalServer> server;
 
-    void start(size_t count, const std::function<void(Settings&)>& change = {}) {
+    // With `saved`, the settings and the library live in the test's folder and survive restart().
+    void start(size_t count, const std::function<void(Settings&)>& change = {}, bool saved = false) {
         dir = testutil::tempDir() / "zones" /
               (std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()) + "-" +
                std::to_string(GetCurrentProcessId()));
         std::filesystem::remove_all(dir);
-        std::filesystem::create_directories(dir);
+        std::filesystem::create_directories(dir / "data");
+        settingsFile = saved ? dir / "data" / "settings.json" : std::filesystem::path{};
         Settings settings = zoneSettings(count);
         if (change) change(settings);
-        settings = fromJson(toJson(settings));
-        server = std::make_unique<LocalServer>(settings, std::filesystem::path{}, [this](const Settings& s) {
+        open(fromJson(toJson(settings)));
+    }
+
+    void open(const Settings& settings) {
+        server = std::make_unique<LocalServer>(settings, settingsFile, [this](const Settings& s) {
             CaptureOptions options;
             options.file = capture(s.wasapi.deviceId);
             options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
             options.realtime = true;
             return std::make_unique<ZoneOutput>(*this, s.wasapi.deviceId, createCaptureOutput(options));
         });
+        server->waitIdle();
     }
+
+    // A new Server on what the last one saved, which the change turns into what an earlier version wrote.
+    void restart(const std::function<void(nlohmann::json&)>& change = {}) {
+        server.reset();
+        if (change) {
+            auto j = nlohmann::json::parse(std::ifstream(settingsFile));
+            change(j);
+            std::ofstream(settingsFile, std::ios::trunc) << j.dump(2);
+        }
+        open(loadSettings(settingsFile));
+    }
+
+    std::filesystem::path settingsFile;
 
     void TearDown() override {
         server.reset();
@@ -287,8 +307,8 @@ TEST_F(ZonesTest, EachZonePlaysItsQueueGaplessly) {
 
 TEST_F(ZonesTest, EachZoneCrossfadesItsOwnTracks) {
     start(2, [](Settings& s) {
-        s.crossfade.enabled = true;
-        s.crossfade.seconds = 1.0;
+        s.crossfade = {true, 1.0};
+        for (auto& output : s.outputs) output.zone.crossfade = {true, 1.0};
     });
     const std::vector one{track(2, 2.0), track(2, 2.5)};
     const std::vector two{track(5, 2.0), track(5, 2.5)};
@@ -470,4 +490,148 @@ TEST(ZonesApiJsonTest, ZonesAndTheZoneACommandNamesRoundTrip) {
     c.kind = CommandKind::Pause;
     c.zone = zone(2);
     EXPECT_EQ(commandFromJson(toJson(c)), c);
+}
+
+namespace {
+
+const SavedOutput& savedOutput(const Settings& s, size_t number) {
+    const auto found = std::ranges::find_if(s.outputs, [&](const SavedOutput& o) { return o.id == device(number); });
+    if (found == s.outputs.end()) throw std::runtime_error("no saved " + device(number));
+    return *found;
+}
+
+Command shuffle(size_t number, bool on) {
+    Command c;
+    c.kind = CommandKind::SetShuffle;
+    c.shuffle = on;
+    c.zone = zone(number);
+    return c;
+}
+
+Command repeat(size_t number, RepeatMode mode) {
+    Command c;
+    c.kind = CommandKind::SetRepeat;
+    c.repeat = mode;
+    c.zone = zone(number);
+    return c;
+}
+
+} // namespace
+
+TEST(ZoneSettingsTest, AnEarlierVersionsCrossfadeAndAutoplayBecomeEveryOutputsOwn) {
+    Settings old = zoneSettings(2);
+    old.crossfade = {true, 4.0};
+    old.autoplay = false;
+    auto j = nlohmann::json::parse(toJson(old));
+    j["schema"] = 4;
+    j.erase("shuffle");
+    j.erase("repeat");
+    for (auto& output : j["outputs"]) output.erase("zone");
+    const Settings read = fromJson(j.dump());
+    EXPECT_TRUE(read.adoptQueueChoices);
+    for (size_t i = 1; i <= 2; ++i) {
+        EXPECT_EQ(savedOutput(read, i).zone.crossfade, (CrossfadeSettings{true, 4.0})) << i;
+        EXPECT_FALSE(savedOutput(read, i).zone.autoplay) << i;
+    }
+    // Saved again, each output has its own.
+    Settings changed = read;
+    changed.outputs[1].zone.crossfade = {true, 2.0};
+    changed.adoptQueueChoices = false;
+    const Settings again = fromJson(toJson(changed));
+    EXPECT_FALSE(again.adoptQueueChoices);
+    EXPECT_EQ(savedOutput(again, 1).zone.crossfade, (CrossfadeSettings{true, 4.0}));
+    EXPECT_EQ(savedOutput(again, 2).zone.crossfade, (CrossfadeSettings{true, 2.0}));
+}
+
+TEST_F(ZonesTest, TheQueuesShuffleAndRepeatOfAnEarlierVersionBecomeEveryZones) {
+    start(3, {}, true);
+    send(play(1, {track(1, 6.0), track(1, 1.0)}));
+    send(shuffle(1, true));
+    send(repeat(1, RepeatMode::All));
+    restart([](nlohmann::json& j) {
+        j["schema"] = 4;
+        j.erase("shuffle");
+        j.erase("repeat");
+        for (auto& output : j["outputs"]) output.erase("zone");
+    });
+    const auto s = server->snapshot();
+    for (size_t i = 1; i <= 3; ++i) {
+        EXPECT_TRUE(of(s, i).queue.shuffle) << zone(i);
+        EXPECT_EQ(of(s, i).queue.repeat, RepeatMode::All) << zone(i);
+    }
+    EXPECT_EQ(of(s, 1).queue.entries.size(), 2U);
+    server->shutdown();
+    const Settings saved = loadSettings(settingsFile);
+    EXPECT_FALSE(saved.adoptQueueChoices);
+    EXPECT_TRUE(saved.shuffle);
+    EXPECT_TRUE(savedOutput(saved, 3).zone.shuffle);
+    EXPECT_EQ(savedOutput(saved, 3).zone.repeat, RepeatMode::All);
+}
+
+TEST_F(ZonesTest, EachZonesShuffleAndRepeatAreItsOwnAndSurviveARestart) {
+    start(3, {}, true);
+    send(shuffle(2, true));
+    send(repeat(3, RepeatMode::One));
+    const auto s = server->snapshot();
+    EXPECT_FALSE(of(s, 1).queue.shuffle);
+    EXPECT_EQ(of(s, 1).queue.repeat, RepeatMode::Off);
+    EXPECT_TRUE(of(s, 2).queue.shuffle);
+    EXPECT_EQ(of(s, 2).queue.repeat, RepeatMode::Off);
+    EXPECT_FALSE(of(s, 3).queue.shuffle);
+    EXPECT_EQ(of(s, 3).queue.repeat, RepeatMode::One);
+    restart();
+    const auto after = server->snapshot();
+    EXPECT_FALSE(of(after, 1).queue.shuffle);
+    EXPECT_TRUE(of(after, 2).queue.shuffle);
+    EXPECT_EQ(of(after, 3).queue.repeat, RepeatMode::One);
+    EXPECT_EQ(of(after, 1).queue.repeat, RepeatMode::Off);
+}
+
+TEST_F(ZonesTest, EachZoneCrossfadesByItsOwnSetting) {
+    start(2, [](Settings& s) { s.outputs[1].zone.crossfade = {true, 1.0}; });
+    const std::vector one{track(2, 2.0), track(2, 2.5)};
+    const std::vector two{track(5, 2.0), track(5, 2.5)};
+    send(play(1, one));
+    send(play(2, two));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return ended(of(s, 1)) && ended(of(s, 2)); }, 30s));
+    EXPECT_EQ(captured(1), reference(one));
+    EXPECT_NEAR(double(captured(2).size()) / 2 / 176400, 3.5, 0.25);
+}
+
+TEST_F(ZonesTest, AChangeToTheSelectedZonesSettingsLeavesTheOthersAlone) {
+    start(2, [](Settings& s) { s.outputs[1].zone.crossfade = {true, 6.0}; });
+    Settings s = nativeSettings(server->snapshot().settings);
+    s.crossfade = {true, 2.0};
+    s.autoplay = true;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(s);
+    send(std::move(apply));
+    server->shutdown();
+    const auto settings = nativeSettings(server->snapshot().settings);
+    EXPECT_EQ(settings.crossfade, (CrossfadeSettings{true, 2.0}));
+    EXPECT_EQ(savedOutput(settings, 2).zone.crossfade, (CrossfadeSettings{true, 6.0}));
+    EXPECT_FALSE(savedOutput(settings, 2).zone.autoplay);
+}
+
+TEST_F(ZonesTest, AnOutputTurnedOffAndOnAgainKeepsItsZonesSettings) {
+    start(3);
+    send(shuffle(2, true));
+    send(repeat(2, RepeatMode::All));
+    const auto setEnabled = [&](bool enabled) {
+        Settings s = nativeSettings(server->snapshot().settings);
+        setOutputEnabled(s, Backend::Wasapi, device(2), enabled, server->snapshot().devices);
+        Command apply;
+        apply.kind = CommandKind::ApplySettings;
+        apply.settings = settingsDto(s);
+        return send(std::move(apply));
+    };
+    const auto off = setEnabled(false);
+    EXPECT_EQ(off.zones.size(), 2U);
+    EXPECT_TRUE(std::ranges::none_of(off.zones, [](const ZoneSnapshot& z) { return z.id == zone(2); }));
+    const auto on = setEnabled(true);
+    ASSERT_EQ(on.zones.size(), 3U);
+    EXPECT_TRUE(of(on, 2).queue.shuffle);
+    EXPECT_EQ(of(on, 2).queue.repeat, RepeatMode::All);
+    EXPECT_FALSE(of(on, 3).queue.shuffle);
 }

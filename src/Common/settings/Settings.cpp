@@ -215,6 +215,17 @@ void setOutputDsp(Settings& s, const OutputDsp& dsp) {
     s.replayGain = dsp.replayGain;
 }
 
+ZoneChoices zoneChoices(const Settings& s) {
+    return {s.shuffle, s.repeat, s.crossfade, s.autoplay};
+}
+
+void setZoneChoices(Settings& s, const ZoneChoices& choices) {
+    s.shuffle = choices.shuffle;
+    s.repeat = choices.repeat;
+    s.crossfade = choices.crossfade;
+    s.autoplay = choices.autoplay;
+}
+
 std::vector<EqBand> defaultEqBands() {
     return {{EqKind::LowShelf, EqChannels::All, 12, 100.0},
             {EqKind::Peaking, EqChannels::All, 12, 400.0},
@@ -654,6 +665,41 @@ static void readHQPlayer(const json& o, HQPlayerSettings& h) {
     h.dsdPcmRate = dsdPcmRateFrom(num(o, "dsdPcmRate", 176400, 0, 1e7));
 }
 
+constexpr const char* kRepeatIds[] = {"off", "one", "all"};
+
+static RepeatMode repeatFromId(const std::string& id) {
+    const auto found = std::ranges::find(kRepeatIds, id);
+    return found == std::end(kRepeatIds) ? RepeatMode::Off : RepeatMode(found - std::begin(kRepeatIds));
+}
+
+static json crossfadeJson(const CrossfadeSettings& c) {
+    return {{"enabled", c.enabled}, {"seconds", c.seconds}};
+}
+
+static CrossfadeSettings crossfadeFrom(const json& c) {
+    CrossfadeSettings crossfade;
+    crossfade.enabled = boolean(c, "enabled", false);
+    const double seconds = num(c, "seconds", 3.0, CrossfadeSettings::kMinSeconds, CrossfadeSettings::kMaxSeconds);
+    crossfade.seconds = std::round(seconds * 2.0) / 2.0;
+    return crossfade;
+}
+
+static json zoneJson(const ZoneChoices& z) {
+    return {{"shuffle", z.shuffle},
+            {"repeat", kRepeatIds[int(z.repeat)]},
+            {"crossfade", crossfadeJson(z.crossfade)},
+            {"autoplay", z.autoplay}};
+}
+
+static ZoneChoices zoneFrom(const json& z) {
+    ZoneChoices choices;
+    choices.shuffle = boolean(z, "shuffle", false);
+    choices.repeat = repeatFromId(str(z, "repeat", "off"));
+    if (z.contains("crossfade") && z["crossfade"].is_object()) choices.crossfade = crossfadeFrom(z["crossfade"]);
+    choices.autoplay = boolean(z, "autoplay", true);
+    return choices;
+}
+
 static json outputJson(const SavedOutput& o) {
     json j = {
         {"backend", backendId(o.backend)},         {"id", o.id}, {"name", o.name}, {"alias", o.alias}, {"enabled", o.enabled},
@@ -665,13 +711,16 @@ static json outputJson(const SavedOutput& o) {
                       : o.backend == Backend::Ks       ? ksJson(o.ks)
                                                        : wasapiJson(o.wasapi);
     j["dsp"] = dspJson(o.dsp);
+    j["zone"] = zoneJson(o.zone);
     if (!o.speakers.empty()) j["speakers"] = o.speakers;
     if (!o.model.empty()) j["model"] = o.model;
     return j;
 }
 
-// An output saved before each had its own DSP takes `shared`, the one DSP of every output then.
-static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& shared, ResampleQuality quality) {
+// An output saved before each had its own DSP takes `shared`, the one DSP of every output then, and one saved before
+// zones `sharedZone`, the one crossfade and autoplay of every output then.
+static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& shared, const ZoneChoices& sharedZone,
+                                             ResampleQuality quality) {
     SavedOutput saved;
     if (!o.is_object() || !backendFromId(str(o, "backend", ""), saved.backend)) return std::nullopt;
     saved.id = str(o, "id", "");
@@ -681,6 +730,7 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
     saved.enabled = boolean(o, "enabled", false);
     saved.volumeMode = volumeModeFromId(str(o, "volumeMode", "fixed"));
     saved.dsp = o.contains("dsp") && o["dsp"].is_object() ? dspFrom(o["dsp"]) : shared;
+    saved.zone = o.contains("zone") && o["zone"].is_object() ? zoneFrom(o["zone"]) : sharedZone;
     if (o.contains("speakers") && o["speakers"].is_array())
         for (const auto& speaker : o["speakers"])
             if (speaker.is_string()) saved.speakers.push_back(speaker.get<std::string>());
@@ -749,7 +799,9 @@ std::string toJson(const Settings& s) {
     j["convolution"] = convolutionJson(s.convolution);
     j["volume"] = {{"mode", volumeModeId(s.volume.mode)}, {"db", s.volume.db}, {"muted", s.volume.muted}};
     j["replayGain"] = replayGainJson(s.replayGain);
-    j["crossfade"] = {{"enabled", s.crossfade.enabled}, {"seconds", s.crossfade.seconds}};
+    j["crossfade"] = crossfadeJson(s.crossfade);
+    j["shuffle"] = s.shuffle;
+    j["repeat"] = kRepeatIds[int(s.repeat)];
     j["dspOrder"] = dspOrderJson(s.dspOrder);
     j["lastFile"] = toUtf8(s.lastFile);
     j["wasapi"] = wasapiJson(s.wasapi);
@@ -867,12 +919,9 @@ Settings fromJson(const std::string& text) {
         s.volume.muted = boolean(v, "muted", false);
     }
     if (j.contains("replayGain") && j["replayGain"].is_object()) readReplayGain(j["replayGain"], s.replayGain);
-    if (j.contains("crossfade") && j["crossfade"].is_object()) {
-        const json& c = j["crossfade"];
-        s.crossfade.enabled = boolean(c, "enabled", false);
-        const double seconds = num(c, "seconds", 3.0, CrossfadeSettings::kMinSeconds, CrossfadeSettings::kMaxSeconds);
-        s.crossfade.seconds = std::round(seconds * 2.0) / 2.0;
-    }
+    if (j.contains("crossfade") && j["crossfade"].is_object()) s.crossfade = crossfadeFrom(j["crossfade"]);
+    s.shuffle = boolean(j, "shuffle", false);
+    s.repeat = repeatFromId(str(j, "repeat", "off"));
     if (j.contains("dspOrder")) readDspOrder(j["dspOrder"], s.dspOrder);
     s.lastFile = toWide(str(j, "lastFile", ""));
     if (j.contains("wasapi") && j["wasapi"].is_object()) readWasapi(j["wasapi"], s.wasapi, s.resampleQuality);
@@ -883,8 +932,9 @@ Settings fromJson(const std::string& text) {
     if (j.contains("hqplayer") && j["hqplayer"].is_object()) readHQPlayer(j["hqplayer"], s.hqplayer);
     if (j.contains("outputs") && j["outputs"].is_array()) {
         const OutputDsp shared = outputDsp(s);
+        const ZoneChoices sharedZone = zoneChoices(s);
         for (const auto& item : j["outputs"])
-            if (auto output = outputFrom(item, shared, s.resampleQuality)) s.outputs.push_back(std::move(*output));
+            if (auto output = outputFrom(item, shared, sharedZone, s.resampleQuality)) s.outputs.push_back(std::move(*output));
     }
     if (j.contains("airplayGroup") && j["airplayGroup"].is_array())
         for (const auto& id : j["airplayGroup"])
@@ -896,6 +946,7 @@ Settings fromJson(const std::string& text) {
                 s.airplayLevels[id] = {uint32_t(integer(level, "level", 33, 0, 100)), boolean(level, "muted", false)};
     s.followedDefault = str(j, "followedDefault", "");
     s.adoptOutputSets = schema < 4 || boolean(j, "adoptOutputSets", false);
+    s.adoptQueueChoices = schema < 5; // the Server takes them as it restores the queue, at the start that read them
     return s;
 }
 

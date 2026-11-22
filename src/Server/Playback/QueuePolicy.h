@@ -13,9 +13,11 @@
 #include <unordered_set>
 #include <vector>
 
+#include "Common/settings/Settings.h"
+
 namespace camel::server {
 
-enum class RepeatMode : uint8_t { Off, One, All };
+using camel::RepeatMode;
 
 struct QueuePosition {
     uint64_t entryId = 0;

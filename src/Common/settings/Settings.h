@@ -393,6 +393,18 @@ struct TrackColumns {
     bool operator==(const TrackColumns&) const = default;
 };
 
+enum class RepeatMode : uint8_t { Off, One, All };
+
+// What a zone keeps of its own besides its queue and DSP (docs/Plan.md §5.12): its queue's shuffle and repeat, crossfade
+// and autoplay.
+struct ZoneChoices {
+    bool shuffle = false;
+    RepeatMode repeat = RepeatMode::Off;
+    CrossfadeSettings crossfade;
+    bool autoplay = true;
+    bool operator==(const ZoneChoices&) const = default;
+};
+
 // An output's own DSP: EQ, crossfeed, convolution, their order and ReplayGain, all off for an output new to it. The
 // EQ presets are not part of it; every output shares them.
 struct OutputDsp {
@@ -422,13 +434,14 @@ struct SavedOutput {
     HQPlayerSettings hqplayer;
     VolumeMode volumeMode = VolumeMode::Fixed;
     OutputDsp dsp;
+    ZoneChoices zone;
     // An AirPlay stereo pair's speakers by their own device IDs, which stay when pairing it again gives it a new ID.
     std::vector<std::string> speakers;
     bool operator==(const SavedOutput&) const = default;
 };
 
 struct Settings {
-    static constexpr int kSchemaVersion = 4;
+    static constexpr int kSchemaVersion = 5;
 
     Backend backend = Backend::Wasapi;
     DecoderByFormat decoderByFormat;
@@ -469,6 +482,9 @@ struct Settings {
     VolumeSettings volume;
     ReplayGainSettings replayGain;
     CrossfadeSettings crossfade;
+    // The output in use's queue: only the Server sets them, from the queue commands.
+    bool shuffle = false;
+    RepeatMode repeat = RepeatMode::Off;
     std::vector<SavedOutput> outputs;
     // The AirPlay receivers playing together, the one in `airplay` among them; kept when another output is chosen, so
     // choosing any of them again brings the group back.
@@ -477,11 +493,17 @@ struct Settings {
     std::string followedDefault; // the endpoint whose parameters are in `wasapi` while it follows the Windows default
     std::wstring lastFile;
     bool adoptOutputSets = false; // from an earlier version: each backend's set still has to reach its device
+    // Read from a version before zones: the saved queue's shuffle and repeat still have to become every zone's. Never
+    // written, as the start that reads them restores the queue.
+    bool adoptQueueChoices = false;
 };
 
 // The DSP of the output in use, and putting another in its place, the EQ presets staying.
 OutputDsp outputDsp(const Settings& s);
 void setOutputDsp(Settings& s, const OutputDsp& dsp);
+// The same for its zone's choices.
+ZoneChoices zoneChoices(const Settings& s);
+void setZoneChoices(Settings& s, const ZoneChoices& choices);
 
 // Settings › Reset (docs/Plan.md §8.2). Playback and output: backend, devices, every backend parameter, conversion,
 // decoders, autoplay, playing on from a folder, the library scan's speed and the DSP chain, whose saved EQ presets stay.

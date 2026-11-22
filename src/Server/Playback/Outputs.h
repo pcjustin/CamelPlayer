@@ -51,6 +51,9 @@ void setInAirPlayGroup(Settings& s, const std::string& id, bool in, const Device
 AirPlayChannels airplayChannels(const Settings& s, const std::string& id);
 // `s` as it would be with this output in use, for showing its parameters without leaving the one in use.
 Settings withOutputParameters(Settings s, Backend backend, const std::string& id, const DeviceCatalog& devices);
+// The shuffle and repeat of this output's zone, which only the Server sets: in Settings' fields for the output in use.
+void keepQueueChoices(Settings& s, Backend backend, const std::string& id, bool shuffle, RepeatMode repeat,
+                      const DeviceCatalog& devices);
 // Takes this output's parameters from `edited`, which came from withOutputParameters. An output not in use only keeps them.
 void keepOutputParameters(Settings& s, const Settings& edited, Backend backend, const std::string& id,
                           const DeviceCatalog& devices);
