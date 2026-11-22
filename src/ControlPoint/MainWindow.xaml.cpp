@@ -2165,6 +2165,7 @@ void MainWindow::OnNavSelectionChanged(NavigationView const&, NavigationViewSele
     if (e.IsSettingsSelected()) {
         SearchBox().Text(L"");
         showPage(L"settings");
+        askSameNamedOutputs({});
         return;
     }
     auto item = e.SelectedItemContainer();

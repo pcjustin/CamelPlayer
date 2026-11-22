@@ -274,6 +274,15 @@ void MainWindow::populateOutputs() {
                 askTurnOffOutput(row, label);
                 return;
             }
+            if (on) {
+                auto enabledRow = row;
+                enabledRow.enabled = true;
+                if (camel::server::nameTaken(camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices),
+                                             enabledRow)) {
+                    askOutputName(row, true, {});
+                    return;
+                }
+            }
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
                 camel::server::setOutputEnabled(s, row.backend, row.id, on, devices);
             });
@@ -791,6 +800,88 @@ winrt::fire_and_forget MainWindow::askDeleteOutput(Backend backend, std::string 
 // state, play or pause and volume; a click on a row selects its zone, which the whole window follows. Under the rows, the
 // receivers of the selected AirPlay group join and leave it, and Pause all pauses every zone.
 void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (askSameNamedOutputs([this] { openZonePicker(); })) return;
+    openZonePicker();
+}
+
+// Two enabled outputs showing one name, as 0.5.1 allowed or a player renamed on itself, are named apart when the zone
+// picker or Settings › Audio outputs opens; false when none share a name. `then` runs once the question closes.
+bool MainWindow::askSameNamedOutputs(std::function<void()> then) {
+    if (askingName_) return true;
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (!rows[i].enabled) continue;
+        const bool earlier = std::ranges::any_of(rows.begin(), rows.begin() + std::ptrdiff_t(i), [&](const auto& other) {
+            return other.enabled && other.backend == rows[i].backend && other.name == rows[i].name;
+        });
+        if (!earlier) continue;
+        askOutputName(rows[i], false, std::move(then));
+        return true;
+    }
+    return false;
+}
+
+// Asks for a name of its own for `row`, "DMP-A6 (2)" offered; `enable` turns it on with it, and Cancel leaves it off.
+winrt::fire_and_forget MainWindow::askOutputName(camel::server::OutputRow row, bool enable, std::function<void()> then) {
+    auto strong = get_strong();
+    askingName_ = true;
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices);
+    auto candidate = row;
+    candidate.enabled = true;
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"Output_SameNameTitle", {std::wstring(outputMenuLabel(row))})));
+    StackPanel content;
+    content.Spacing(12);
+    TextBlock explanation;
+    explanation.Text(tr(L"Output_SameNameText"));
+    explanation.TextWrapping(TextWrapping::Wrap);
+    content.Children().Append(explanation);
+    TextBox name;
+    name.Text(ui::utf8(camel::server::freeName(rows, candidate)));
+    name.SelectAll();
+    Automation::AutomationProperties::SetName(name, tr(L"Output_SameNameBox"));
+    content.Children().Append(name);
+    TextBlock taken;
+    taken.Text(tr(L"Output_SameNameTaken"));
+    taken.Visibility(Visibility::Collapsed);
+    taken.Foreground(themeBrush(L"SystemFillColorCriticalBrush"));
+    content.Children().Append(taken);
+    dialog.Content(content);
+    dialog.PrimaryButtonText(tr(enable ? L"Output_SameNameEnable" : L"Output_Rename"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    // A name another enabled output shows keeps the question open.
+    dialog.PrimaryButtonClick([rows, candidate, weak = winrt::make_weak(name),
+                               weakTaken = winrt::make_weak(taken)](auto&&, ContentDialogButtonClickEventArgs const& e) {
+        const auto box = weak.get();
+        if (!box) return;
+        auto named = candidate;
+        std::wstring text(box.Text());
+        text.erase(0, text.find_first_not_of(L" \t"));
+        text.erase(text.find_last_not_of(L" \t") + 1);
+        named.name = toUtf8(text);
+        if (!text.empty() && !camel::server::nameTaken(rows, named)) return;
+        e.Cancel(true);
+        if (const auto shown = weakTaken.get()) shown.Visibility(Visibility::Visible);
+    });
+    const auto answer = co_await ui::showDialog(dialog);
+    askingName_ = false;
+    if (answer == ContentDialogResult::Primary) {
+        std::wstring text(name.Text());
+        text.erase(0, text.find_first_not_of(L" \t"));
+        text.erase(text.find_last_not_of(L" \t") + 1);
+        changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+            camel::server::renameOutput(s, row.backend, row.id, toUtf8(text), devices);
+            if (enable) camel::server::setOutputEnabled(s, row.backend, row.id, true, devices);
+        });
+        if (enable && camel::server::needsFirewallRule(row)) askFirewallRule();
+    }
+    populateOutputs(); // a switch turned on and cancelled goes back off
+    if (then) then();
+}
+
+void MainWindow::openZonePicker() {
     if (zonePicker_) zonePicker_.Hide();
     Flyout picker;
     picker.Placement(Primitives::FlyoutPlacementMode::Top);

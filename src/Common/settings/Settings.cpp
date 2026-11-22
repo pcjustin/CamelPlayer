@@ -720,6 +720,7 @@ static json outputJson(const SavedOutput& o) {
     if (!o.speakers.empty()) j["speakers"] = o.speakers;
     if (!o.airplayGroup.empty()) j["group"] = o.airplayGroup;
     if (!o.model.empty()) j["model"] = o.model;
+    if (!o.mac.empty()) j["mac"] = o.mac;
     return j;
 }
 
@@ -732,6 +733,7 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
     saved.id = str(o, "id", "");
     saved.name = str(o, "name", "");
     saved.model = str(o, "model", "");
+    saved.mac = str(o, "mac", "");
     saved.alias = str(o, "alias", "");
     saved.enabled = boolean(o, "enabled", false);
     saved.volumeMode = volumeModeFromId(str(o, "volumeMode", "fixed"));

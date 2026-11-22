@@ -141,8 +141,9 @@ public:
         emitLastChange(R"(<TransportState val="STOPPED"/>)");
     }
 
-    // Stops answering searches, while its other services stay.
+    // Stops answering searches, while its other services stay; answerAgain() undoes it.
     void goQuiet() { quiet_ = true; }
+    void answerAgain() { quiet_ = false; }
 
     void announce(uint16_t notifyPort, const char* subtype) {
         const std::string text = std::string("NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nNT: ") + searchTarget() +

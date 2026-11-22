@@ -395,6 +395,10 @@ private:
     winrt::fire_and_forget askTurnOffOutput(camel::server::OutputRow row, winrt::hstring label);
     void selectZone(const std::string& id);
     void selectZoneOf(const camel::server::ZoneSnapshot& zone);
+    void openZonePicker();
+    bool askSameNamedOutputs(std::function<void()> then);
+    winrt::fire_and_forget askOutputName(camel::server::OutputRow row, bool enable, std::function<void()> then);
+    bool askingName_ = false; // a question for an output's name is open
     std::vector<winrt::hstring> zonesPlaying() const;
     winrt::fire_and_forget requestExit();
     bool exitAsking_ = false; // Exit's question is open

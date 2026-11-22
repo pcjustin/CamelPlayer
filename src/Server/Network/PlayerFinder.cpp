@@ -6,9 +6,12 @@
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
+#include <netioapi.h>
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -19,6 +22,7 @@
 #include "Server/Network/SocketWait.h"
 
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "iphlpapi.lib")
 
 namespace camel::server {
 
@@ -165,11 +169,12 @@ struct PlayerFinder::Impl {
             return;
         }
         refused.erase(answer);
+        const std::string mac = options.macOf ? options.macOf(message.location) : arpMacOf(message.location);
         {
             std::scoped_lock lock(mutex);
             auto found = std::ranges::find_if(known, [&](const Known& k) { return k.player.description.udn == message.udn; });
             if (found == known.end()) found = known.insert(known.end(), Known{});
-            found->player = {std::move(*description), message.location};
+            found->player = {std::move(*description), message.location, mac};
             found->locations.insert(found->locations.begin(), message.location);
             if (found->locations.size() > kKeptLocations) found->locations.resize(kKeptLocations);
             found->seen = Clock::now();
@@ -219,7 +224,8 @@ struct PlayerFinder::Impl {
                 if (found != known.end()) {
                     found->seen = Clock::now();
                     moved = found->player.location != location;
-                    found->player = {std::move(*description), location};
+                    const std::string mac = found->player.mac;
+                    found->player = {std::move(*description), location, mac};
                 }
             }
             if (moved) changed();
@@ -244,6 +250,24 @@ struct PlayerFinder::Impl {
         }
     }
 };
+
+std::string arpMacOf(const std::string& location) {
+    const auto start = location.find("://");
+    if (start == std::string::npos) return {};
+    const std::string rest = location.substr(start + 3);
+    const std::string host = rest.substr(0, rest.find_first_of(":/"));
+    MIB_IPNET_ROW2 row{};
+    row.Address.si_family = AF_INET;
+    if (inet_pton(AF_INET, host.c_str(), &row.Address.Ipv4.sin_addr) != 1) return {};
+    if (ResolveIpNetEntry2(&row, nullptr) != NO_ERROR || !row.PhysicalAddressLength) return {};
+    std::string mac;
+    for (ULONG i = 0; i < row.PhysicalAddressLength; ++i) {
+        char part[4];
+        std::snprintf(part, sizeof(part), i ? ":%02x" : "%02x", row.PhysicalAddress[i]);
+        mac += part;
+    }
+    return mac;
+}
 
 PlayerFinder::PlayerFinder(FinderOptions options, std::function<void()> onChange)
     : impl_(std::make_unique<Impl>(std::move(options), std::move(onChange))) {}

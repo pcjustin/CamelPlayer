@@ -282,6 +282,7 @@ struct DeviceInfo {
     std::vector<std::string> speakers; // of an AirPlay stereo pair, as SavedOutput::speakers
     std::string model;                 // a network player's maker and model, as its description gives them
     std::string container;             // a local device's Windows container ID: the hardware it is part of
+    std::string mac;                   // a network player's MAC address, from the ARP table; empty when unknown
     bool operator==(const DeviceInfo&) const = default;
 };
 

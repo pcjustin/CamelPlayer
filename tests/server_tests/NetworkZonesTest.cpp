@@ -321,3 +321,81 @@ TEST_F(AirPlayZonesTest, TheFirstReceiverTakenOutOfAPlayingGroupLeavesItsZoneToT
     EXPECT_LT(rtsp_[0].packetCount(), aPackets + 10);
     server->shutdown();
 }
+
+// A player back under a new UDN is known by its MAC address and keeps its zone, its queue and its settings (MZ-R14);
+// another of its name and model with another MAC is not taken for it.
+TEST(NetworkZonesTest, APlayerBackUnderANewUdnWithItsMacKeepsItsZone) {
+    FakeRenderer inUse(RendererKind::UpnpAv, "uuid:in-use", "Other Player"), first(RendererKind::UpnpAv, "uuid:first", "DMP-A6"),
+        lookalike(RendererKind::UpnpAv, "uuid:lookalike", "DMP-A6"), renewed(RendererKind::UpnpAv, "uuid:renewed", "DMP-A6");
+    lookalike.goQuiet();
+    renewed.goQuiet();
+    Settings settings;
+    settings.autoplay = false;
+    settings.backend = Backend::Network;
+    settings.network.udn = "uuid:in-use";
+    settings.outputs = {enabled(Backend::Network, "uuid:in-use"), enabled(Backend::Network, "uuid:first")};
+    settings.outputs[1].zone.crossfade = {true, 6.0};
+    settings = fromJson(toJson(settings));
+    LocalServer server(settings);
+    FinderOptions options;
+    options.searchHost = "127.0.0.1";
+    options.searchPort = inUse.ssdpPort();
+    options.moreSearchPorts = {first.ssdpPort(), lookalike.ssdpPort(), renewed.ssdpPort()};
+    options.notifyPort = 0;
+    options.searchInterval = 100ms;
+    // The renewed player has the first one's MAC, the lookalike one of its own.
+    options.macOf = [&](const std::string& location) {
+        if (location == first.location() || location == renewed.location()) return std::string("aa:bb:cc:00:00:01");
+        return location == lookalike.location() ? std::string("aa:bb:cc:00:00:02") : std::string();
+    };
+    server.setFinderOptions(options);
+    const auto zoneOf = [](const std::string& udn) { return zoneId(Backend::Network, udn); };
+    ASSERT_TRUE(waitFor([&] {
+        server.submit(refresh());
+        server.waitIdle();
+        return server.snapshot().devices.network.size() == 2;
+    }));
+    server.submit(playIn(zoneOf("uuid:first"), testutil::generatedFile({"renewed-player", 44100, 16, 2, 20.0})));
+    server.waitIdle();
+    Command pause;
+    pause.kind = CommandKind::Pause;
+    pause.zone = zoneOf("uuid:first");
+    server.submit(pause);
+    server.waitIdle();
+    const auto queue = in(server.snapshot(), zoneOf("uuid:first")).queue.entries;
+    ASSERT_FALSE(queue.empty());
+
+    first.disappear();
+    lookalike.answerAgain();
+    ASSERT_TRUE(waitFor(
+        [&] {
+            server.submit(refresh());
+            server.waitIdle();
+            const auto& found = server.snapshot().devices.network;
+            return std::ranges::any_of(found, [](const DeviceInfo& d) { return d.id == "uuid:lookalike"; }) &&
+                   std::ranges::none_of(found, [](const DeviceInfo& d) { return d.id == "uuid:first"; });
+        },
+        60s));
+    auto s = server.snapshot();
+    EXPECT_TRUE(std::ranges::any_of(s.zones, [&](const ZoneSnapshot& z) { return z.id == zoneOf("uuid:first"); }))
+        << "the lookalike is not taken for it";
+    EXPECT_TRUE(std::ranges::none_of(s.zones, [&](const ZoneSnapshot& z) { return z.id == zoneOf("uuid:lookalike"); }));
+
+    renewed.answerAgain();
+    ASSERT_TRUE(waitFor(
+        [&] {
+            server.submit(refresh());
+            server.waitIdle();
+            const auto now = server.snapshot();
+            return std::ranges::any_of(now.zones, [&](const ZoneSnapshot& z) { return z.id == zoneOf("uuid:renewed"); });
+        },
+        30s));
+    s = server.snapshot();
+    EXPECT_EQ(in(s, zoneOf("uuid:renewed")).queue.entries, queue);
+    EXPECT_TRUE(std::ranges::none_of(s.zones, [&](const ZoneSnapshot& z) { return z.id == zoneOf("uuid:first"); }));
+    const auto saved = std::ranges::find(s.settings.outputs, std::string("uuid:renewed"), &SavedOutput::id);
+    ASSERT_NE(saved, s.settings.outputs.end());
+    EXPECT_EQ(saved->mac, "aa:bb:cc:00:00:01");
+    EXPECT_EQ(saved->zone.crossfade, (CrossfadeSettings{true, 6.0}));
+    server.shutdown();
+}

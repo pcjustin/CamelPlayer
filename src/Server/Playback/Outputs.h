@@ -37,10 +37,23 @@ const std::string& outputInUse(const Settings& s);
 // Fetches the stream from another computer, through the Windows Firewall rule.
 bool needsFirewallRule(const OutputRow& row);
 
+// An output that came back under another ID, as a player under a new UDN or speakers paired again, which its zone follows.
+struct OutputMove {
+    Backend backend = Backend::Wasapi;
+    std::string from, to;
+    bool operator==(const OutputMove&) const = default;
+};
+
 // Brings `s` in line with `devices`: gives an earlier version's sets to their devices, moves to the default device's
-// set when the followed default changed, keeps the parameters in use and the devices' names, enables the output in use
-// and disables any other that cannot be used. Does nothing before the first device scan.
-void syncOutputs(Settings& s, const DeviceCatalog& devices);
+// set when the followed default changed, keeps the parameters in use and the devices' names, models and MACs, enables
+// the output in use and disables any other that cannot be used. Does nothing before the first device scan. Returns the
+// outputs that came back under another ID.
+std::vector<OutputMove> syncOutputs(Settings& s, const DeviceCatalog& devices);
+
+// Whether another enabled output of `row`'s backend shows the same name, which no two may (docs/Plan.md §5.12); and the
+// name offered instead, "DMP-A6 (2)" and on.
+bool nameTaken(const std::vector<OutputRow>& rows, const OutputRow& row);
+std::string freeName(const std::vector<OutputRow>& rows, const OutputRow& row);
 
 // Choosing a receiver of the AirPlay group last played brings the whole group back; any other starts a group of one.
 void selectOutput(Settings& s, Backend backend, const std::string& id, const DeviceCatalog& devices);

@@ -22,11 +22,18 @@ struct FinderOptions {
     uint16_t notifyPort = 1900; // 0 picks a free one, without joining the multicast group
     std::chrono::milliseconds searchInterval{60000};
     std::vector<uint16_t> moreSearchPorts; // tests: other ports at searchHost searched too, each a player of its own
+    // The MAC address of the player at a location; empty for none. By default the ARP table's for its address.
+    std::function<std::string(const std::string& location)> macOf;
 };
+
+// The MAC address of the host at `location` from the ARP table, asking for it when it is not there; empty for none, as on
+// the loopback interface.
+std::string arpMacOf(const std::string& location);
 
 struct FoundPlayer {
     upnp::PlayerDescription description;
     std::string location;
+    std::string mac; // its MAC address; empty when unknown
     bool operator==(const FoundPlayer&) const = default;
 };
 

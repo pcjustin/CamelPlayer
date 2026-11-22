@@ -763,6 +763,11 @@ Details: {0}</value></data>
   <data name="Output_ZoneCrossfade" xml:space="preserve"><value>Crossfade</value></data>
   <data name="Output_ZoneCrossfadeOn" xml:space="preserve"><value>Overlap tracks as they change</value></data>
   <data name="Output_ZoneCrossfadeSeconds" xml:space="preserve"><value>Length (seconds)</value></data>
+  <data name="Output_SameNameTitle" xml:space="preserve"><value>Another output is called {0}</value></data>
+  <data name="Output_SameNameText" xml:space="preserve"><value>No two outputs may show the same name, so that each zone can be told apart. Give this one a name of its own.</value></data>
+  <data name="Output_SameNameBox" xml:space="preserve"><value>Its name</value></data>
+  <data name="Output_SameNameTaken" xml:space="preserve"><value>Another output shows this name; choose another.</value></data>
+  <data name="Output_SameNameEnable" xml:space="preserve"><value>Turn on</value></data>
   <data name="Output_DeleteTitle" xml:space="preserve"><value>Delete the settings of {0}?</value></data>
   <data name="Output_DeleteText" xml:space="preserve"><value>Its settings, name and place in the output menu are cleared. If it is found again, it starts from the defaults.</value></data>
   <data name="Output_Offline" xml:space="preserve"><value>{0} (not connected)</value></data>

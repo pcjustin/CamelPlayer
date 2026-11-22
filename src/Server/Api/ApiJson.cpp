@@ -396,7 +396,8 @@ json toJson(const std::vector<DeviceInfo>& devices) {
                        {"unsupported", d.unsupported},
                        {"speakers", d.speakers},
                        {"model", d.model},
-                       {"container", d.container}});
+                       {"container", d.container},
+                       {"mac", d.mac}});
     return out;
 }
 
@@ -409,7 +410,8 @@ std::vector<DeviceInfo> devicesFrom(const json& j, const char* key) {
             speakers.push_back(speaker.get<std::string>());
         }
         out.push_back({value<std::string>(d, "id"), value<std::string>(d, "name"), value<std::string>(d, "unsupported"),
-                       std::move(speakers), value<std::string>(d, "model"), value<std::string>(d, "container")});
+                       std::move(speakers), value<std::string>(d, "model"), value<std::string>(d, "container"),
+                       d.contains("mac") ? value<std::string>(d, "mac") : std::string()});
     }
     return out;
 }

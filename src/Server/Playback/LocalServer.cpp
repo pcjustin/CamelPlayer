@@ -875,6 +875,19 @@ private:
         return wanted;
     }
 
+    // A zone whose output came back under another ID goes on as that output's, its queue and saved session with it.
+    void followMoves(const std::vector<OutputMove>& moves) {
+        std::unique_lock zones(zonesMutex_);
+        for (const auto& move : moves) {
+            const auto at = [&](const std::string& output) {
+                return std::ranges::find_if(zones_,
+                                            [&](const auto& z) { return z->backend == move.backend && z->output == output; });
+            };
+            if (const auto zone = at(move.from); zone != zones_.end() && at(move.to) == zones_.end())
+                rekey(**zone, move.backend, move.to);
+        }
+    }
+
     // A zone goes on as another output's, its saved session with it.
     void rekey(Zone& z, Backend backend, const std::string& output) {
         const std::string from = z.id, to = zoneId(backend, output);
@@ -2359,7 +2372,7 @@ private:
         const auto outputs = settings_.outputs;
         const auto followed = settings_.followedDefault;
         const auto receiver = settings_.backend == Backend::AirPlay ? settings_.airplay.deviceId : std::string();
-        syncOutputs(settings_, state_.devices);
+        followMoves(syncOutputs(settings_, state_.devices));
         // Speakers paired while one of them played: the pair is in use now and plays on once it can.
         if (!receiver.empty() && settings_.airplay.deviceId != receiver && selected_)
             selected_->pairedAt = std::chrono::steady_clock::now();
@@ -2385,6 +2398,7 @@ private:
             const auto& d = player.description;
             DeviceInfo device{d.udn, d.name};
             device.model = d.manufacturer.empty() ? d.model : d.model.empty() ? d.manufacturer : d.manufacturer + " " + d.model;
+            device.mac = player.mac;
             catalog.network.push_back(std::move(device));
         }
     }

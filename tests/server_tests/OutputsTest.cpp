@@ -584,6 +584,112 @@ TEST(OutputsTest, TheRowsBeforeADeviceScanKeepTheLastScansOrder) {
     EXPECT_EQ(ids(outputRows(fromJson(toJson(s)), DeviceCatalog{})), scanned);
 }
 
+namespace {
+
+SavedOutput savedPlayer(const std::string& udn, const std::string& name, const std::string& model, const std::string& mac) {
+    SavedOutput o;
+    o.backend = Backend::Network;
+    o.id = o.network.udn = udn;
+    o.name = name;
+    o.model = model;
+    o.mac = mac;
+    o.enabled = true;
+    return o;
+}
+
+DeviceInfo foundPlayer(const std::string& udn, const std::string& name, const std::string& model, const std::string& mac) {
+    DeviceInfo d{udn, name};
+    d.model = model;
+    d.mac = mac;
+    return d;
+}
+
+} // namespace
+
+// Two players of one name and model: the one saved and gone is not taken for the other, never used, when their MACs differ
+// (MZ-R14); one back under a new UDN with its MAC is followed whatever its name.
+TEST(OutputsTest, APlayerUnderANewUdnIsFollowedByItsMacAndAnotherOfItsNameIsNot) {
+    Settings s = fresh();
+    s.outputs.push_back(savedPlayer("uuid:first", "DMP-A6", "Eversolo DMP-A6", "aa:aa:aa:aa:aa:01"));
+    DeviceCatalog devices = catalog();
+    devices.network = {foundPlayer("uuid:second", "DMP-A6", "Eversolo DMP-A6", "aa:aa:aa:aa:aa:02")};
+    EXPECT_TRUE(syncOutputs(s, devices).empty());
+    EXPECT_NE(saved(s, Backend::Network, "uuid:first"), nullptr);
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:second"), nullptr);
+
+    devices.network.push_back(foundPlayer("uuid:renewed", "Living room", "Eversolo DMP-A6", "aa:aa:aa:aa:aa:01"));
+    const auto moves = syncOutputs(s, devices);
+    EXPECT_EQ(moves, (std::vector<OutputMove>{{Backend::Network, "uuid:first", "uuid:renewed"}}));
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:first"), nullptr);
+    ASSERT_NE(saved(s, Backend::Network, "uuid:renewed"), nullptr);
+    EXPECT_TRUE(saved(s, Backend::Network, "uuid:renewed")->enabled);
+    EXPECT_EQ(saved(s, Backend::Network, "uuid:renewed")->mac, "aa:aa:aa:aa:aa:01");
+}
+
+// Without a MAC, a player is followed by its name and model only while no other saved player shares them.
+TEST(OutputsTest, WithoutAMacAPlayerIsFollowedByNameAndModelOnlyWhenNoOtherSavedOneSharesThem) {
+    Settings s = fresh();
+    s.outputs.push_back(savedPlayer("uuid:one", "KECES", "KECES E620", ""));
+    DeviceCatalog devices = catalog();
+    devices.network = {foundPlayer("uuid:new", "KECES", "KECES E620", "")};
+    Settings shared = s;
+    shared.outputs.push_back(savedPlayer("uuid:two", "KECES", "KECES E620", ""));
+    EXPECT_TRUE(syncOutputs(shared, devices).empty());
+    EXPECT_NE(saved(shared, Backend::Network, "uuid:one"), nullptr);
+    EXPECT_NE(saved(shared, Backend::Network, "uuid:two"), nullptr);
+
+    EXPECT_EQ(syncOutputs(s, devices), (std::vector<OutputMove>{{Backend::Network, "uuid:one", "uuid:new"}}));
+    EXPECT_NE(saved(s, Backend::Network, "uuid:new"), nullptr);
+}
+
+// An AirPlay pair saved before its speakers were is followed by its name only when no other saved receiver has that name.
+TEST(OutputsTest, AnAirPlayPairSavedBeforeItsSpeakersIsFollowedByANameNoOtherReceiverHas) {
+    Settings s = fresh();
+    SavedOutput pair;
+    pair.backend = Backend::AirPlay;
+    pair.id = pair.airplay.deviceId = "OLD-PAIR";
+    pair.name = "Living Room";
+    pair.enabled = true;
+    s.outputs.push_back(pair);
+    DeviceCatalog devices = catalog();
+    DeviceInfo repaired{"NEW-PAIR", "Living Room"};
+    repaired.speakers = {"NEW-PAIR", "SPEAKER-2"};
+    devices.airplay = {repaired};
+    Settings twice = s;
+    SavedOutput other = pair;
+    other.id = other.airplay.deviceId = "OTHER";
+    twice.outputs.push_back(other);
+    EXPECT_TRUE(syncOutputs(twice, devices).empty());
+    EXPECT_NE(saved(twice, Backend::AirPlay, "OLD-PAIR"), nullptr);
+
+    EXPECT_EQ(syncOutputs(s, devices), (std::vector<OutputMove>{{Backend::AirPlay, "OLD-PAIR", "NEW-PAIR"}}));
+}
+
+// No two enabled outputs of one backend show the same name, as the settings of 0.5.1 could have them; the name offered
+// instead counts on.
+TEST(OutputsTest, TwoEnabledOutputsOfOneNameAreFoundAndOfferedANumberedName) {
+    Settings s = fresh();
+    s.outputs.push_back(savedPlayer("uuid:a", "DMP-A6", "Eversolo DMP-A6", ""));
+    s.outputs.push_back(savedPlayer("uuid:b", "DMP-A6", "Eversolo DMP-A6", ""));
+    const auto rows = outputRows(s, catalog());
+    const auto& a = row(rows, Backend::Network, "uuid:a");
+    const auto& b = row(rows, Backend::Network, "uuid:b");
+    EXPECT_TRUE(nameTaken(rows, b));
+    EXPECT_EQ(freeName(rows, b), "DMP-A6 (2)");
+    renameOutput(s, Backend::Network, "uuid:b", "DMP-A6 (2)", catalog());
+    const auto renamed = outputRows(s, catalog());
+    EXPECT_FALSE(nameTaken(renamed, row(renamed, Backend::Network, "uuid:b")));
+    EXPECT_FALSE(nameTaken(renamed, a));
+    // A third of that name is offered the next number.
+    s.outputs.push_back(savedPlayer("uuid:c", "DMP-A6", "Eversolo DMP-A6", ""));
+    const auto three = outputRows(s, catalog());
+    EXPECT_EQ(freeName(three, row(three, Backend::Network, "uuid:c")), "DMP-A6 (3)");
+    // One turned off takes no name.
+    setOutputEnabled(s, Backend::Network, "uuid:c", false, catalog());
+    const auto off = outputRows(s, catalog());
+    EXPECT_FALSE(nameTaken(off, row(off, Backend::Network, "uuid:a")));
+}
+
 TEST(OutputsTest, ResettingPlaybackForgetsTheDevices) {
     Settings s = fresh();
     selectOutput(s, Backend::Asio, "a-dave", catalog());

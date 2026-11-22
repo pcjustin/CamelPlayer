@@ -158,7 +158,8 @@ bool holds(const std::vector<std::string>& ids, const std::string& id) {
 
 // What was saved for the AirPlay receiver `from` goes to `to`: the entry, or its turning on when `to` has one, the use,
 // the group's place and the level.
-void moveReceiver(Settings& s, const std::string& from, const std::string& to) {
+void moveReceiver(Settings& s, const std::string& from, const std::string& to, std::vector<OutputMove>& moves) {
+    moves.push_back({Backend::AirPlay, from, to});
     const auto saved = [&](const std::string& id) {
         return std::ranges::find_if(s.outputs, [&](const SavedOutput& o) { return o.backend == Backend::AirPlay && o.id == id; });
     };
@@ -185,45 +186,66 @@ void moveReceiver(Settings& s, const std::string& from, const std::string& to) {
 }
 
 // A stereo pair paired again in the Home app comes back under a new ID. It is known by a speaker it shares with a saved
-// pair, or by its name for one saved before its speakers were, and takes over what was saved under the old ID.
-void followRepairedPairs(Settings& s, const DeviceCatalog& devices) {
+// pair, or by its name for one saved before its speakers were, when no other saved receiver has that name (MZ-R14), and
+// takes over what was saved under the old ID.
+void followRepairedPairs(Settings& s, const DeviceCatalog& devices, std::vector<OutputMove>& moves) {
     for (const auto& device : devices.airplay) {
         if (device.speakers.size() < 2) continue;
+        // Its own speakers, which go into it, do not count.
+        const auto named = [&](const std::string& name) {
+            return std::ranges::count_if(s.outputs, [&](const SavedOutput& o) {
+                return o.backend == Backend::AirPlay && o.name == name && !holds(device.speakers, o.id);
+            });
+        };
         const auto old = std::ranges::find_if(s.outputs, [&](const SavedOutput& o) {
             if (o.backend != Backend::AirPlay || o.id.empty() || findDevice(devices, Backend::AirPlay, o.id)) return false;
-            if (o.speakers.empty()) return o.name == device.name && !holds(device.speakers, o.id);
+            if (o.speakers.empty()) return o.name == device.name && !holds(device.speakers, o.id) && named(o.name) == 1;
             return std::ranges::any_of(o.speakers, [&](const std::string& id) { return holds(device.speakers, id); });
         });
-        if (old != s.outputs.end()) moveReceiver(s, std::string(old->id), device.id);
+        if (old != s.outputs.end()) moveReceiver(s, std::string(old->id), device.id, moves);
     }
 }
 
 // Speakers paired in the Home app are one receiver from then on (the owner, 2026-11-15): what was saved for each alone goes
 // into the pair, which is in use and in the group where either was. A speaker still found alone keeps its own.
-void mergePairedSpeakers(Settings& s, const DeviceCatalog& devices) {
+void mergePairedSpeakers(Settings& s, const DeviceCatalog& devices, std::vector<OutputMove>& moves) {
     for (const auto& device : devices.airplay) {
         if (device.speakers.size() < 2) continue;
         for (const auto& speaker : device.speakers)
             if (speaker != device.id && !findDevice(devices, Backend::AirPlay, speaker) &&
                 (findOutput(s, Backend::AirPlay, speaker) || holds(s.airplayGroup, speaker) ||
                  (s.backend == Backend::AirPlay && s.airplay.deviceId == speaker)))
-                moveReceiver(s, speaker, device.id);
+                moveReceiver(s, speaker, device.id, moves);
     }
 }
 
-// A player can answer under a new UDN, as the DMP-A6 did on 2026-11-19. The only one found unsaved with the name and model
-// of a saved player that is gone is taken for it (the owner, 2026-11-19), one saved before models were kept by its name
-// alone; what was saved for the old UDN, its use included, goes to the new one.
-void followRenewedPlayers(Settings& s, const DeviceCatalog& devices) {
+// A player can answer under a new UDN, as the DMP-A6 did on 2026-11-19. A saved player that is gone is taken for the
+// only one found unsaved with its MAC address (the owner, 2026-11-22); when either MAC is unknown, for the only one with
+// its name and model, as long as no other saved player shares them (the owner, 2026-11-19 and 2026-11-22), one saved
+// before models were kept by its name alone. What was saved for the old UDN, its use included, goes to the new one.
+void followRenewedPlayers(Settings& s, const DeviceCatalog& devices, std::vector<OutputMove>& moves) {
     for (auto& old : s.outputs) {
         if (old.backend != Backend::Network || old.id.empty() || findDevice(devices, Backend::Network, old.id)) continue;
-        const auto fits = [&](const DeviceInfo& d) {
-            return d.name == old.name && (old.model.empty() || d.model == old.model) && !findOutput(s, Backend::Network, d.id);
+        const auto unsaved = [&](const DeviceInfo& d) { return !findOutput(s, Backend::Network, d.id); };
+        const auto sameMac = [&](const DeviceInfo& d) { return !old.mac.empty() && d.mac == old.mac && unsaved(d); };
+        const auto sameName = [&](const std::string& name, const std::string& model) {
+            return name == old.name && (old.model.empty() || model == old.model);
         };
-        if (std::ranges::count_if(devices.network, fits) != 1) continue;
-        const std::string renewed = std::ranges::find_if(devices.network, fits)->id;
-        if (s.backend == Backend::Network && s.network.udn == old.id) s.network.udn = renewed;
-        setId(old, renewed);
+        const auto fits = [&](const DeviceInfo& d) {
+            return sameName(d.name, d.model) && (old.mac.empty() || d.mac.empty()) && unsaved(d);
+        };
+        const bool shared = std::ranges::any_of(s.outputs, [&](const SavedOutput& o) {
+            return &o != &old && o.backend == Backend::Network && sameName(o.name, o.model);
+        });
+        const DeviceInfo* renewed = nullptr;
+        if (std::ranges::count_if(devices.network, sameMac) == 1)
+            renewed = &*std::ranges::find_if(devices.network, sameMac);
+        else if (!shared && std::ranges::count_if(devices.network, fits) == 1)
+            renewed = &*std::ranges::find_if(devices.network, fits);
+        if (!renewed) continue;
+        if (s.backend == Backend::Network && s.network.udn == old.id) s.network.udn = renewed->id;
+        moves.push_back({Backend::Network, old.id, renewed->id});
+        setId(old, renewed->id);
     }
 }
 
@@ -273,8 +295,9 @@ bool needsFirewallRule(const OutputRow& row) {
     return !hqplayer::splitAddress(row.id, host, port) || !hqplayer::isLocalHost(host);
 }
 
-void syncOutputs(Settings& s, const DeviceCatalog& devices) {
-    if (devices.revision == 0) return;
+std::vector<OutputMove> syncOutputs(Settings& s, const DeviceCatalog& devices) {
+    std::vector<OutputMove> moves;
+    if (devices.revision == 0) return moves;
     // In the order the scan found them, which the output menu and the zone picker show before the next scan too.
     const auto found = [&](const SavedOutput& o) {
         const auto& list = devicesOf(devices, o.backend);
@@ -283,9 +306,9 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
     };
     std::ranges::stable_sort(s.outputs, {}, found);
     adoptSets(s, devices);
-    followRepairedPairs(s, devices);
-    mergePairedSpeakers(s, devices);
-    followRenewedPlayers(s, devices);
+    followRepairedPairs(s, devices, moves);
+    mergePairedSpeakers(s, devices, moves);
+    followRenewedPlayers(s, devices, moves);
     if (followsDefault(s) && !devices.defaultWasapi.empty() && s.followedDefault != devices.defaultWasapi) {
         keepParameters(s, Backend::Wasapi, s.followedDefault);
         loadParameters(s, Backend::Wasapi, devices.defaultWasapi, {});
@@ -299,6 +322,7 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
         if (const auto* device = findDevice(devices, saved.backend, saved.id)) {
             saved.name = device->name;
             if (!device->model.empty()) saved.model = device->model;
+            if (!device->mac.empty()) saved.mac = device->mac;
             if (!device->speakers.empty()) saved.speakers = device->speakers;
             const bool inUse = saved.backend == s.backend && saved.id == selectedId(s);
             if (!device->unsupported.empty() && !inUse) {
@@ -306,6 +330,21 @@ void syncOutputs(Settings& s, const DeviceCatalog& devices) {
                 if (saved.backend == Backend::AirPlay) std::erase(s.airplayGroup, saved.id);
             }
         }
+    return moves;
+}
+
+bool nameTaken(const std::vector<OutputRow>& rows, const OutputRow& row) {
+    return std::ranges::any_of(rows, [&](const OutputRow& other) {
+        return other.enabled && other.backend == row.backend && other.id != row.id && other.name == row.name;
+    });
+}
+
+std::string freeName(const std::vector<OutputRow>& rows, const OutputRow& row) {
+    for (int n = 2;; ++n) {
+        OutputRow renamed = row;
+        renamed.name = row.name + " (" + std::to_string(n) + ")";
+        if (!nameTaken(rows, renamed)) return renamed.name;
+    }
 }
 
 Settings withOutputParameters(Settings s, Backend backend, const std::string& id, const DeviceCatalog& devices) {

@@ -763,6 +763,11 @@
   <data name="Output_ZoneCrossfade" xml:space="preserve"><value>淡入淡出</value></data>
   <data name="Output_ZoneCrossfadeOn" xml:space="preserve"><value>換曲時讓曲目交疊</value></data>
   <data name="Output_ZoneCrossfadeSeconds" xml:space="preserve"><value>長度（秒）</value></data>
+  <data name="Output_SameNameTitle" xml:space="preserve"><value>已有另一個輸出叫做 {0}</value></data>
+  <data name="Output_SameNameText" xml:space="preserve"><value>兩個輸出不能顯示相同的名稱，這樣才分得出每個區域。請替這個輸出取一個自己的名稱。</value></data>
+  <data name="Output_SameNameBox" xml:space="preserve"><value>它的名稱</value></data>
+  <data name="Output_SameNameTaken" xml:space="preserve"><value>另一個輸出已經使用這個名稱，請換一個。</value></data>
+  <data name="Output_SameNameEnable" xml:space="preserve"><value>開啟</value></data>
   <data name="Output_DeleteTitle" xml:space="preserve"><value>要刪除 {0} 的設定嗎？</value></data>
   <data name="Output_DeleteText" xml:space="preserve"><value>它的設定、名稱和輸出選單中的位置都會清除。之後再找到時，會從預設值開始。</value></data>
   <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
