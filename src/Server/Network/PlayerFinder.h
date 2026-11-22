@@ -21,6 +21,7 @@ struct FinderOptions {
     uint16_t searchPort = 1900;
     uint16_t notifyPort = 1900; // 0 picks a free one, without joining the multicast group
     std::chrono::milliseconds searchInterval{60000};
+    std::vector<uint16_t> moreSearchPorts; // tests: other ports at searchHost searched too, each a player of its own
 };
 
 struct FoundPlayer {

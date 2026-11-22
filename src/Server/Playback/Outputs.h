@@ -47,6 +47,9 @@ void selectOutput(Settings& s, Backend backend, const std::string& id, const Dev
 // While AirPlay is in use: adds a receiver to the group, or takes one out, the last one staying. When the one in use
 // leaves, the next takes its place in Settings' AirPlay fields.
 void setInAirPlayGroup(Settings& s, const std::string& id, bool in, const DeviceCatalog& devices);
+// Takes a receiver out of the group of `owner`, an AirPlay zone's receiver not in use (MZ-R05); the one in use's group
+// changes through setInAirPlayGroup.
+void leaveAirPlayGroup(Settings& s, const std::string& owner, const std::string& id);
 // A group receiver's channels: the one in use from Settings' fields, the others from their saved outputs.
 AirPlayChannels airplayChannels(const Settings& s, const std::string& id);
 // `s` as it would be with this output in use, for showing its parameters without leaving the one in use.

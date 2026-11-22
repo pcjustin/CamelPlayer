@@ -713,6 +713,7 @@ static json outputJson(const SavedOutput& o) {
     j["dsp"] = dspJson(o.dsp);
     j["zone"] = zoneJson(o.zone);
     if (!o.speakers.empty()) j["speakers"] = o.speakers;
+    if (!o.airplayGroup.empty()) j["group"] = o.airplayGroup;
     if (!o.model.empty()) j["model"] = o.model;
     return j;
 }
@@ -734,6 +735,11 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
     if (o.contains("speakers") && o["speakers"].is_array())
         for (const auto& speaker : o["speakers"])
             if (speaker.is_string()) saved.speakers.push_back(speaker.get<std::string>());
+    if (saved.backend == Backend::AirPlay && o.contains("group") && o["group"].is_array())
+        for (const auto& member : o["group"])
+            if (member.is_string() &&
+                std::ranges::find(saved.airplayGroup, member.get<std::string>()) == saved.airplayGroup.end())
+                saved.airplayGroup.push_back(member.get<std::string>());
     const json& parameters = o.contains("parameters") && o["parameters"].is_object() ? o["parameters"] : json::object();
     if (saved.backend == Backend::Network)
         readNetwork(parameters, saved.network, quality);
@@ -944,6 +950,12 @@ Settings fromJson(const std::string& text) {
         for (const auto& [id, level] : j["airplayLevels"].items())
             if (level.is_object())
                 s.airplayLevels[id] = {uint32_t(integer(level, "level", 33, 0, 100)), boolean(level, "muted", false)};
+    // The group last played, while another output is in use, is its first receiver's, as each receiver keeps its own
+    // since zones.
+    if (s.backend != Backend::AirPlay && s.airplayGroup.size() > 1)
+        for (auto& output : s.outputs)
+            if (output.backend == Backend::AirPlay && output.id == s.airplayGroup.front() && output.airplayGroup.empty())
+                output.airplayGroup = s.airplayGroup;
     s.followedDefault = str(j, "followedDefault", "");
     s.adoptOutputSets = schema < 4 || boolean(j, "adoptOutputSets", false);
     s.adoptQueueChoices = schema < 5; // the Server takes them as it restores the queue, at the start that read them

@@ -437,6 +437,8 @@ struct SavedOutput {
     ZoneChoices zone;
     // An AirPlay stereo pair's speakers by their own device IDs, which stay when pairing it again gives it a new ID.
     std::vector<std::string> speakers;
+    // An AirPlay receiver's group, itself first, as Settings::airplayGroup holds the one in use's; empty while alone.
+    std::vector<std::string> airplayGroup;
     bool operator==(const SavedOutput&) const = default;
 };
 

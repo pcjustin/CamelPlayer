@@ -67,9 +67,10 @@ void keepParameters(Settings& s, Backend backend, const std::string& id) {
         saved.ks = s.ks;
     else if (backend == Backend::Network)
         saved.network = s.network;
-    else if (backend == Backend::AirPlay)
+    else if (backend == Backend::AirPlay) {
         saved.airplay = s.airplay;
-    else if (backend == Backend::HQPlayer)
+        saved.airplayGroup = s.airplayGroup.size() > 1 ? s.airplayGroup : std::vector<std::string>();
+    } else if (backend == Backend::HQPlayer)
         saved.hqplayer = s.hqplayer;
     else
         saved.wasapi = s.wasapi;
@@ -98,6 +99,8 @@ void loadParameters(Settings& s, Backend backend, const std::string& device, std
     } else if (backend == Backend::AirPlay) {
         s.airplay = source.airplay;
         s.airplay.deviceId = std::move(selected);
+        // A receiver of the group last played, without one of its own, brings that group back.
+        if (!source.airplayGroup.empty()) s.airplayGroup = source.airplayGroup;
     } else if (backend == Backend::HQPlayer) {
         s.hqplayer = source.hqplayer;
         s.hqplayer.address = std::move(selected);
@@ -293,7 +296,18 @@ Settings withOutputParameters(Settings s, Backend backend, const std::string& id
     if (s.backend == backend && selectedId(s) == id) return s;
     const std::string device = parameterDevice(devices, backend, id);
     loadParameters(s, backend, device, id);
+    if (backend == Backend::AirPlay) {
+        const SavedOutput* saved = findOutput(s, backend, id);
+        s.airplayGroup = saved && !saved->airplayGroup.empty() ? saved->airplayGroup : std::vector{id};
+    }
     return s;
+}
+
+void leaveAirPlayGroup(Settings& s, const std::string& owner, const std::string& id) {
+    if (s.backend == Backend::AirPlay && s.airplay.deviceId == owner) return;
+    SavedOutput& saved = savedOutput(s, Backend::AirPlay, owner);
+    std::erase(saved.airplayGroup, id);
+    if (saved.airplayGroup.size() < 2) saved.airplayGroup.clear();
 }
 
 void keepQueueChoices(Settings& s, Backend backend, const std::string& id, bool shuffle, RepeatMode repeat,

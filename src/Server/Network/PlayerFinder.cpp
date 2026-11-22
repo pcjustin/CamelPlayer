@@ -118,6 +118,11 @@ struct PlayerFinder::Impl {
                        sizeof(target));
         };
         send();
+        for (const uint16_t port : options.moreSearchPorts) {
+            target.sin_port = htons(port);
+            send();
+        }
+        target.sin_port = htons(options.searchPort);
         if ((ntohl(target.sin_addr.s_addr) >> 28) != 0xE) return; // a test's unicast address
         for (const auto& local : localAddresses()) {
             setsockopt(searcher, IPPROTO_IP, IP_MULTICAST_IF, reinterpret_cast<const char*>(&local), sizeof(local));
