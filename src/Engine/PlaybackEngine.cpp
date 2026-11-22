@@ -26,6 +26,7 @@
 #include "Engine/Dsp.h"
 #include "Engine/FormatRule.h"
 #include "Engine/RustSession.h"
+#include "Engine/SharedLoad.h"
 #include "Engine/SlowSource.h"
 #include "OutputBridge/OutputBridge.h"
 #include "OutputBridge/OutputChoices.h"
@@ -247,6 +248,8 @@ public:
         }
         qCv_.notify_all();
         thread_.join();
+        load::setNotPlaying(this);
+        load::setShareRead(this, {}, 0.0);
     }
 
     // ---- command posting ----
@@ -441,11 +444,19 @@ public:
 
     void play() {
         buffering_ = false;
+        giveWay_ = false;
         if (active_) {
             if (state_ == PlayState::Paused) {
                 if (!openDeferredOutput()) return;
                 startRust();
                 if (!std::exchange(runsPaused_, false)) output_->start();
+                {
+                    std::lock_guard lock(snapMutex_);
+                    if (snap_.error == ErrorCode::CannotKeepUp) {
+                        snap_.error.reset();
+                        snap_.errorDetail.clear();
+                    }
+                }
                 setState(PlayState::Playing);
             }
             return;
@@ -837,10 +848,12 @@ private:
             logFirstAudio();
             logUnderruns();
             if (!active_ || !keepsUp()) return;
+            if (giveWay_.exchange(false) && state_ == PlayState::Playing) giveWay();
             reportAudible();
             refreshNextSlot();
             refreshMd5();
             refreshTotal();
+            followLoad();
             checkBuffering();
         }
         if (active_ && state_ == PlayState::Paused) stopDeviceOncePaused();
@@ -883,9 +896,15 @@ private:
         publish();
     }
 
-    // A modulated DSD stream the DSP stage falls behind on plays in gaps: playback stops, for a lower rate to be chosen.
+    // A stream the DSP stage falls behind on plays in gaps. While other engines play, the one started last among those
+    // upsampling or modulating to DSD gives way (Engine/SharedLoad.h); alone, a modulated DSD stream stops, for a lower
+    // rate to be chosen.
     bool keepsUp() {
-        if (!plan_.modulatorOrder || behind_.load(std::memory_order_relaxed) < kBehindLimit) return true;
+        if (behind_.load(std::memory_order_relaxed) < kBehindLimit) return true;
+        if (load::ranShort(this) == load::Shortfall::GivingWay || !plan_.modulatorOrder) {
+            behind_ = 0;
+            return true;
+        }
         const uint32_t byteRate = plan_.dsd == DsdPath::Dop ? plan_.format.sampleRate * 2 : plan_.format.sampleRate;
         const uint64_t at = currentPosition();
         teardown();
@@ -1075,28 +1094,47 @@ private:
         readRate_.reset();
         streamRate_ = 0;
         streamPace_ = 0;
+        sharePace_ = 0;
+        shareRead_ = 0;
+        share_.clear();
+        load::setShareRead(this, {}, 0.0);
         const uint32_t configured = predecodeSeconds();
         if (!shown || !onNetworkShare(file_)) return configured;
         const double needed = playedBytesPerSecond(file_, shown, src.sampleRate);
+        share_ = shareOf(file_);
+        shareNeeded_ = needed;
+        shareRead_ = needed;
+        // A share serves the engines already reading it first (docs/Plan.md §5.12): this one reads what they leave.
+        const double others = load::othersRead(this, share_);
         if (needed < kMeasuredBytesPerSecond) return configured;
         const uint64_t from = std::min(startFrame, shown);
         std::error_code error;
         const uint64_t size = std::filesystem::file_size(file_, error);
         const uint64_t at = error ? 0 : uint64_t(double(size) * double(from) / double(shown));
-        // A seek in the file measured when it started uses that rate: measuring takes up to 4 MB from the share.
+        // A seek in the file measured when it started uses that rate: measuring takes up to 4 MB from the share, as it
+        // would from the others reading it, whose rate was measured when the first of them started.
         const bool kept = measuredFile_ == file_ && measuredRate_;
-        const auto read =
-            kept ? measuredRate_ : measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
+        const auto known = others > 0 ? load::shareRate(share_) : std::nullopt;
+        const auto measured = kept    ? measuredRate_
+                              : known ? known
+                                      : measureReadRate(file_, at, std::clamp<uint64_t>(uint64_t(needed), 1u << 20, 4u << 20));
         measuredFile_ = file_;
-        measuredRate_ = read;
-        if (!read) return configured;
+        measuredRate_ = measured;
+        if (!measured) return configured;
+        load::setShareRate(share_, *measured);
+        const auto read = std::optional(others > 0 ? std::max(*measured - others, *measured * kLeastShare) : *measured);
+        shareRead_ = std::min(needed, *read);
+        if (others > 0) sharePace_ = *read / needed;
         const double left = framesToSeconds(shown - from, src.sampleRate);
         const bool streamed = isStreamed(settings_.backend);
         const double wait = bufferSeconds(left, *read / needed) <= 0
                                 ? 0.0
                                 : bufferSeconds(left, *read * (streamed ? kStreamReadShare : 1.0) / needed);
         log::info("engine: %s reads at %.2f MB/s%s, plays at %.2f MB/s%s", toUtf8(file_).c_str(), *read / 1e6,
-                  kept ? " (as measured when it started)" : "", needed / 1e6,
+                  kept         ? " (as measured when it started)"
+                  : others > 0 ? " (what the others reading its share leave)"
+                               : "",
+                  needed / 1e6,
                   wait <= 0  ? ""
                   : streamed ? "; buffering before it plays, then reading it slower while it streams"
                              : "; buffering before it plays");
@@ -1112,6 +1150,48 @@ private:
         if (src.bitsPerSample == 1 && plan_.dsd != DsdPath::Native && plan_.dsd != DsdPath::Dop && fmt_.sampleRate)
             scale = std::max(1.0, double(src.sampleRate) * src.channels / (double(fmt_.sampleRate) * fmt_.channels * 4.0));
         return uint32_t(std::ceil((wait + configured) * scale));
+    }
+
+    // What this engine asks of the computer beside the others (Engine/SharedLoad.h): whether it upsamples or modulates
+    // while it plays, and what it reads of its share while it reads, at no more than the readers before it leave.
+    void followLoad() {
+        if (state_ == PlayState::Playing)
+            load::setPlaying(this, upsamples(), [this] {
+                giveWay_ = true;
+                qCv_.notify_all();
+            });
+        if (share_.empty()) return;
+        const bool reading = (state_ == PlayState::Playing || buffering_) && !decodeDone_.load(std::memory_order_acquire);
+        load::setShareRead(this, share_, reading ? shareRead_ : 0.0);
+        if (sharePace_.load(std::memory_order_relaxed) <= 0) return;
+        const auto measured = load::shareRate(share_);
+        const double others = load::othersRead(this, share_);
+        if (!measured || others <= 0) {
+            log::info("engine: %s reads its share alone now", toUtf8(file_).c_str());
+            sharePace_ = 0;
+            return;
+        }
+        const double left = std::max(*measured - others, *measured * kLeastShare);
+        sharePace_ = left / shareNeeded_;
+        if (readRate_ && left < *readRate_) readRate_ = left;
+    }
+
+    bool upsamples() const {
+        return plan_.modulatorOrder || plan_.remodulate ||
+               (plan_.resample && outputRate_.load(std::memory_order_relaxed) > sourceRate_.load(std::memory_order_relaxed));
+    }
+
+    // Another engine ran short and this one, started last among those upsampling or modulating, pauses for the others.
+    void giveWay() {
+        log::warn("engine: pausing %s, as this computer cannot keep up with its upsampling beside the others playing",
+                  toUtf8(file_).c_str());
+        pause();
+        {
+            std::lock_guard lock(snapMutex_);
+            snap_.error = ErrorCode::CannotKeepUp;
+            snap_.errorDetail = "this computer cannot keep up with this zone's upsampling while the others play";
+        }
+        publish();
     }
 
     // While a slow source is buffered: plays once enough is buffered to reach the end of the file, or when the ring is
@@ -1450,15 +1530,21 @@ private:
 
     void decodeMain() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
-        std::optional<std::pair<std::chrono::steady_clock::time_point, double>> pacedFrom;
+        struct Paced {
+            std::chrono::steady_clock::time_point at;
+            double decoded, pace;
+        };
+        std::optional<Paced> pacedFrom;
         try {
             while (!stopDecode_) {
-                if (const double pace = streamPace_.load(std::memory_order_relaxed); pace > 0 && playing_) {
+                const double stream = playing_ ? streamPace_.load(std::memory_order_relaxed) : 0.0;
+                const double share = sharePace_.load(std::memory_order_relaxed);
+                if (const double pace = stream > 0 && share > 0 ? std::min(stream, share) : std::max(stream, share); pace > 0) {
                     const auto now = std::chrono::steady_clock::now();
                     const double decoded =
                         framesToSeconds(rust_->buffered().decoded, sourceRate_.load(std::memory_order_relaxed));
-                    if (!pacedFrom) pacedFrom.emplace(now, decoded);
-                    if (decoded - pacedFrom->second > std::chrono::duration<double>(now - pacedFrom->first).count() * pace) {
+                    if (!pacedFrom || pacedFrom->pace != pace) pacedFrom = Paced{now, decoded, pace};
+                    if (decoded - pacedFrom->decoded > std::chrono::duration<double>(now - pacedFrom->at).count() * pace) {
                         Sleep(20);
                         continue;
                     }
@@ -1476,6 +1562,7 @@ private:
                 }
                 if (result == RustSession::Prefill::Full) {
                     fullAt_.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+                    pacedFrom.reset(); // caught up, so a pause in reading is not made up for afterwards
                     Sleep(5);
                     continue;
                 }
@@ -1557,6 +1644,10 @@ private:
         readRate_.reset();
         streamRate_ = 0;
         streamPace_ = 0;
+        sharePace_ = 0;
+        share_.clear();
+        load::setShareRead(this, {}, 0.0);
+        load::setNotPlaying(this);
         buffering_ = false;
         std::lock_guard lock(snapMutex_);
         snap_.output.reset();
@@ -1714,6 +1805,10 @@ private:
         if (s == PlayState::Paused) pausedAt_ = std::chrono::steady_clock::now();
         state_ = s;
         playing_ = s == PlayState::Playing;
+        if (s == PlayState::Playing)
+            followLoad();
+        else
+            load::setNotPlaying(this);
         publish();
     }
 
@@ -1841,6 +1936,13 @@ private:
     double neededRate_ = 0;             // bytes per second neededFor_ plays at
     double streamRate_ = 0;             // bytes per second it is read at while it streams; 0 when it does not
     std::atomic<double> streamPace_{0}; // seconds of it decoded per second while it streams; 0 when unpaced
+    // The server the file is read from (Engine/SharedLoad.h), empty for a local file; what it plays at and what this
+    // engine reads of it while it reads.
+    std::wstring share_;
+    double shareNeeded_ = 0, shareRead_ = 0;
+    std::atomic<double> sharePace_{0}; // seconds of it decoded per second, leaving the readers before it theirs; 0 unpaced
+    static constexpr double kLeastShare = 0.01; // of the share's rate, read however much the others read
+    std::atomic<bool> giveWay_{false};          // asked to pause for the other engines' upsampling
     static constexpr auto kImpulseRetry = std::chrono::minutes(10);
     mutable std::mutex impulseMutex_;
     _Guarded_by_(impulseMutex_) mutable std::string impulseFailed_; // the response file that could not be read

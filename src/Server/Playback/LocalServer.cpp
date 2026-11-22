@@ -605,6 +605,9 @@ public:
     void setAirPlayFinderOptions(const AirPlayFinderOptions& options) { airplayFinderOptions_ = options; }
     void setHQPlayerFinderOptions(const hqplayer::FinderOptions& options) { hqplayerFinderOptions_ = options; }
     void setLocalDevices(std::function<LocalDevices()> list) { localDevices_ = std::move(list); }
+    BackgroundPace backgroundPace(const std::filesystem::path& storage) const {
+        return server::backgroundPace(playbackReads(), storage);
+    }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
         coversInFlight_.fetch_add(1);
@@ -3223,6 +3226,9 @@ void LocalServer::setHQPlayerFinderOptions(const hqplayer::FinderOptions& option
 }
 void LocalServer::setLocalDevices(std::function<LocalDevices()> list) {
     impl_->setLocalDevices(std::move(list));
+}
+BackgroundPace LocalServer::backgroundPace(const std::filesystem::path& storage) const {
+    return impl_->backgroundPace(storage);
 }
 CommandStamp LocalServer::submit(Command command) {
     return impl_->enqueue(std::move(command));

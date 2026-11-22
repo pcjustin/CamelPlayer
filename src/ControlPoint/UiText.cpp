@@ -65,6 +65,8 @@ winrt::hstring errorTitle(camel::audio::ErrorCode code) {
         return tr(L"Error_DeviceChanged");
     case ErrorCode::TooSlow:
         return tr(L"Error_TooSlow");
+    case ErrorCode::CannotKeepUp:
+        return tr(L"Error_CannotKeepUp");
     case ErrorCode::Other:
         break;
     }

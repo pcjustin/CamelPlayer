@@ -103,6 +103,7 @@ enum class ErrorCode {
     AccessDenied,  // the device refuses this computer, as an AirPlay receiver its access setting keeps from it
     DeviceChanged, // the device is another now, as AirPlay speakers paired or separated in the Home app
     TooSlow,       // this computer cannot process the stream in real time, as a DSD rate too high to modulate to
+    CannotKeepUp,  // paused, the zone started last among those upsampling while the computer cannot keep up with them all
     Other,
 };
 

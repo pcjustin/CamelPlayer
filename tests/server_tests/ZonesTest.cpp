@@ -16,6 +16,7 @@
 
 #include "Common/util/Text.h"
 #include "Engine/SamplePacker.h"
+#include "Engine/SlowSource.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "Server/Api/ApiJson.h"
 #include "Server/Library/LibraryScanner.h"
@@ -972,4 +973,98 @@ TEST_F(ZonesTest, OtherZonesPlayOnWhileTheOutputInUseChanges) {
     EXPECT_TRUE(waitFor([](const Snapshot& now) { return playing(of(now, 2)) && playing(of(now, 3), 0.8); }));
     EXPECT_EQ(opened(3), 1);
     EXPECT_EQ(closed(3), 0);
+}
+
+// Background work on the storage a zone plays from gives way to it, on other storage it takes one worker while any zone
+// plays, and it runs at full speed again once every zone is paused (docs/Plan.md §7.7).
+TEST_F(ZonesTest, AScanYieldsToTheZoneOnItsShareWhileAnotherPlaysFromALocalDiskUntilEveryZoneIsPaused) {
+    const auto local = track(1, 30.0), shared = track(2, 30.0);
+    // The local disk through its administrative share stands for a NAS: another storage to the library.
+    const std::filesystem::path share = L"\\\\localhost\\" + shared.root_name().wstring().substr(0, 1) + L"$";
+    const auto remote = share / shared.relative_path();
+    if (!std::filesystem::exists(remote)) GTEST_SKIP() << "no administrative share to stand for a NAS";
+    const std::filesystem::path elsewhere = L"\\\\elsewhere\\music";
+    start(2);
+    send(play(1, {local}));
+    send(play(2, {remote}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1)) && playing(of(s, 2)); }));
+    EXPECT_NE(server->backgroundPace(share), BackgroundPace::Full);
+    EXPECT_NE(server->backgroundPace(local.parent_path()), BackgroundPace::Full);
+    EXPECT_EQ(server->backgroundPace(elsewhere), BackgroundPace::One);
+
+    // With only the local zone playing, the share takes one worker.
+    send(command(CommandKind::Pause, 2));
+    EXPECT_EQ(server->backgroundPace(share), BackgroundPace::One);
+    EXPECT_NE(server->backgroundPace(local.parent_path()), BackgroundPace::Full);
+
+    send(command(CommandKind::Pause, 1));
+    EXPECT_EQ(server->backgroundPace(share), BackgroundPace::Full);
+    EXPECT_EQ(server->backgroundPace(local.parent_path()), BackgroundPace::Full);
+    EXPECT_EQ(server->backgroundPace(elsewhere), BackgroundPace::Full);
+}
+
+// A zone starting from a share another zone plays from reads only what that zone leaves of the share's rate: the first
+// plays on untouched, and the second buffers on what is left, where alone it would play at once (docs/Plan.md §5.12).
+TEST_F(ZonesTest, ASecondZoneOnASlowShareLeavesTheFirstItsReadsAndBuffersOnWhatIsLeft) {
+    const auto first = testutil::generatedFile({"zone-share-first", 384000, 24, 2, 30.0});
+    const auto second = testutil::generatedFile({"zone-share-second", 352800, 24, 2, 10.0});
+    const double needed = double(std::filesystem::file_size(first)) / 30.0;
+    ASSERT_GT(needed, 1e6) << "a share's rate is measured only for files played at 1 MB/s or more";
+    // Read at 1.6 times what the first plays at: enough for either alone, not for both at once.
+    setSlowShareForTest(first.parent_path().wstring(), needed * 1.6);
+    struct Restore {
+        ~Restore() { setSlowShareForTest({}, 0); }
+    } restore;
+    start(2);
+    send(play(1, {first}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1), 1.0); }));
+    send(play(2, {second}));
+    std::optional<uint32_t> buffering;
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) {
+        if (!buffering) buffering = of(s, 2).playback.bufferingSeconds;
+        return playing(of(s, 2), 0.5);
+    }));
+    // Read at what the first leaves, 0.6 of its rate, against 0.92 of it the second plays at, the second waits about
+    // nine seconds; reckoned on the share alone, it would have played at once.
+    ASSERT_TRUE(buffering) << "the second zone did not buffer";
+    EXPECT_GE(*buffering, 5U);
+    EXPECT_LE(*buffering, 20U);
+    const auto s = server->snapshot();
+    EXPECT_EQ(of(s, 1).playback.state, PlaybackState::Playing);
+    EXPECT_FALSE(of(s, 1).playback.bufferingSeconds);
+    EXPECT_EQ(of(s, 1).playback.underruns, 0U);
+    EXPECT_FALSE(of(s, 1).playback.error);
+}
+
+// While the DSP stage cannot keep up with two zones upsampling, the one started last pauses with the notice and the other
+// plays on; playing it again clears the notice (docs/Plan.md §5.12).
+TEST_F(ZonesTest, AComputerThatCannotKeepUpPausesTheZoneStartedLastAmongThoseUpsampling) {
+    start(2, [](Settings& s) {
+        s.wasapi.upsampling = Upsampling::IntegerMultiple;
+        for (auto& output : s.outputs) output.wasapi.upsampling = Upsampling::IntegerMultiple;
+    });
+    send(play(1, {track(1, 30.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1), 0.5); }));
+    send(play(2, {track(2, 30.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 2), 0.5); }));
+    for (const size_t number : {size_t{1}, size_t{2}}) {
+        const auto plan = of(server->snapshot(), number).playback.plan;
+        ASSERT_TRUE(plan && plan->resample && plan->format.sampleRate > 48000) << "zone " << number << " does not upsample";
+    }
+    setDspStageDelayForTest(400ms);
+    const bool paused = waitFor([](const Snapshot& s) { return of(s, 2).playback.state == PlaybackState::Paused; });
+    setDspStageDelayForTest(0ms);
+    ASSERT_TRUE(paused);
+    auto s = server->snapshot();
+    EXPECT_EQ(of(s, 2).playback.error, ErrorCode::CannotKeepUp);
+    EXPECT_EQ(of(s, 1).playback.state, PlaybackState::Playing);
+    const uint64_t at = of(s, 1).playback.position;
+    EXPECT_TRUE(waitFor([&](const Snapshot& now) { return of(now, 1).playback.position > at + 44100; }));
+    s = server->snapshot();
+    EXPECT_EQ(of(s, 1).playback.state, PlaybackState::Playing);
+    EXPECT_FALSE(of(s, 1).playback.error);
+
+    send(command(CommandKind::Play, 2));
+    EXPECT_TRUE(waitFor(
+        [](const Snapshot& now) { return of(now, 2).playback.state == PlaybackState::Playing && !of(now, 2).playback.error; }));
 }

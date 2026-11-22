@@ -5,6 +5,7 @@
 #pragma once
 
 #include "Server/Api/ServerApi.h"
+#include "Server/Library/LibraryStore.h"
 #include "Server/Network/AirPlayFinder.h"
 #include "Server/Network/HQPlayer.h"
 #include "Server/Network/PlayerFinder.h"
@@ -106,6 +107,8 @@ public:
     void setHQPlayerFinderOptions(const hqplayer::FinderOptions& options);
     // Tests: the local devices device scans find, in place of Windows'.
     void setLocalDevices(std::function<LocalDevices()> list);
+    // How background library work on `storage` goes while the zones play as they do now (docs/Plan.md §7.7).
+    BackgroundPace backgroundPace(const std::filesystem::path& storage) const;
     // How the settings passed in were obtained (openSettings).
     void setSettingsRecovery(SettingsRecovery recovery);
 

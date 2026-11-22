@@ -17,6 +17,8 @@ inline constexpr double kMeasuredBytesPerSecond = 1'000'000.0;
 inline constexpr double kFastEnough = 1.1;
 
 bool onNetworkShare(const std::wstring& path);
+// The server a network path is read from (`\server`, lowercased), whose link its shares share; empty for a local path.
+std::wstring shareOf(const std::wstring& path);
 
 // Reads `bytes` from `offset` past Windows' file cache, which would otherwise report the speed of memory, and returns
 // the bytes read per second; nothing when the file cannot be read.
@@ -25,5 +27,9 @@ std::optional<double> measureReadRate(const std::wstring& path, uint64_t offset,
 // The seconds to buffer before `remainingSeconds` play without running dry while the source is read at `fillRatio`
 // seconds of audio per second; 0 when it reads fast enough.
 double bufferSeconds(double remainingSeconds, double fillRatio);
+
+// Tests only: the files in `folder` are on a network share of their own, measured at `bytesPerSecond`; an empty folder
+// ends it.
+void setSlowShareForTest(const std::wstring& folder, double bytesPerSecond);
 
 } // namespace camel::audio

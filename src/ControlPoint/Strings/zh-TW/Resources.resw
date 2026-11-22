@@ -145,6 +145,7 @@
   <data name="Error_AccessDenied" xml:space="preserve"><value>裝置拒絕這台電腦</value></data>
   <data name="Error_DeviceChanged" xml:space="preserve"><value>裝置已變更，請重新選擇輸出</value></data>
   <data name="Error_TooSlow" xml:space="preserve"><value>這台電腦跟不上這個 DSD 取樣率，請選擇較低的 DSD 取樣率</value></data>
+  <data name="Error_CannotKeepUp" xml:space="preserve"><value>這台電腦跟不上這個區域的升頻</value></data>
   <data name="Error_FormatNotSupported" xml:space="preserve"><value>裝置無法以 bit-perfect 播放這個格式，已跳過</value></data>
   <data name="Error_DriverError" xml:space="preserve"><value>驅動程式錯誤</value></data>
   <data name="Error_DeviceRunsFast" xml:space="preserve"><value>裝置取用音訊遠快於播放速度，可能已休眠或未連接；備妥後按播放</value></data>

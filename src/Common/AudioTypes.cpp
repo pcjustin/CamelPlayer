@@ -65,6 +65,8 @@ const char* errorCodeName(ErrorCode c) {
         return "DeviceChanged";
     case ErrorCode::TooSlow:
         return "TooSlow";
+    case ErrorCode::CannotKeepUp:
+        return "CannotKeepUp";
     case ErrorCode::Other:
         return "Other";
     }
