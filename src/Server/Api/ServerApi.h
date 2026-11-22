@@ -130,7 +130,8 @@ enum class CommandKind : uint8_t {
     SetPlayerMute,     // playerMute: the network player's own mute; every receiver of an AirPlay group
     SetReceiverVolume, // receiver + playerVolume: one receiver of the AirPlay group in use
     ShowAirPlayCode,   // receiver: one that pairs with a code shows it
-    PairAirPlay        // receiver + code: pairs with the password or code the user typed
+    PairAirPlay,       // receiver + code: pairs with the password or code the user typed
+    DeleteOutput       // zone: the output it names, enabled or not; its zone's queue goes and a zone playing stops
 };
 
 struct Command {
@@ -510,7 +511,8 @@ public:
                                           const CancellationToken& token = {}) = 0;
     virtual PlaylistChange addToPlaylist(int64_t playlist, std::optional<int64_t> revision,
                                          const std::vector<PlaylistSource>& sources, const CancellationToken& token = {}) = 0;
-    virtual PlaylistChange saveQueueAsPlaylist(std::string name) = 0;
+    // The zone's queue; an empty zone is the selected one.
+    virtual PlaylistChange saveQueueAsPlaylist(std::string name, const std::string& zone = {}) = 0;
     virtual PlaylistChange editPlaylist(const PlaylistEdit& edit) = 0;
     virtual bool undoPlaylistChange(const PlaylistUndo& undo) = 0;
     virtual PlaylistChange importPlaylist(const std::filesystem::path& file) = 0;

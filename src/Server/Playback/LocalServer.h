@@ -80,7 +80,7 @@ public:
                                   const CancellationToken& token = {}) override;
     PlaylistChange addToPlaylist(int64_t playlist, std::optional<int64_t> revision, const std::vector<PlaylistSource>& sources,
                                  const CancellationToken& token = {}) override;
-    PlaylistChange saveQueueAsPlaylist(std::string name) override;
+    PlaylistChange saveQueueAsPlaylist(std::string name, const std::string& zone = {}) override;
     PlaylistChange editPlaylist(const PlaylistEdit& edit) override;
     bool undoPlaylistChange(const PlaylistUndo& undo) override;
     PlaylistChange importPlaylist(const std::filesystem::path& file) override;

@@ -60,6 +60,8 @@ Migration addTable(const std::string& name) {
     return [name](Database& db) { db.exec("CREATE TABLE " + name + " (x INTEGER)"); };
 }
 
+const int kSchema = int(libraryMigrations().size());
+
 size_t backupCount(const std::filesystem::path& dir) {
     size_t n = 0;
     for (const auto& e : std::filesystem::directory_iterator(dir))
@@ -75,7 +77,7 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_TRUE(store.report().created);
     EXPECT_EQ(store.report().migratedFrom, 0);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 25);
+    EXPECT_EQ(db.userVersion(), int(libraryMigrations().size()));
     EXPECT_EQ(
         tables(db),
         (std::set<std::string>{
@@ -224,7 +226,7 @@ TEST(LibraryStore, UpgradesV1WithoutInventingFingerprintsOrChangingHistory) {
     EXPECT_EQ(store.report().migratedFrom, 1);
     EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v1.bak"));
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 25);
+    EXPECT_EQ(db.userVersion(), int(libraryMigrations().size()));
     EXPECT_EQ(db.scalar("SELECT rating FROM stats JOIN files ON files.id=stats.file_id WHERE files.path='C:/music/old.flac'"), 5);
     EXPECT_EQ(db.scalar("SELECT play_count FROM stats"), 17);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NULL AND created=0 AND volume_key IS NULL"), 1);
@@ -264,7 +266,7 @@ TEST(LibraryStore, UpgradesV11ByDroppingTheCueIndexAndKeepingEveryRow) {
     LibraryStore store(dir);
     EXPECT_EQ(store.report().migratedFrom, 11);
     auto db = store.openReader();
-    EXPECT_EQ(db.userVersion(), 25);
+    EXPECT_EQ(db.userVersion(), int(libraryMigrations().size()));
     for (const char* table : {"tracks", "stats", "play_events", "playlist_items", "queue"})
         EXPECT_EQ(db.scalar(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name LIKE 'cue%'"), 0)
             << table;
@@ -380,10 +382,10 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     }
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
-        EXPECT_EQ(store.report().migratedFrom, 25);
+        EXPECT_EQ(store.report().migratedFrom, kSchema);
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 26);
-        EXPECT_TRUE(std::filesystem::exists(dir / "library.db.v25.bak"));
+        EXPECT_EQ(db.userVersion(), kSchema + 1);
+        EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(kSchema) + ".bak")));
     }
     const auto broken = withExtra({addTable("v2_table"), [](Database& db) {
                                        db.exec("CREATE TABLE half (x INTEGER)");
@@ -393,7 +395,7 @@ TEST(LibraryStore, MigrationBacksUpFirstAndAFailureKeepsThePreviousDatabase) {
     {
         LibraryStore store(dir, withExtra({addTable("v2_table")}));
         auto db = store.openReader();
-        EXPECT_EQ(db.userVersion(), 26);
+        EXPECT_EQ(db.userVersion(), kSchema + 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'Kept'"), 1);
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'"), 0);
     }
@@ -486,7 +488,8 @@ TEST(LibraryStore, KeepsTheNewestThreeBackups) {
         LibraryStore store(dir, withExtra(extra));
     }
     EXPECT_EQ(backupCount(dir), size_t(LibraryStore::kKeptBackups));
-    for (int v : {27, 28, 29}) EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
+    for (int v : {kSchema + 2, kSchema + 3, kSchema + 4})
+        EXPECT_TRUE(std::filesystem::exists(dir / ("library.db.v" + std::to_string(v) + ".bak"))) << v;
 }
 
 TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
@@ -507,7 +510,7 @@ TEST(LibraryStore, ADamagedFileIsKeptAsideAndReplacedByTheNewestBackup) {
         EXPECT_TRUE(std::filesystem::exists(dir / "library.db.bad"));
         auto db = store.openReader();
         EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks WHERE title = 'From backup'"), 1);
-        EXPECT_EQ(db.userVersion(), 26); // the backup was migrated again
+        EXPECT_EQ(db.userVersion(), kSchema + 1); // the backup was migrated again
     }
     for (const auto& e : std::filesystem::directory_iterator(dir))
         if (e.path().extension() == ".bak") std::filesystem::remove(e.path());
@@ -611,4 +614,34 @@ TEST(LibraryStore, RefusesNetworkLocations) {
     EXPECT_TRUE(isNetworkPath(L"\\\\?\\UNC\\nas\\music\\camelplayer"));
     EXPECT_FALSE(isNetworkPath(testutil::tempDir()));
     EXPECT_THROW(LibraryStore(L"\\\\nas\\music\\camelplayer"), std::runtime_error);
+}
+
+// Schema 26 keeps each zone's queue under its zone's ID (docs/Plan.md §5.12): the queue saved before is kept under the
+// empty ID for the Server to give to the zone of the output in use, and the plays already recorded have no zone.
+TEST(LibraryStore, UpgradesV25ByKeepingTheQueueForTheZoneOfTheOutputInUse) {
+    const auto dir = freshDir("upgrade-v25");
+    {
+        LibraryStore store(dir, std::vector<Migration>(libraryMigrations().begin(), libraryMigrations().begin() + 25));
+        store
+            .write([](Database& db) {
+                const auto id = addTrack(db, "C:/music/kept.flac", "Kept");
+                db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,1,?,?,'Kept')")
+                    .bind(1, id)
+                    .bind(2, "C:/music/kept.flac")
+                    .run();
+                db.exec("INSERT INTO app_state(key,value) VALUES('session','{\"current\":0}'),('session_order','[0]'),"
+                        "('session_automatic','[]');");
+                db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?,1,0,60000,1)")
+                    .bind(1, id)
+                    .run();
+            })
+            .get();
+    }
+    LibraryStore store(dir);
+    EXPECT_EQ(store.report().migratedFrom, 25);
+    auto db = store.openReader();
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM queue WHERE zone='' AND path='C:/music/kept.flac'"), 1);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM app_state WHERE key IN ('session:','session_order:','session_automatic:')"), 3);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM app_state WHERE key IN ('session','session_order','session_automatic')"), 0);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM play_events WHERE zone IS NULL AND counted=1"), 1);
 }

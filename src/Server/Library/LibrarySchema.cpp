@@ -510,6 +510,19 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
                     "CREATE TRIGGER tracks_revision_update AFTER UPDATE OF " +
                     columns + " ON tracks BEGIN UPDATE library_revision SET value=value+1 WHERE id=1; END;");
         },
+        // Zones (docs/Plan.md §5.12): each saves its queue under its zone's ID. The one queue saved before is kept under
+        // the empty ID, which the Server gives to the zone of the output in use; each play records its zone's name.
+        [](sqlite::Database& db) {
+            db.exec("CREATE TABLE zone_queue (zone TEXT NOT NULL, position INTEGER NOT NULL, entry_id INTEGER NOT NULL, "
+                    "file_id INTEGER REFERENCES files(id), path TEXT NOT NULL, start_frame INTEGER NOT NULL DEFAULT 0, "
+                    "end_frame INTEGER, decoder TEXT, source_description TEXT NOT NULL, PRIMARY KEY (zone, position));"
+                    "INSERT INTO zone_queue SELECT '',position,entry_id,file_id,path,start_frame,end_frame,decoder,"
+                    "source_description FROM queue;"
+                    "DROP TABLE queue;"
+                    "ALTER TABLE zone_queue RENAME TO queue;"
+                    "UPDATE app_state SET key=key||':' WHERE key IN ('session','session_order','session_automatic');"
+                    "ALTER TABLE play_events ADD COLUMN zone TEXT;");
+        },
     };
     return migrations;
 }

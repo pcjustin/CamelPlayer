@@ -960,7 +960,7 @@ TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningThe
     const auto before = send(repeat);
     // Saved while the Server runs, so a crash would keep it too.
     ASSERT_TRUE(waitFor([&] {
-        auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session'");
+        auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session:wasapi:'");
         return row.step() && row.text(0).find("\"position\":48000") != std::string::npos;
     }));
     server.reset();
@@ -1207,7 +1207,7 @@ TEST_F(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiv
     setUp({a});
     send(queueReplace({track(a)}));
     const auto saved = [&] {
-        auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session'");
+        auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session:wasapi:'");
         if (!row.step()) return uint64_t(0);
         const auto text = row.text(0);
         const auto at = text.find("\"position\":");
@@ -1230,7 +1230,7 @@ TEST_F(LibraryPlaybackTest, ShutdownSavesTheQueueAndLeavesTheServerReadable) {
     server->shutdown();
     EXPECT_THROW(server->submit(command(CommandKind::Play)), std::runtime_error);
     EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt).total, 1);
-    auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session'");
+    auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session:wasapi:'");
     ASSERT_TRUE(row.step());
     EXPECT_NE(row.text(0).find("\"position\":12000"), std::string::npos);
 }

@@ -74,7 +74,8 @@ TEST_F(LibraryIdentityTest, LocalRenamePreservesTracksStatsPlaylistAndQueue) {
             db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
                 .bind(1, original)
                 .run();
-            db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,'old','Kept')")
+            db.prepare("INSERT INTO queue(zone,position,entry_id,file_id,path,source_description) "
+                       "VALUES('wasapi:',0,77,?,'old','Kept')")
                 .bind(1, original)
                 .run();
         })
@@ -454,7 +455,8 @@ TEST_F(LibraryIdentityTest, ARemovedRootLeavesNoRowsAndComesBackAsNew) {
                 .bind(1, gone)
                 .bind(2, kept)
                 .run();
-            db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,'gone','Gone')")
+            db.prepare("INSERT INTO queue(zone,position,entry_id,file_id,path,source_description) "
+                       "VALUES('wasapi:',0,77,?,'gone','Gone')")
                 .bind(1, gone)
                 .run();
             db.prepare("INSERT INTO play_events(file_id,started,utc_offset,heard_ms,counted) VALUES(?1,1,0,1,1),(?2,1,0,1,1)")
@@ -807,7 +809,8 @@ TEST_F(LibraryIdentityTest, PartialScanDefersMoveResolutionUntilACompleteRetry) 
     const auto provisional = id(store, "new.lrc");
     store
         .write([=](sqlite::Database& db) {
-            db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,99,?,'stale','Kept')")
+            db.prepare("INSERT INTO queue(zone,position,entry_id,file_id,path,source_description) "
+                       "VALUES('wasapi:',0,99,?,'stale','Kept')")
                 .bind(1, provisional)
                 .run();
         })

@@ -744,7 +744,8 @@ TEST(LibraryNas, DISABLED_PhysicalCrossVolumeMovesPreserveOnlyVerifiedHistory) {
                     db.prepare("INSERT INTO playlist_items(playlist_id,position,file_id,source_description) VALUES(1,0,?,'Kept')")
                         .bind(1, original)
                         .run();
-                    db.prepare("INSERT INTO queue(position,entry_id,file_id,path,source_description) VALUES(0,77,?,?,'Kept')")
+                    db.prepare("INSERT INTO queue(zone,position,entry_id,file_id,path,source_description) "
+                               "VALUES('wasapi:',0,77,?,?,'Kept')")
                         .bind(1, original)
                         .bind(2, camel::toUtf8(source.wstring()))
                         .run();

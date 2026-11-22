@@ -12,18 +12,23 @@
 namespace camel::server {
 namespace {
 
+// Each followed by ':' and the zone's ID.
 constexpr const char* kStateKey = "session";
 constexpr const char* kOrderKey = "session_order";
 constexpr const char* kAutomaticKey = "session_automatic"; // positions of the entries autoplay added
 
-void setState(sqlite::Database& db, const char* key, const std::string& value) {
+std::string key(const char* name, const std::string& zone) {
+    return std::string(name) + ":" + zone;
+}
+
+void setState(sqlite::Database& db, const std::string& key, const std::string& value) {
     db.prepare("INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
         .bind(1, key)
         .bind(2, value)
         .run();
 }
 
-std::optional<std::string> state(sqlite::Database& db, const char* key) {
+std::optional<std::string> state(sqlite::Database& db, const std::string& key) {
     auto row = db.prepare("SELECT value FROM app_state WHERE key=?");
     if (!row.bind(1, key).step()) return std::nullopt;
     return row.text(0);
@@ -49,44 +54,44 @@ size_t rowHash(const SavedQueueEntry& entry) {
     return hash;
 }
 
-void saveSession(sqlite::Database& db, const SavedSession& session, SessionParts parts) {
+void saveSession(sqlite::Database& db, const std::string& zone, const SavedSession& session, SessionParts parts) {
     if (parts.entries) {
         // A scan deletes the rows of files that are gone, which leaves the entries they kept to be written again.
         auto kept = int64_t(std::min(parts.keptEntries, session.entries.size()));
         if (kept) {
-            auto stored = db.prepare("SELECT count(*) FROM queue WHERE position<?");
-            if (!stored.bind(1, kept).step() || stored.integer(0) != kept) kept = 0;
+            auto stored = db.prepare("SELECT count(*) FROM queue WHERE zone=? AND position<?");
+            if (!stored.bind(1, zone).bind(2, kept).step() || stored.integer(0) != kept) kept = 0;
         }
-        db.prepare("DELETE FROM queue WHERE position>=?").bind(1, kept).run();
+        db.prepare("DELETE FROM queue WHERE zone=? AND position>=?").bind(1, zone).bind(2, kept).run();
         auto insert =
-            db.prepare("INSERT INTO queue(position,entry_id,file_id,path,start_frame,end_frame,decoder,source_description) "
-                       "VALUES(?,?,(SELECT id FROM files WHERE id=?),?,?,?,?,?)"); // a file deleted meanwhile is unlinked
+            db.prepare("INSERT INTO queue(zone,position,entry_id,file_id,path,start_frame,end_frame,decoder,source_description) "
+                       "VALUES(?,?,?,(SELECT id FROM files WHERE id=?),?,?,?,?,?)"); // a file deleted meanwhile is unlinked
         for (auto i = size_t(kept); i < session.entries.size(); ++i) {
             const auto& entry = session.entries[i];
-            insert.bind(1, int64_t(i)).bind(2, int64_t(i) + 1);
+            insert.bind(1, zone).bind(2, int64_t(i)).bind(3, int64_t(i) + 1);
             if (entry.file)
-                insert.bind(3, entry.file);
+                insert.bind(4, entry.file);
             else
-                insert.bindNull(3);
-            insert.bind(4, entry.source.pathUtf8()).bind(5, int64_t(entry.source.range().first));
+                insert.bindNull(4);
+            insert.bind(5, entry.source.pathUtf8()).bind(6, int64_t(entry.source.range().first));
             if (const auto end = entry.source.range().endExclusive)
-                insert.bind(6, int64_t(*end));
-            else
-                insert.bindNull(6);
-            if (const auto decoder = entry.source.decoder())
-                insert.bind(7, int64_t(*decoder));
+                insert.bind(7, int64_t(*end));
             else
                 insert.bindNull(7);
-            insert.bind(8, entry.description);
+            if (const auto decoder = entry.source.decoder())
+                insert.bind(8, int64_t(*decoder));
+            else
+                insert.bindNull(8);
+            insert.bind(9, entry.description);
             insert.run();
             insert.reset();
         }
         std::vector<size_t> automatic;
         for (size_t i = 0; i < session.entries.size(); ++i)
             if (session.entries[i].automatic) automatic.push_back(i);
-        setState(db, kAutomaticKey, nlohmann::json(automatic).dump());
+        setState(db, key(kAutomaticKey, zone), nlohmann::json(automatic).dump());
     }
-    if (parts.order) setState(db, kOrderKey, nlohmann::json(session.order).dump());
+    if (parts.order) setState(db, key(kOrderKey, zone), nlohmann::json(session.order).dump());
     nlohmann::json j;
     j["history"] = session.history;
     if (session.current) j["current"] = *session.current;
@@ -97,20 +102,39 @@ void saveSession(sqlite::Database& db, const SavedSession& session, SessionParts
     if (const auto& source = session.track.source)
         j["source"] = {source->sampleRate, source->channels, source->bitsPerSample, source->totalFrames};
     if (session.track.format) j["format"] = int(*session.track.format);
-    setState(db, kStateKey, j.dump());
+    setState(db, key(kStateKey, zone), j.dump());
 }
 
 bool hasSavedSession(sqlite::Database& db) {
-    return state(db, kStateKey).has_value();
+    return db.prepare("SELECT 1 FROM app_state WHERE substr(key,1,8)='session:'").step();
 }
 
-std::optional<SavedSession> loadSession(sqlite::Database& db) {
-    const auto text = state(db, kStateKey);
+bool hasSavedSession(sqlite::Database& db, const std::string& zone) {
+    return state(db, key(kStateKey, zone)).has_value();
+}
+
+void deleteSession(sqlite::Database& db, const std::string& zone) {
+    db.prepare("DELETE FROM queue WHERE zone=?").bind(1, zone).run();
+    for (const char* name : {kStateKey, kOrderKey, kAutomaticKey})
+        db.prepare("DELETE FROM app_state WHERE key=?").bind(1, key(name, zone)).run();
+}
+
+void moveSession(sqlite::Database& db, const std::string& from, const std::string& to) {
+    if (from == to) return;
+    deleteSession(db, to);
+    db.prepare("UPDATE queue SET zone=? WHERE zone=?").bind(1, to).bind(2, from).run();
+    for (const char* name : {kStateKey, kOrderKey, kAutomaticKey})
+        db.prepare("UPDATE app_state SET key=? WHERE key=?").bind(1, key(name, to)).bind(2, key(name, from)).run();
+}
+
+std::optional<SavedSession> loadSession(sqlite::Database& db, const std::string& zone) {
+    const auto text = state(db, key(kStateKey, zone));
     if (!text) return std::nullopt;
     try {
         SavedSession session;
         auto rows = db.prepare("SELECT path,start_frame,end_frame,decoder,coalesce(file_id,0),source_description FROM queue "
-                               "ORDER BY position");
+                               "WHERE zone=? ORDER BY position");
+        rows.bind(1, zone);
         while (rows.step()) {
             FrameRange range{uint64_t(rows.integer(1))};
             if (!rows.isNull(2)) range.endExclusive = uint64_t(rows.integer(2));
@@ -123,8 +147,8 @@ std::optional<SavedSession> loadSession(sqlite::Database& db) {
         }
         const auto count = session.entries.size();
         const auto j = nlohmann::json::parse(*text);
-        if (const auto order = state(db, kOrderKey)) session.order = indexes(nlohmann::json::parse(*order), count);
-        if (const auto automatic = state(db, kAutomaticKey))
+        if (const auto order = state(db, key(kOrderKey, zone))) session.order = indexes(nlohmann::json::parse(*order), count);
+        if (const auto automatic = state(db, key(kAutomaticKey, zone)))
             for (const auto at : indexes(nlohmann::json::parse(*automatic), count)) session.entries[at].automatic = true;
         session.history = indexes(j.value("history", nlohmann::json::array()), count);
         if (j.contains("current") && j["current"].get<size_t>() < count) session.current = j["current"].get<size_t>();

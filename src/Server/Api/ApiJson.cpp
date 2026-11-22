@@ -76,7 +76,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 33> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 34> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -108,7 +108,8 @@ constexpr Names<CommandKind, 33> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::SetPlayerMute, "setPlayerMute"},
                                                   {CommandKind::SetReceiverVolume, "setReceiverVolume"},
                                                   {CommandKind::ShowAirPlayCode, "showAirPlayCode"},
-                                                  {CommandKind::PairAirPlay, "pairAirPlay"}};
+                                                  {CommandKind::PairAirPlay, "pairAirPlay"},
+                                                  {CommandKind::DeleteOutput, "deleteOutput"}};
 constexpr Names<AirPlayChannels, 3> kAirPlayChannels = {
     {AirPlayChannels::Stereo, "stereo"}, {AirPlayChannels::Left, "left"}, {AirPlayChannels::Right, "right"}};
 constexpr Names<LibraryGroupField, 2> kArtistFields = {{LibraryGroupField::Artist, "artist"},

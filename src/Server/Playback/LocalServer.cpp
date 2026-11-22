@@ -77,7 +77,7 @@ bool changesQueue(CommandKind kind) {
     return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueReorder ||
            kind == CommandKind::QueueAdd || kind == CommandKind::QueuePlayNext || kind == CommandKind::QueueRemove ||
            kind == CommandKind::QueueClear || kind == CommandKind::SetShuffle || kind == CommandKind::SetRepeat ||
-           kind == CommandKind::RemoveLibraryRoot;
+           kind == CommandKind::RemoveLibraryRoot || kind == CommandKind::DeleteOutput;
 }
 
 // Problems of one track rather than of the device: report them and move on to the next eligible entry.
@@ -118,7 +118,7 @@ std::string partsReadBackOtherwise(const SettingsDto& sent, const SettingsDto& b
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::PairAirPlay)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::DeleteOutput)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -142,7 +142,8 @@ void validate(const Command& c) {
         c.artists.empty() == (c.kind == CommandKind::SetArtistFavorite) ||
         (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite &&
          c.kind != CommandKind::SetArtistFavorite) ||
-        (!c.zone.empty() && !actsOnZone(c.kind)))
+        (!c.zone.empty() && !actsOnZone(c.kind) && c.kind != CommandKind::DeleteOutput) ||
+        (c.kind == CommandKind::DeleteOutput && c.zone.empty()))
         throw std::invalid_argument("invalid Server command payload");
     if (std::ranges::any_of(c.artists, [](const LibraryGroupFilter& a) {
             return (a.field != LibraryGroupField::Artist && a.field != LibraryGroupField::Composer) || a.value.empty() ||
@@ -368,14 +369,16 @@ public:
             issued_ = next;
         } else if (!settings_.lastFile.empty()) {
             settings_.adoptQueueChoices = false; // no saved queue had any
-            sessionRestored_ = true;
+            for (auto& zone : zones_) zone->sessionRestored = true;
+            sessionsRestored_ = true;
             Command restore;
             restore.kind = CommandKind::Load;
             restore.source.emplace(toUtf8(settings_.lastFile));
             enqueue(std::move(restore), true);
         } else {
             settings_.adoptQueueChoices = false;
-            sessionRestored_ = true;
+            for (auto& zone : zones_) zone->sessionRestored = true;
+            sessionsRestored_ = true;
         }
         // Discord's cover comes from the file or its folder, as the playback bar's does, at 512 px; cloudflared lives in
         // the data folder, so without one there are no covers.
@@ -443,7 +446,7 @@ public:
         CommandStamp next = issued_;
         ++next.id;
         if (startsEntry(c.kind) || c.kind == CommandKind::Stop || c.kind == CommandKind::Seek ||
-            c.kind == CommandKind::ApplySettings)
+            c.kind == CommandKind::ApplySettings || c.kind == CommandKind::DeleteOutput)
             ++next.generation;
         if (changesQueue(c.kind)) ++next.queueRevision;
         queue_.push_back({std::move(c), next, restore});
@@ -624,9 +627,12 @@ public:
     }
 
     // The published queue keeps every entry: library files keep their identity, others only their path.
-    PlaylistChange saveQueueAsPlaylist(std::string name) {
+    PlaylistChange saveQueueAsPlaylist(std::string name, const std::string& zone) {
         auto& store = library();
-        const auto queue = snapshot().queue;
+        const auto now = snapshot();
+        const auto shown = std::ranges::find(now.zones, zone.empty() ? now.selectedZone : zone, &ZoneSnapshot::id);
+        if (shown == now.zones.end()) throw std::invalid_argument("no such zone: " + zone);
+        const auto& queue = shown->queue;
         auto reader = store.openReader();
         auto file = reader.prepare("SELECT id FROM files WHERE path=? AND available=1");
         std::vector<PlaylistEntry> entries;
@@ -740,15 +746,24 @@ private:
             const auto found = std::ranges::find(zones_, id, &Zone::id);
             return found == zones_.end() ? nullptr : found->get();
         };
+        std::vector<Zone*> created; // their saved queues are read back once the start's were
         std::unique_lock zones(zonesMutex_);
         if (selected_ && (selected_->backend != inUse.backend || selected_->output != inUse.id)) {
+            const std::string from = selected_->id, to = zoneId(inUse.backend, inUse.id);
             if (Zone* taken = find(inUse.backend, inUse.id)) {
                 zones.unlock();
+                finishWrite(*taken);
                 emptyZone(*taken);
                 zones.lock();
                 setKey(*taken, selected_->backend, selected_->output);
+                taken->saved = {};
+                taken->savedRows.clear();
+                taken->sessionRestored = true;
                 emptied.push_back(taken);
             }
+            // The saved queue goes with the queue; the new output's own was dropped with it.
+            finishWrite(*selected_);
+            if (library_) library_->write([from, to](sqlite::Database& db) { moveSession(db, from, to); });
             setKey(*selected_, inUse.backend, inUse.id);
             moved = selected_;
             zonesChanged_ = true;
@@ -760,7 +775,9 @@ private:
                 ++it;
                 continue;
             }
+            // An output turned off keeps its zone's queue, which comes back when it is turned on.
             zones.unlock();
+            saveQueueSession(**it, true);
             emptyZone(**it);
             zones.lock();
             it = zones_.erase(it);
@@ -780,6 +797,7 @@ private:
                 zone->engine = std::make_unique<audio::PlaybackEngine>(zone->settings, factory_);
                 zone->state.playback = playback(zone->engine->snapshot());
                 emptied.push_back(zone.get());
+                created.push_back(zone.get());
                 ordered.push_back(std::move(zone));
                 zonesChanged_ = true;
             } else {
@@ -799,7 +817,36 @@ private:
             zone->q.policy.setShuffle(zone->settings.shuffle);
             zone->q.policy.setRepeat(zone->settings.repeat);
         }
+        if (sessionsRestored_ && library_)
+            for (Zone* zone : created) restoreQueueSession(*zone);
         if (moved) rememberQueueChoices(*moved);
+    }
+
+    // Deleting a saved output deletes its zone's queue, stopping a zone that plays (the owner, 2026-11-22).
+    void forgetZoneQueue(const std::string& zone) {
+        if (const auto found = std::ranges::find(zones_, zone, &Zone::id); found != zones_.end()) {
+            Zone& z = **found;
+            finishWrite(z);
+            emptyZone(z);
+            z.saved = {};
+            z.savedRows.clear();
+            z.sessionRestored = &z == selected_; // a zone going is not saved again
+        }
+        if (library_) library_->write([zone](sqlite::Database& db) { deleteSession(db, zone); });
+    }
+
+    void deleteSavedOutput(const std::string& zone) {
+        const auto colon = zone.find(':');
+        Backend backend{};
+        if (colon == std::string::npos || !backendFromId(std::string_view(zone).substr(0, colon), backend))
+            throw std::invalid_argument("no such output: " + zone);
+        const auto outputs = settings_.outputs;
+        forgetZoneQueue(zone);
+        deleteOutput(settings_, backend, zone.substr(colon + 1), state_.devices);
+        forgetDeletedReceivers(outputs);
+        followAirPlayGroup();
+        syncZones();
+        persist();
     }
 
     // Before zones, the saved queue's shuffle and repeat were every output's: they become every zone's (MZ-R02).
@@ -861,8 +908,35 @@ private:
 
     // Library entries are found by their file, wherever it moved, so restoring reads only the library database
     // (docs/Plan.md §7); an unavailable file stays in the queue, marked unavailable.
+    // Every zone's saved queue comes back paused (docs/Plan.md §2); the one saved before zones becomes the selected zone's.
+    void restoreSessions() {
+        bool selectedSaved = false;
+        if (library_) {
+            auto reader = library_->openReader();
+            if (hasSavedSession(reader, kQueueBeforeZones) && !hasSavedSession(reader, selected().id))
+                library_->write([to = selected().id](sqlite::Database& db) { moveSession(db, kQueueBeforeZones, to); }).get();
+            selectedSaved = hasSavedSession(reader, selected().id);
+        }
+        for (auto& zone : zones_) restoreQueueSession(*zone);
+        sessionsRestored_ = true;
+        if (settings_.adoptQueueChoices && selectedSaved)
+            adoptQueueChoices(selected());
+        else
+            settings_.adoptQueueChoices = false;
+    }
+
+    // Waits for the zone's last write, which a move of its rows must follow.
+    static void finishWrite(Zone& z) {
+        if (!z.sessionWrite.valid()) return;
+        try {
+            z.sessionWrite.get();
+        } catch (const std::exception& e) {
+            log::warn("session: %s", e.what());
+        }
+    }
+
     void restoreQueueSession(Zone& z) {
-        sessionRestored_ = true;
+        z.sessionRestored = true;
         const auto started = measure::now();
         auto measured = wil::scope_exit([&] {
             if (measure::measuring())
@@ -870,9 +944,9 @@ private:
                           measure::milliseconds(started, measure::now()));
         });
         auto reader = library_->openReader();
-        const auto saved = loadSession(reader);
+        const auto saved = loadSession(reader, z.id);
         if (!saved) return;
-        for (const auto& item : saved->entries) savedRows_.push_back(rowHash(item));
+        for (const auto& item : saved->entries) z.savedRows.push_back(rowHash(item));
         std::vector<QueueEntry> entries;
         entries.reserve(saved->entries.size());
         for (const auto& item : saved->entries) {
@@ -919,7 +993,6 @@ private:
         state.shuffle = saved->shuffle;
         state.repeat = saved->repeat;
         z.q.policy.restore(std::move(state));
-        if (settings_.adoptQueueChoices) adoptQueueChoices(z);
         applyMarks(z, entries);
         z.q.entries = std::move(entries);
         if (const auto current = z.q.policy.current()) {
@@ -931,15 +1004,15 @@ private:
         refreshLibraryAvailability(z);
         z.queueChanged = true;
         auto policy = z.q.policy.state();
-        saved_ = {std::move(policy.entries),
-                  std::move(policy.order),
-                  std::move(policy.history),
-                  policy.current,
-                  policy.shuffle,
-                  policy.repeat,
-                  z.q.restored.value_or(SavedTrack{}),
-                  z.engine->snapshot().state,
-                  std::chrono::steady_clock::now()};
+        z.saved = {std::move(policy.entries),
+                   std::move(policy.order),
+                   std::move(policy.history),
+                   policy.current,
+                   policy.shuffle,
+                   policy.repeat,
+                   z.q.restored.value_or(SavedTrack{}),
+                   z.engine->snapshot().state,
+                   std::chrono::steady_clock::now()};
     }
 
     SavedTrack currentTrack(const Zone& z, const audio::EngineSnapshot& playback) const {
@@ -953,26 +1026,26 @@ private:
     // Written when the queue, its order or the current entry changes, on pause and stop, every 5 seconds while playing
     // (what a crash can lose) and at exit. Large queues are rewritten only when their entries or order change.
     void saveQueueSession(Zone& z, bool final) {
-        if (!library_ || !sessionRestored_) return;
-        if (sessionWrite_.valid()) {
-            if (!final && sessionWrite_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+        if (!library_ || !z.sessionRestored) return;
+        if (z.sessionWrite.valid()) {
+            if (!final && z.sessionWrite.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
             try {
-                sessionWrite_.get();
+                z.sessionWrite.get();
             } catch (const std::exception& e) {
                 log::warn("session: %s", e.what());
-                saved_ = {}; // nothing of it is in the database: the next save writes it all
-                savedRows_.clear();
+                z.saved = {}; // nothing of it is in the database: the next save writes it all
+                z.savedRows.clear();
             }
         }
         const auto playback = z.engine->snapshot();
         const auto now = std::chrono::steady_clock::now();
         auto policy = z.q.policy.state();
-        SessionParts parts{policy.entries != saved_.entries, policy.order != saved_.order};
+        SessionParts parts{policy.entries != z.saved.entries, policy.order != z.saved.order};
         const auto track = currentTrack(z, playback);
         const bool changed =
-            parts.entries || parts.order || policy.current != saved_.current || policy.history != saved_.history ||
-            policy.shuffle != saved_.shuffle || policy.repeat != saved_.repeat || playback.state != saved_.playState ||
-            (playback.state == audio::PlayState::Playing ? now - saved_.at >= std::chrono::seconds(5) : track != saved_.track);
+            parts.entries || parts.order || policy.current != z.saved.current || policy.history != z.saved.history ||
+            policy.shuffle != z.saved.shuffle || policy.repeat != z.saved.repeat || playback.state != z.saved.playState ||
+            (playback.state == audio::PlayState::Playing ? now - z.saved.at >= std::chrono::seconds(5) : track != z.saved.track);
         if (!changed && !final) return;
         std::unordered_map<uint64_t, size_t> index;
         index.reserve(z.q.entries.size());
@@ -996,8 +1069,8 @@ private:
             std::vector<size_t> rows;
             rows.reserve(session.entries.size());
             for (const auto& row : session.entries) rows.push_back(rowHash(row));
-            parts.keptEntries = size_t(std::ranges::mismatch(rows, savedRows_).in1 - rows.begin());
-            savedRows_ = std::move(rows);
+            parts.keptEntries = size_t(std::ranges::mismatch(rows, z.savedRows).in1 - rows.begin());
+            z.savedRows = std::move(rows);
         }
         if (parts.order) session.order = indexes(policy.order);
         session.history = indexes(policy.history);
@@ -1006,19 +1079,19 @@ private:
         session.shuffle = policy.shuffle;
         session.repeat = policy.repeat;
         session.track = track;
-        auto write =
-            library_->write([session = std::move(session), parts](sqlite::Database& db) { saveSession(db, session, parts); });
-        saved_ = {std::move(policy.entries),
-                  std::move(policy.order),
-                  std::move(policy.history),
-                  policy.current,
-                  policy.shuffle,
-                  policy.repeat,
-                  track,
-                  playback.state,
-                  now};
+        auto write = library_->write(
+            [zone = z.id, session = std::move(session), parts](sqlite::Database& db) { saveSession(db, zone, session, parts); });
+        z.saved = {std::move(policy.entries),
+                   std::move(policy.order),
+                   std::move(policy.history),
+                   policy.current,
+                   policy.shuffle,
+                   policy.repeat,
+                   track,
+                   playback.state,
+                   now};
         if (!final) {
-            sessionWrite_ = std::move(write);
+            z.sessionWrite = std::move(write);
             return;
         }
         try {
@@ -1034,11 +1107,11 @@ private:
         state_.commandError.reset();
         state_.controlPanelOpened.reset();
         // A command of no zone may add or remove zones, so it uses none after that.
-        Zone& z = zoneFor(c);
+        Zone& z = c.kind == CommandKind::DeleteOutput ? selected() : zoneFor(c);
         z.attempted = {}; // a command may restart the stream, so the upcoming entry may be queued again
         z.checked = {};
         if (pending.restore && !c.source) {
-            restoreQueueSession(z);
+            restoreSessions();
             return;
         }
         if (c.source) {
@@ -1223,6 +1296,11 @@ private:
                             output.zone.repeat = was->zone.repeat;
                         }
                     settings_.adoptQueueChoices = adoptQueueChoices;
+                    for (const auto& output : outputs)
+                        if (std::ranges::none_of(settings_.outputs, [&](const SavedOutput& o) {
+                                return o.backend == output.backend && o.id == output.id;
+                            }))
+                            forgetZoneQueue(zoneId(output.backend, output.id));
                     std::erase_if(settings_.airplayLevels, [&](const auto& entry) {
                         return std::ranges::none_of(settings_.outputs, [&](const SavedOutput& o) {
                             return o.backend == Backend::AirPlay && o.id == entry.first;
@@ -1264,6 +1342,9 @@ private:
             }
             case CommandKind::RefreshDevices:
                 refreshDevices();
+                break;
+            case CommandKind::DeleteOutput:
+                deleteSavedOutput(c.zone);
                 break;
             case CommandKind::ShowAirPlayCode:
                 defer([this, id = c.receiver] { showAirPlayCode(id); });
@@ -1640,6 +1721,7 @@ private:
             if (binding != z.q.libraryEntries.end() && binding->second.file &&
                 playback.file == toWide(entry(z, z.q.entryId).source.pathUtf8())) {
                 z.q.session.emplace(LibraryTrackKey{binding->second.file}, playback.source->sampleRate, playback.total);
+                z.q.session->setZone(z.state.name);
                 z.q.sessionEntry = z.q.entryId;
                 z.q.sessionFile = playback.file;
                 z.q.sessionTransitions = playback.transitions;
@@ -2751,7 +2833,7 @@ private:
                 state_.finished = {done->command, std::move(done->failure)};
             }
             if (settingsDue_ && std::chrono::steady_clock::now() >= *settingsDue_) persist();
-            saveQueueSession(selected(), false);
+            for (auto& zone : zones_) saveQueueSession(*zone, false);
             publish(pending.has_value());
             if (pending || done) {
                 {
@@ -2779,7 +2861,7 @@ private:
         if (settingsDue_) persist();
         for (const auto& zone : zones_)
             if (zone->q.session) zone->q.session->persist(*library_);
-        saveQueueSession(selected(), true);
+        for (auto& zone : zones_) saveQueueSession(*zone, true);
         queueSaved_.set_value();
         backgroundStopped_.get_future().wait();
         {
@@ -2829,6 +2911,16 @@ private:
         std::chrono::steady_clock::time_point availabilityChecked;
         uint64_t availabilityFiles = 0;
     };
+    // A zone's saved session (M5-R01): what was last written of it.
+    struct SavedState {
+        std::vector<uint64_t> entries, order, history;
+        std::optional<uint64_t> current;
+        bool shuffle = false;
+        RepeatMode repeat = RepeatMode::Off;
+        SavedTrack track;
+        audio::PlayState playState = audio::PlayState::Stopped;
+        std::chrono::steady_clock::time_point at;
+    };
     // An enabled output, or the AirPlay group in use, playing with an Engine session, output and queue of its own
     // (docs/Plan.md §5.12).
     struct Zone {
@@ -2846,6 +2938,10 @@ private:
         uint64_t publishedEntry = UINT64_MAX; // the current entry `state.queue` was built for
         ZoneSnapshot state;                   // as last built for publishing
         std::filesystem::path queuedRead;     // the file last queued in the engine to follow; under readsMutex_
+        bool sessionRestored = false;         // nothing is saved before its saved session is read back
+        SavedState saved;
+        std::vector<size_t> savedRows; // rowHash() of each queue row as last written: rows before the first changed stay
+        std::future<void> sessionWrite;
     };
 
     Settings settings_;
@@ -2904,19 +3000,7 @@ private:
     std::vector<std::unique_ptr<Zone>> zones_; // in the output menu's order
     bool zonesChanged_ = false;                // zones added, removed or moved to another output since the last publish
     Zone* selected_ = nullptr;                 // the zone of the output in use at the last syncZones()
-    // The saved session (M5-R01) is the selected zone's: what was last written of it.
-    bool sessionRestored_ = false; // nothing is saved before the saved session is read back
-    struct SavedState {
-        std::vector<uint64_t> entries, order, history;
-        std::optional<uint64_t> current;
-        bool shuffle = false;
-        RepeatMode repeat = RepeatMode::Off;
-        SavedTrack track;
-        audio::PlayState playState = audio::PlayState::Stopped;
-        std::chrono::steady_clock::time_point at;
-    } saved_;
-    std::vector<size_t> savedRows_; // rowHash() of each queue row as last written: rows before the first changed stay
-    std::future<void> sessionWrite_;
+    bool sessionsRestored_ = false; // every zone's saved queue was read back at the start; a zone added later reads its own
     std::function<void(const Event&)> listener_;
     std::unique_ptr<DiscordPresence> discord_;
     // Held shared by other threads while they use loudness_, libraryMonitor_ or discord_; shutdown takes them away.
@@ -3147,8 +3231,8 @@ PlaylistChange LocalServer::addToPlaylist(int64_t playlist, std::optional<int64_
                                           const std::vector<PlaylistSource>& sources, const CancellationToken& token) {
     return camel::server::addToPlaylist(impl_->library(), playlist, revision, sources, token);
 }
-PlaylistChange LocalServer::saveQueueAsPlaylist(std::string name) {
-    return impl_->saveQueueAsPlaylist(std::move(name));
+PlaylistChange LocalServer::saveQueueAsPlaylist(std::string name, const std::string& zone) {
+    return impl_->saveQueueAsPlaylist(std::move(name), zone);
 }
 PlaylistChange LocalServer::editPlaylist(const PlaylistEdit& edit) {
     return camel::server::editPlaylist(impl_->library(), edit);

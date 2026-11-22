@@ -18,8 +18,11 @@
 #include "Engine/SamplePacker.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "Server/Api/ApiJson.h"
+#include "Server/Library/LibraryScanner.h"
+#include "Server/Library/LibraryStore.h"
 #include "Server/Playback/LocalServer.h"
 #include "Server/Playback/Outputs.h"
+#include "Server/Playback/QueueSession.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -548,11 +551,21 @@ TEST_F(ZonesTest, TheQueuesShuffleAndRepeatOfAnEarlierVersionBecomeEveryZones) {
     send(play(1, {track(1, 6.0), track(1, 1.0)}));
     send(shuffle(1, true));
     send(repeat(1, RepeatMode::All));
-    restart([](nlohmann::json& j) {
+    restart([&](nlohmann::json& j) {
         j["schema"] = 4;
         j.erase("shuffle");
         j.erase("repeat");
         for (auto& output : j["outputs"]) output.erase("zone");
+        // As an earlier version left the library: one queue, and nothing of the other zones.
+        LibraryStore store(dir / "data");
+        store
+            .write([](sqlite::Database& db) {
+                db.exec("DELETE FROM queue WHERE zone<>'wasapi:zone-1';"
+                        "DELETE FROM app_state WHERE key LIKE 'session%' AND key NOT LIKE '%:wasapi:zone-1';"
+                        "UPDATE queue SET zone='';"
+                        "UPDATE app_state SET key=replace(key,'wasapi:zone-1','') WHERE key LIKE 'session%';");
+            })
+            .get();
     });
     const auto s = server->snapshot();
     for (size_t i = 1; i <= 3; ++i) {
@@ -634,4 +647,151 @@ TEST_F(ZonesTest, AnOutputTurnedOffAndOnAgainKeepsItsZonesSettings) {
     EXPECT_TRUE(of(on, 2).queue.shuffle);
     EXPECT_EQ(of(on, 2).queue.repeat, RepeatMode::All);
     EXPECT_FALSE(of(on, 3).queue.shuffle);
+}
+
+namespace {
+
+std::vector<std::string> paths(const ZoneSnapshot& z) {
+    std::vector<std::string> result;
+    for (const auto& entry : z.queue.entries) result.push_back(entry.source.pathUtf8());
+    return result;
+}
+
+size_t current(const ZoneSnapshot& z) {
+    const auto at = std::ranges::find(z.queue.entries, z.queueEntryId, &QueueEntry::id);
+    return size_t(at - z.queue.entries.begin());
+}
+
+} // namespace
+
+TEST_F(ZonesTest, EveryZonesQueueComesBackPausedAtTheNextStart) {
+    start(3, {}, true);
+    for (size_t i = 1; i <= 3; ++i) send(play(i, {track(i, 7.0), track(i, 1.0)}));
+    send(command(CommandKind::Next, 3));
+    ASSERT_TRUE(waitFor(
+        [](const Snapshot& s) { return std::ranges::all_of(s.zones, [](const ZoneSnapshot& z) { return playing(z, 0.5); }); }));
+    const auto before = server->snapshot();
+    restart();
+    const auto after = server->snapshot();
+    for (size_t i = 1; i <= 3; ++i) {
+        const auto& was = of(before, i);
+        const auto& is = of(after, i);
+        EXPECT_EQ(paths(is), paths(was)) << zone(i);
+        EXPECT_EQ(current(is), current(was)) << zone(i);
+        EXPECT_EQ(is.playback.state, PlaybackState::Paused) << zone(i);
+        EXPECT_GE(is.playback.position + 4410, was.playback.position) << zone(i);
+    }
+}
+
+TEST_F(ZonesTest, TheQueueSavedBeforeZonesComesBackInTheZoneOfTheOutputInUse) {
+    start(3, [](Settings& s) { s.wasapi.deviceId = device(2); }, true);
+    send(play(2, {track(2, 6.0), track(2, 1.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 2)); }));
+    const auto before = server->snapshot();
+    server.reset();
+    {
+        // As schema 26 leaves the one queue an earlier version saved.
+        LibraryStore store(dir / "data");
+        store
+            .write([](sqlite::Database& db) {
+                db.exec("UPDATE queue SET zone='';"
+                        "UPDATE app_state SET key=replace(key,'wasapi:zone-2','') WHERE key LIKE 'session%';");
+            })
+            .get();
+    }
+    open(loadSettings(settingsFile));
+    const auto after = server->snapshot();
+    EXPECT_EQ(paths(of(after, 2)), paths(of(before, 2)));
+    EXPECT_EQ(of(after, 2).playback.state, PlaybackState::Paused);
+    EXPECT_TRUE(of(after, 1).queue.entries.empty());
+    EXPECT_TRUE(of(after, 3).queue.entries.empty());
+    server->shutdown();
+    LibraryStore store(dir / "data");
+    auto db = store.openReader();
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM queue WHERE zone=''"), 0);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM queue WHERE zone='wasapi:zone-2'"), 2);
+}
+
+TEST_F(ZonesTest, AnOutputTurnedOffWhilePlayingStopsAndKeepsItsQueueForWhenItIsOn) {
+    start(3, {}, true);
+    send(play(2, {track(2, 6.0), track(2, 1.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 2), 0.5); }));
+    const auto before = server->snapshot();
+    const auto setEnabled = [&](bool enabled) {
+        Settings s = nativeSettings(server->snapshot().settings);
+        setOutputEnabled(s, Backend::Wasapi, device(2), enabled, server->snapshot().devices);
+        Command apply;
+        apply.kind = CommandKind::ApplySettings;
+        apply.settings = settingsDto(s);
+        return send(std::move(apply));
+    };
+    const auto off = setEnabled(false);
+    EXPECT_TRUE(std::ranges::none_of(off.zones, [](const ZoneSnapshot& z) { return z.id == zone(2); }));
+    EXPECT_EQ(opened(2), closed(2));
+    const auto on = setEnabled(true);
+    EXPECT_EQ(paths(of(on, 2)), paths(of(before, 2)));
+    EXPECT_EQ(of(on, 2).playback.state, PlaybackState::Paused);
+    EXPECT_GE(of(on, 2).playback.position + 4410, of(before, 2).playback.position);
+}
+
+TEST_F(ZonesTest, DeletingAnOutputDeletesItsQueueOnceSavedAsAPlaylistWhenAsked) {
+    start(3, {}, true);
+    send(play(1, {track(1, 6.0)}));
+    send(play(2, {track(2, 6.0), track(2, 1.0)}));
+    send(play(3, {track(3, 6.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 2)) && playing(of(s, 3)); }));
+    const auto saved = server->saveQueueAsPlaylist("Zone 2's queue", zone(2));
+    EXPECT_EQ(saved.added, 2);
+    Command remove;
+    remove.kind = CommandKind::DeleteOutput;
+    remove.zone = zone(2);
+    const auto s = send(std::move(remove));
+    EXPECT_TRUE(std::ranges::none_of(s.zones, [](const ZoneSnapshot& z) { return z.id == zone(2); }));
+    EXPECT_EQ(opened(2), closed(2));
+    EXPECT_EQ(of(s, 3).playback.state, PlaybackState::Playing);
+    // Deleted in Settings › Audio outputs, as the window does it through the settings.
+    Settings settings = nativeSettings(s.settings);
+    deleteOutput(settings, Backend::Wasapi, device(3), s.devices);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(settings);
+    send(std::move(apply));
+    const auto playlists = server->playlists();
+    server->shutdown();
+    ASSERT_EQ(playlists.size(), 1U);
+    EXPECT_EQ(playlists.front().tracks, 2);
+    LibraryStore store(dir / "data");
+    auto db = store.openReader();
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM queue WHERE zone='wasapi:zone-2'"), 0);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM queue WHERE zone='wasapi:zone-3'"), 0);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM queue WHERE zone='wasapi:zone-1'"), 1);
+    EXPECT_FALSE(hasSavedSession(db, zone(2)));
+}
+
+TEST_F(ZonesTest, PlaysInTwoZonesAtOnceAreEachCountedOnceUnderTheirZonesNames) {
+    start(2, {}, true);
+    const Settings settings = nativeSettings(server->snapshot().settings);
+    server.reset();
+    std::filesystem::create_directories(dir / "music");
+    const std::vector files{dir / "music" / "one.flac", dir / "music" / "two.flac"};
+    std::filesystem::copy_file(track(1, 1.5), files[0]);
+    std::filesystem::copy_file(track(2, 1.5), files[1]);
+    {
+        LibraryStore store(dir / "data");
+        LibraryScanner scanner(store);
+        ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    }
+    open(settings);
+    send(play(1, {files[0]}));
+    send(play(2, {files[1]}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return ended(of(s, 1)) && ended(of(s, 2)); }));
+    server->shutdown();
+    LibraryStore store(dir / "data");
+    auto db = store.openReader();
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM play_events"), 2);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM play_events WHERE counted=1"), 2);
+    EXPECT_EQ(db.scalar("SELECT count(DISTINCT file_id) FROM play_events"), 2);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM play_events WHERE zone='Zone 1'"), 1);
+    EXPECT_EQ(db.scalar("SELECT count(*) FROM play_events WHERE zone='Zone 2'"), 1);
+    EXPECT_EQ(db.scalar("SELECT sum(play_count) FROM stats"), 2);
 }

@@ -37,6 +37,8 @@ public:
     void discard();
     // Queues writing heard time and the count when they changed since the last call.
     void persist(LibraryStore& store);
+    // The zone it plays in, by the name it has now (docs/Plan.md §7.8); set before the first persist.
+    void setZone(std::string name) { zone_ = std::move(name); }
 
     const LibraryTrackKey& track() const { return track_; }
     std::optional<uint64_t> position() const { return last_; } // the last observed position while playing
@@ -55,6 +57,7 @@ private:
     bool counted_ = false;
     int64_t startedMs_ = 0;
     int32_t utcOffsetMinutes_ = 0;
+    std::string zone_;
     uint64_t persistedMs_ = 0;
     bool persistedCount_ = false;
     std::shared_ptr<int64_t> event_ = std::make_shared<int64_t>(0); // assigned by the writer thread
