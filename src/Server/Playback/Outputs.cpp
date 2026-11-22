@@ -395,11 +395,36 @@ void setInAirPlayGroup(Settings& s, const std::string& id, bool in, const Device
         if (s.airplayGroup.size() < 2) return;
         std::erase(s.airplayGroup, id);
         if (s.airplay.deviceId == id) {
+            // The group goes on under the first receiver left with its DSP, choices and volume; the one that left keeps
+            // them as its own, alone (MZ-R08).
             keepParameters(s, Backend::AirPlay, id);
-            loadParameters(s, Backend::AirPlay, s.airplayGroup.front(), s.airplayGroup.front());
+            savedOutput(s, Backend::AirPlay, id).airplayGroup.clear();
+            const std::string next = s.airplayGroup.front();
+            const SavedOutput* own = findOutput(s, Backend::AirPlay, next);
+            s.airplay = own ? own->airplay : AirPlaySettings{};
+            s.airplay.deviceId = next;
         }
     }
     syncOutputs(s, devices);
+}
+
+std::string passAirPlayGroup(Settings& s, const std::string& owner) {
+    const SavedOutput* found = findOutput(s, Backend::AirPlay, owner);
+    if (!found) return {};
+    auto rest = found->airplayGroup;
+    std::erase(rest, owner);
+    if (rest.empty()) return {};
+    SavedOutput& to = savedOutput(s, Backend::AirPlay, rest.front());
+    const SavedOutput& from = *findOutput(s, Backend::AirPlay, owner);
+    to.dsp = from.dsp;
+    to.zone = from.zone;
+    to.volumeMode = from.volumeMode;
+    to.volumeDb = from.volumeDb;
+    to.volumeMuted = from.volumeMuted;
+    to.enabled = true;
+    to.airplayGroup = rest.size() > 1 ? rest : std::vector<std::string>();
+    savedOutput(s, Backend::AirPlay, owner).airplayGroup.clear();
+    return rest.front();
 }
 
 AirPlayChannels airplayChannels(const Settings& s, const std::string& id) {

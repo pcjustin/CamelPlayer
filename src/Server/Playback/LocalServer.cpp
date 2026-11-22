@@ -28,6 +28,7 @@
 #include <cctype>
 #include <cmath>
 #include <condition_variable>
+#include <cwchar>
 #include <deque>
 #include <future>
 #include <iterator>
@@ -816,6 +817,15 @@ private:
         return wanted;
     }
 
+    // A zone goes on as another output's, its saved session with it.
+    void rekey(Zone& z, Backend backend, const std::string& output) {
+        const std::string from = z.id, to = zoneId(backend, output);
+        finishWrite(z);
+        if (library_) library_->write([from, to](sqlite::Database& db) { moveSession(db, from, to); });
+        setKey(z, backend, output);
+        zonesChanged_ = true;
+    }
+
     static void setKey(Zone& z, Backend backend, const std::string& output) {
         z.backend = backend;
         z.output = output;
@@ -856,15 +866,15 @@ private:
         const auto wants = [&](Backend backend, const std::string& output) {
             return std::ranges::any_of(wanted, [&](const OutputRow& row) { return row.backend == backend && row.id == output; });
         };
+        // The AirPlay group in use whose first receiver left goes on under the next (MZ-R08).
+        const bool leftItsGroup =
+            selected_ && selected_->backend == Backend::AirPlay && inUse.backend == Backend::AirPlay &&
+            std::ranges::find(selected_->settings.airplayGroup, inUse.id) != selected_->settings.airplayGroup.end();
         if (selected_ && (selected_->backend != inUse.backend || selected_->output != inUse.id) &&
-            !wants(selected_->backend, selected_->output) &&
+            (leftItsGroup || !wants(selected_->backend, selected_->output)) &&
             std::ranges::none_of(zones_, [&](const auto& z) { return z->backend == inUse.backend && z->output == inUse.id; })) {
-            const std::string from = selected_->id, to = zoneId(inUse.backend, inUse.id);
-            finishWrite(*selected_);
-            if (library_) library_->write([from, to](sqlite::Database& db) { moveSession(db, from, to); });
-            setKey(*selected_, inUse.backend, inUse.id);
+            rekey(*selected_, inUse.backend, inUse.id);
             moved = selected_;
-            zonesChanged_ = true;
         }
         for (auto it = zones_.begin(); it != zones_.end();) {
             const bool kept = std::ranges::any_of(
@@ -906,7 +916,7 @@ private:
                 (*found)->engine->applySettings((*found)->settings);
                 ordered.push_back(std::move(*found));
             }
-            if (ordered.back()->state.name != row.name) {
+            if (row.backend != Backend::AirPlay && ordered.back()->state.name != row.name) {
                 ordered.back()->state.name = row.name;
                 zonesChanged_ = true;
             }
@@ -916,6 +926,7 @@ private:
             }
         }
         zones_ = std::move(ordered);
+        nameAirPlayZones();
         zones.unlock();
         for (Zone* zone : emptied) {
             zone->q.policy.setShuffle(zone->settings.shuffle);
@@ -924,6 +935,24 @@ private:
         if (sessionsRestored_ && library_)
             for (Zone* zone : created) restoreQueueSession(*zone);
         if (moved) rememberQueueChoices(*moved);
+    }
+
+    // An AirPlay zone is named by its receivers, the one it was formed with first (MZ-R08).
+    void nameAirPlayZones() {
+        const auto rows = outputRows(settings_, state_.devices);
+        for (auto& zone : zones_) {
+            if (zone->backend != Backend::AirPlay) continue;
+            std::string name;
+            for (const auto& id : airplayGroup(*zone)) {
+                const auto row =
+                    std::ranges::find_if(rows, [&](const OutputRow& r) { return r.backend == Backend::AirPlay && r.id == id; });
+                name += (name.empty() ? "" : " + ") + (row == rows.end() || row->name.empty() ? id : row->name);
+            }
+            if (zone->state.name != name) {
+                zone->state.name = std::move(name);
+                zonesChanged_ = true;
+            }
+        }
     }
 
     // Deleting a saved output deletes its zone's queue, stopping a zone that plays (the owner, 2026-11-22).
@@ -2678,10 +2707,17 @@ private:
                 if (std::ranges::find(group, id) == group.end() || group.size() < 2) continue;
                 z.receiverLeft = ReceiverLeft{z.receiverLeft ? z.receiverLeft->serial + 1 : 1, receiverName(id, found),
                                               why.code(), why.what()};
-                if (&z == selected_)
+                if (&z == selected_) {
                     setInAirPlayGroup(settings_, id, false, state_.devices);
-                else
+                } else if (id == z.output) {
+                    // The zone goes on under the first receiver left (MZ-R08).
+                    if (const auto next = passAirPlayGroup(settings_, z.output); !next.empty()) {
+                        std::unique_lock zones(zonesMutex_);
+                        rekey(z, Backend::AirPlay, next);
+                    }
+                } else {
                     leaveAirPlayGroup(settings_, z.output, id);
+                }
                 grouping = true;
             }
             std::vector<AirPlayMember> members;
@@ -3441,6 +3477,17 @@ std::shared_ptr<IServer> createLocalServer() {
     const auto settings = openSettings(path, recovery);
     auto server = std::make_shared<LocalServer>(settings, path);
     server->setSettingsRecovery(recovery);
+    // UI Automation runs only: AirPlay receivers are looked for on a loopback mDNS responder at this port alone.
+    wchar_t port[16] = {};
+    if (const DWORD length = GetEnvironmentVariableW(L"CAMELPLAYER_AIRPLAY_QUERY", port, DWORD(std::size(port)));
+        length > 0 && length < std::size(port)) {
+        AirPlayFinderOptions options;
+        options.queryHost = "127.0.0.1";
+        options.queryPort = uint16_t(std::wcstoul(port, nullptr, 10));
+        options.groupPort = 0;
+        options.searchInterval = std::chrono::seconds(2);
+        server->setAirPlayFinderOptions(options);
+    }
     return server;
 }
 

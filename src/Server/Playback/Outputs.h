@@ -50,6 +50,9 @@ void setInAirPlayGroup(Settings& s, const std::string& id, bool in, const Device
 // Takes a receiver out of the group of `owner`, an AirPlay zone's receiver not in use (MZ-R05); the one in use's group
 // changes through setInAirPlayGroup.
 void leaveAirPlayGroup(Settings& s, const std::string& owner, const std::string& id);
+// The group of `owner`, an AirPlay receiver not in use, goes on under the first receiver left, which takes the owner's
+// DSP, zone choices and volume; the owner is left alone (MZ-R08). Returns that receiver; empty when the owner was alone.
+std::string passAirPlayGroup(Settings& s, const std::string& owner);
 // A group receiver's channels: the one in use from Settings' fields, the others from their saved outputs.
 AirPlayChannels airplayChannels(const Settings& s, const std::string& id);
 // `s` as it would be with this output in use, for showing its parameters without leaving the one in use.

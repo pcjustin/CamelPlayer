@@ -763,6 +763,7 @@ Details: {0}</value></data>
   <data name="Output_Offline" xml:space="preserve"><value>{0} (not connected)</value></data>
   <data name="Output_Unsupported" xml:space="preserve"><value>{0} (not supported)</value></data>
   <data name="Output_InUseUnsupported" xml:space="preserve"><value>In use; {0}</value></data>
+  <data name="Zone_ReceiverInUse" xml:space="preserve"><value>{0}, in use by {1}</value></data>
   <data name="Zone_PickerName" xml:space="preserve"><value>Zones</value></data>
   <data name="Zone_GroupHeading" xml:space="preserve"><value>Receivers in this group</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>Pause all</value></data>

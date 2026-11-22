@@ -102,13 +102,24 @@ bool firewallRuleFound() {
 
 } // namespace
 
+// The zone button says which zone the window follows, an AirPlay group by its receivers.
+void MainWindow::nameZoneButton(const Snapshot& snapshot) {
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
+    const auto inUse = std::ranges::find_if(rows, &camel::server::OutputRow::selected);
+    if (inUse == rows.end()) return;
+    const auto zone = std::ranges::find(snapshot.zones, snapshot.selectedZone, &ZoneSnapshot::id);
+    const hstring label = zone != snapshot.zones.end() && zone->playback.receivers.size() > 1
+                              ? ui::utf8(zone->name) + L" (AirPlay)"
+                              : outputMenuLabel(*inUse);
+    ToolTipService::SetToolTip(OutputButton(), box_value(label));
+    Automation::AutomationProperties::SetName(OutputButton(), ui::format(L"Output_ButtonName", {std::wstring(label)}));
+}
+
 void MainWindow::populateOutputs() {
     const auto rows = camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices);
     const auto inUse = std::ranges::find_if(rows, &camel::server::OutputRow::selected);
     if (inUse != rows.end()) {
-        ToolTipService::SetToolTip(OutputButton(), box_value(outputMenuLabel(*inUse)));
-        Automation::AutomationProperties::SetName(OutputButton(),
-                                                  ui::format(L"Output_ButtonName", {std::wstring(outputMenuLabel(*inUse))}));
+        nameZoneButton(server_->snapshot());
         dspOutputLabel_ = outputMenuLabel(*inUse);
         const hstring forOutput = ui::format(L"Dsp_ForOutput", {std::wstring(dspOutputLabel_)});
         DspOutputText().Text(forOutput);
@@ -884,19 +895,33 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
         zoneRows_.push_back(std::move(row));
     }
     content.Children().Append(rows);
-    // The selected AirPlay group's receivers, which join and leave it; the last one stays.
+    // The selected AirPlay group's receivers, which join and leave it; the last one stays. One another group plays
+    // through is greyed and says which; one of a group that does not play moves from it into this one (MZ-R08).
     if (settings_.backend == Backend::AirPlay) {
         const auto grouped = std::ranges::count_if(outputs, &camel::server::OutputRow::grouped);
         StackPanel receivers;
         for (const auto& output : outputs) {
-            if (!output.enabled || output.backend != Backend::AirPlay || output.selected) continue;
+            if (!output.enabled || output.backend != Backend::AirPlay) continue;
+            const auto holder = std::ranges::find_if(snapshot.zones, [&](const ZoneSnapshot& z) {
+                return z.id != snapshot.selectedZone && z.backend == Backend::AirPlay &&
+                       (z.output == output.id ||
+                        std::ranges::find(z.playback.receivers, output.id, &ReceiverState::id) != z.playback.receivers.end());
+            });
+            const std::string from = holder == snapshot.zones.end() ? std::string() : holder->output;
+            const bool held = holder != snapshot.zones.end() && holder->playback.state == PlaybackState::Playing;
             CheckBox join;
-            join.Content(box_value(outputMenuText(output)));
+            join.Content(box_value(
+                held ? ui::format(L"Zone_ReceiverInUse", {std::wstring(outputMenuText(output)), ui::utf8(holder->name).c_str()})
+                     : outputMenuText(output)));
             join.IsChecked(output.grouped);
-            join.IsEnabled(output.connected && (!output.grouped || grouped >= 2));
-            join.Click([this, output](auto&&, auto&&) {
-                const auto change = [this, output] {
+            join.IsEnabled(output.connected && !held && (!output.grouped || grouped >= 2));
+            join.Click([this, output, from](auto&&, auto&&) {
+                const auto change = [this, output, from] {
                     changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+                        if (!output.grouped && from == output.id)
+                            camel::server::passAirPlayGroup(s, output.id);
+                        else if (!output.grouped && !from.empty())
+                            camel::server::leaveAirPlayGroup(s, from, output.id);
                         camel::server::setInAirPlayGroup(s, output.id, !output.grouped, devices);
                     });
                     populateSettings();
@@ -965,7 +990,9 @@ void MainWindow::showZoneRows(const Snapshot& snapshot) {
         anyPlaying = anyPlaying || p.state == PlaybackState::Playing;
         const auto entry = std::ranges::find(zone.queue.entries, zone.queueEntryId, &QueueEntry::id);
         const bool hasEntry = entry != zone.queue.entries.end();
-        const hstring name = outputMenuLabel(row.output);
+        // An AirPlay group is named by its receivers.
+        const hstring name =
+            zone.playback.receivers.size() > 1 ? ui::utf8(zone.name) + L" (AirPlay)" : outputMenuLabel(row.output);
         hstring track;
         if (hasEntry) {
             track = ui::utf8(entry->title.empty() ? std::filesystem::path(toWide(entry->source.pathUtf8())).stem().string()

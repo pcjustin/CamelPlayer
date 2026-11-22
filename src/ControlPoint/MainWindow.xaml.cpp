@@ -690,6 +690,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     if (snapshot.playback.receivers != receivers_) {
         receivers_ = snapshot.playback.receivers;
         showReceiverVolumes();
+        nameZoneButton(snapshot);
     }
     if (const auto& left = snapshot.playback.receiverLeft; left && left->serial != shownReceiverLeft_) {
         shownReceiverLeft_ = left->serial;

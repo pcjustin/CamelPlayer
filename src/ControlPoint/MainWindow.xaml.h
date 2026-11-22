@@ -385,6 +385,7 @@ private:
     Microsoft::UI::Xaml::Controls::Button pauseAllButton_{nullptr};
     bool showingZones_ = false; // the rows' sliders are set from a snapshot, not moved by the user
     void showZoneRows(const camel::server::Snapshot& snapshot);
+    void nameZoneButton(const camel::server::Snapshot& snapshot);
     bool zonePlays(const camel::server::OutputRow& row) const;
     winrt::fire_and_forget askTurnOffOutput(camel::server::OutputRow row, winrt::hstring label);
     void selectZone(const std::string& id);

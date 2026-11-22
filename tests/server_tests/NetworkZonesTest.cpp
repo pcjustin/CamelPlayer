@@ -17,6 +17,7 @@
 #include "FakeRenderer.h"
 #include "Server/Network/AirPlayFinder.h"
 #include "Server/Playback/LocalServer.h"
+#include "Server/Playback/Outputs.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -175,6 +176,18 @@ protected:
         return server;
     }
 
+    // Applies a change to the settings the Server shows now.
+    static void change(LocalServer& server, const std::function<void(Settings&, const DeviceCatalog&)>& edit) {
+        const auto now = server.snapshot();
+        Settings settings = nativeSettings(now.settings);
+        edit(settings, now.devices);
+        Command apply;
+        apply.kind = CommandKind::ApplySettings;
+        apply.settings = settingsDto(settings);
+        server.submit(apply);
+        server.waitIdle();
+    }
+
     // The loudest sample a receiver was sent.
     double peak(size_t receiver) const {
         int peakValue = 0;
@@ -208,6 +221,8 @@ TEST_F(AirPlayZonesTest, TwoGroupsPlayAtOnceAndAReceiverPlaysInOneOfThemOnly) {
     const auto a = zoneId(Backend::AirPlay, "A10000000001"), bZone = zoneId(Backend::AirPlay, "B20000000002");
     auto s = server->snapshot();
     ASSERT_EQ(s.zones.size(), 2U) << "C is in A's group, so not a zone";
+    EXPECT_EQ(in(s, a).name, "Receiver A + Receiver C");
+    EXPECT_EQ(in(s, bZone).name, "Receiver B");
     // A plays a loud tone, B a quiet one, so each receiver's packets tell which zone they came from.
     server->submit(playIn(a, testutil::generatedFile({"airplay-zone-loud", 44100, 16, 2, 20.0, true, -3.0})));
     server->submit(playIn(bZone, testutil::generatedFile({"airplay-zone-quiet", 44100, 16, 2, 20.0, true, -30.0})));
@@ -231,5 +246,78 @@ TEST_F(AirPlayZonesTest, TwoGroupsPlayAtOnceAndAReceiverPlaysInOneOfThemOnly) {
     const size_t before = rtsp_[0].packetCount();
     EXPECT_TRUE(waitFor([&] { return rtsp_[0].packetCount() > before + 50; }));
     EXPECT_EQ(in(server->snapshot(), a).playback.state, PlaybackState::Playing);
+    server->shutdown();
+}
+
+// C, in B's group while B does not play, moves into A's group in use, leaving B alone.
+TEST_F(AirPlayZonesTest, AReceiverMovesFromAStoppedGroupIntoAnother) {
+    Settings settings;
+    settings.backend = Backend::AirPlay;
+    settings.airplay.deviceId = "A10000000001";
+    SavedOutput b = enabled(Backend::AirPlay, "B20000000002");
+    b.airplayGroup = {"B20000000002", "C30000000003"};
+    settings.outputs = {enabled(Backend::AirPlay, "A10000000001"), b, enabled(Backend::AirPlay, "C30000000003")};
+    settings.volume.mode = VolumeMode::Fixed;
+    for (auto& output : settings.outputs) output.volumeMode = VolumeMode::Fixed;
+    auto server = serverFor(settings);
+    const auto a = zoneId(Backend::AirPlay, "A10000000001"), bZone = zoneId(Backend::AirPlay, "B20000000002");
+    ASSERT_TRUE(waitFor([&] { return in(server->snapshot(), bZone).playback.receivers.size() == 2; }));
+    change(*server, [](Settings& s, const DeviceCatalog& devices) {
+        leaveAirPlayGroup(s, "B20000000002", "C30000000003");
+        setInAirPlayGroup(s, "C30000000003", true, devices);
+    });
+    ASSERT_TRUE(waitFor([&] {
+        const auto now = server->snapshot();
+        return in(now, a).playback.receivers.size() == 2 && in(now, bZone).playback.receivers.size() == 1;
+    }));
+    auto s = server->snapshot();
+    EXPECT_EQ(s.zones.size(), 2U);
+    EXPECT_EQ(in(s, a).name, "Receiver A + Receiver C");
+    EXPECT_EQ(in(s, bZone).name, "Receiver B");
+    server->submit(playIn(a, testutil::generatedFile({"airplay-move-loud", 44100, 16, 2, 20.0, true, -3.0})));
+    server->waitIdle();
+    EXPECT_TRUE(waitFor([&] { return playing(in(server->snapshot(), a)) && rtsp_[2].packetCount() > 50; }));
+    EXPECT_GT(peak(2), 0.5);
+    EXPECT_EQ(rtsp_[1].packetCount(), 0U);
+    server->shutdown();
+}
+
+// A, the receiver the playing group was formed with, taken out of it: the zone, its queue, playback and DSP go on under
+// C, and A becomes an empty zone of its own.
+TEST_F(AirPlayZonesTest, TheFirstReceiverTakenOutOfAPlayingGroupLeavesItsZoneToTheOthers) {
+    Settings settings;
+    settings.backend = Backend::AirPlay;
+    settings.airplay.deviceId = "A10000000001";
+    settings.airplayGroup = {"A10000000001", "C30000000003"};
+    settings.outputs = {enabled(Backend::AirPlay, "A10000000001"), enabled(Backend::AirPlay, "C30000000003")};
+    settings.volume.mode = VolumeMode::Fixed;
+    for (auto& output : settings.outputs) output.volumeMode = VolumeMode::Fixed;
+    settings.eq.enabled = true;
+    settings.eq.bands[2].gainDb = -6.0;
+    auto server = serverFor(settings);
+    const auto a = zoneId(Backend::AirPlay, "A10000000001"), c = zoneId(Backend::AirPlay, "C30000000003");
+    server->submit(playIn(a, testutil::generatedFile({"airplay-group-owner", 44100, 16, 2, 20.0, true, -3.0})));
+    server->waitIdle();
+    ASSERT_TRUE(waitFor([&] { return playing(in(server->snapshot(), a)) && rtsp_[2].packetCount() > 50; }));
+    const auto before = in(server->snapshot(), a);
+    change(*server, [](Settings& s, const DeviceCatalog& devices) { setInAirPlayGroup(s, "A10000000001", false, devices); });
+    ASSERT_TRUE(waitFor([&] {
+        const auto now = server->snapshot();
+        return now.selectedZone == c && std::ranges::any_of(now.zones, [&](const ZoneSnapshot& z) { return z.id == a; }) &&
+               playing(in(now, c));
+    }));
+    const auto s = server->snapshot();
+    EXPECT_EQ(in(s, c).queue.entries, before.queue.entries);
+    EXPECT_EQ(in(s, c).queueEntryId, before.queueEntryId);
+    EXPECT_EQ(in(s, c).name, "Receiver C");
+    EXPECT_TRUE(in(s, a).queue.entries.empty());
+    EXPECT_EQ(in(s, a).playback.state, PlaybackState::Stopped);
+    EXPECT_TRUE(s.settings.eq.enabled) << "the zone keeps its DSP";
+    ASSERT_TRUE(in(s, c).playback.plan);
+    EXPECT_NE(std::ranges::find(in(s, c).playback.plan->dsp, audio::DspNode::Eq), in(s, c).playback.plan->dsp.end());
+    // The receiver left gets no more of the group's stream; C does.
+    const size_t aPackets = rtsp_[0].packetCount(), cPackets = rtsp_[2].packetCount();
+    EXPECT_TRUE(waitFor([&] { return rtsp_[2].packetCount() > cPackets + 50; }));
+    EXPECT_LT(rtsp_[0].packetCount(), aPackets + 10);
     server->shutdown();
 }

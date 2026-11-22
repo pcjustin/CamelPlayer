@@ -763,6 +763,7 @@
   <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
   <data name="Output_Unsupported" xml:space="preserve"><value>{0}（不支援）</value></data>
   <data name="Output_InUseUnsupported" xml:space="preserve"><value>使用中；{0}</value></data>
+  <data name="Zone_ReceiverInUse" xml:space="preserve"><value>{0}，{1} 正在使用</value></data>
   <data name="Zone_PickerName" xml:space="preserve"><value>區域</value></data>
   <data name="Zone_GroupHeading" xml:space="preserve"><value>這個群組的接收器</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>全部暫停</value></data>
