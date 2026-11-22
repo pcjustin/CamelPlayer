@@ -259,6 +259,7 @@ struct HotkeySettings {
     Hotkey playPause{1, 0x24};
     Hotkey previous{1, 0x21};
     Hotkey next{1, 0x22};
+    Hotkey pauseAll; // every zone (docs/Plan.md §5.12); none by default
     bool operator==(const HotkeySettings&) const = default;
 };
 

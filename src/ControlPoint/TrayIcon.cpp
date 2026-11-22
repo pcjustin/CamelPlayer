@@ -16,7 +16,7 @@ namespace {
 
 constexpr UINT kIconId = 1;
 constexpr UINT kCallbackMessage = WM_APP + 1;
-constexpr UINT kOpenCommand = 1, kExitCommand = 2;
+constexpr UINT kOpenCommand = 1, kExitCommand = 2, kPlayPauseCommand = 3, kPauseAllCommand = 4;
 
 // Windows draws a process's popup menus light unless the process asks for dark ones, which uxtheme exports only by
 // ordinal: SetPreferredAppMode (135) and FlushMenuThemes (136), since Windows 10 1903.
@@ -35,8 +35,7 @@ void drawMenusDark(bool dark) {
 
 } // namespace
 
-TrayIcon::TrayIcon(Handlers handlers, std::wstring openText, std::wstring exitText)
-    : handlers_(std::move(handlers)), openText_(std::move(openText)), exitText_(std::move(exitText)) {
+TrayIcon::TrayIcon(Handlers handlers, Texts texts) : handlers_(std::move(handlers)), texts_(std::move(texts)) {
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSEXW windowClass{sizeof windowClass};
     windowClass.lpfnWndProc = windowProc;
@@ -89,9 +88,14 @@ void TrayIcon::notify(const std::wstring& title, const std::wstring& text) {
 
 void TrayIcon::showMenu() {
     HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, kOpenCommand, openText_.c_str());
+    AppendMenuW(menu, MF_STRING, kOpenCommand, texts_.open.c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kExitCommand, exitText_.c_str());
+    const bool playing = handlers_.playing && handlers_.playing();
+    AppendMenuW(menu, MF_STRING, kPlayPauseCommand, (playing ? texts_.pause : texts_.play).c_str());
+    AppendMenuW(menu, MF_STRING | (handlers_.anyPlaying && handlers_.anyPlaying() ? 0 : MF_GRAYED), kPauseAllCommand,
+                texts_.pauseAll.c_str());
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kExitCommand, texts_.exit.c_str());
     SetMenuDefaultItem(menu, kOpenCommand, FALSE);
     drawMenusDark(handlers_.dark && handlers_.dark());
     POINT point{};
@@ -101,6 +105,8 @@ void TrayIcon::showMenu() {
         UINT(TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, point.x, point.y, window_, nullptr));
     DestroyMenu(menu);
     if (command == kOpenCommand && handlers_.open) handlers_.open();
+    if (command == kPlayPauseCommand && handlers_.playPause) handlers_.playPause();
+    if (command == kPauseAllCommand && handlers_.pauseAll) handlers_.pauseAll();
     if (command == kExitCommand && handlers_.exit) handlers_.exit();
 }
 

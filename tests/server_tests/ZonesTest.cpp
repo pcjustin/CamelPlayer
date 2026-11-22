@@ -6,6 +6,10 @@
 // the others as they were.
 #include <gtest/gtest.h>
 
+#include <windows.h>
+#include <powerbase.h>
+#pragma comment(lib, "powrprof.lib")
+
 #include <algorithm>
 #include <atomic>
 #include <fstream>
@@ -1248,4 +1252,31 @@ TEST_F(ZonesTest, ATransferOntoADeviceAnotherZoneHoldsIsRefused) {
     s = send(transfer(wDave, kDave));
     EXPECT_FALSE(s.commandError);
     EXPECT_TRUE(waitFor([&](const Snapshot& now) { return playing(in(now, kDave)); }));
+}
+
+namespace {
+
+// Whether some program keeps Windows from sleeping now.
+bool systemKeptAwake() {
+    EXECUTION_STATE state = 0;
+    CallNtPowerInformation(SystemExecutionState, nullptr, 0, &state, sizeof(state));
+    return (state & ES_SYSTEM_REQUIRED) != 0;
+}
+
+} // namespace
+
+// While any zone plays Windows does not sleep; paused and stopped zones let it (MAC-R27).
+TEST_F(ZonesTest, WindowsIsKeptFromSleepingWhileAnyZonePlays) {
+    const bool before = systemKeptAwake(); // another program may keep it awake already
+    start(2);
+    send(play(1, {track(1, 8.0)}));
+    send(play(2, {track(2, 8.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1)) && playing(of(s, 2)); }));
+    EXPECT_TRUE(waitFor([](const Snapshot&) { return systemKeptAwake(); }));
+    send(command(CommandKind::Pause, 1));
+    EXPECT_TRUE(systemKeptAwake()) << "zone 2 still plays";
+    Command all;
+    all.kind = CommandKind::PauseAll;
+    send(all);
+    if (!before) EXPECT_TRUE(waitFor([](const Snapshot&) { return !systemKeptAwake(); }));
 }

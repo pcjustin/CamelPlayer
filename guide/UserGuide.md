@@ -14,7 +14,7 @@ The first start opens a short guide: choose a light or dark look (or the Windows
 
 Settings › Interface › **Theme** switches between light, dark, black and the Windows setting at any time. Black is the dark theme with every surface pure black, for OLED screens; the tray icon's menu is Windows' own dark menu.
 
-Closing the window keeps CamelPlayer in the notification area so media keys and hotkeys keep working; use **Exit** in its tray menu to quit, or change this in Settings › Interface. **Start with Windows**, beside it, starts CamelPlayer when you sign in to Windows, in the notification area without a window, with the queue and position restored and paused; click the tray icon to open it. CamelPlayer points the entry at its own folder at every start, so a moved folder keeps working. Turn the switch off before deleting the folder: Windows otherwise keeps an entry for a program that is gone. If Windows' startup settings (Settings › Apps › Startup, or Task Manager) have turned CamelPlayer off, the switch shows off and says so, and only turning it on there starts it again. If a policy or a protection program keeps Windows from changing the entry, a note beside the switch says so.
+Closing the window keeps CamelPlayer in the notification area so media keys and hotkeys keep working; use **Exit** in its tray menu to quit, or change this in Settings › Interface. The tray menu also plays or pauses the zone selected and has **Pause all**. While zones play, Exit names them and asks first; with none playing it quits at once. While any zone plays, Windows does not go to sleep, though the display still may. **Start with Windows**, beside it, starts CamelPlayer when you sign in to Windows, in the notification area without a window, with the queue and position restored and paused; click the tray icon to open it. CamelPlayer points the entry at its own folder at every start, so a moved folder keeps working. Turn the switch off before deleting the folder: Windows otherwise keeps an entry for a program that is gone. If Windows' startup settings (Settings › Apps › Startup, or Task Manager) have turned CamelPlayer off, the switch shows off and says so, and only turning it on there starts it again. If a policy or a protection program keeps Windows from changing the entry, a note beside the switch says so.
 
 ## Getting around
 
@@ -45,7 +45,7 @@ Right-click a selection for **Create playlist** or **Add to playlist**. A playli
 | Ctrl+F | Search the library |
 | Delete | Remove the selected queue or playlist entries |
 
-The system-wide hotkeys (Alt+Home to play or pause, Alt+Page Up and Alt+Page Down for the previous and next track) work in every program and can be changed in Settings › Hotkeys.
+The system-wide hotkeys (Alt+Home to play or pause, Alt+Page Up and Alt+Page Down for the previous and next track) work in every program and can be changed in Settings › Hotkeys, where **Pause all zones** can be given a combination too (none by default). Media keys, the lock screen's controls, the hotkeys and Discord follow the zone selected.
 
 ## Updates
 

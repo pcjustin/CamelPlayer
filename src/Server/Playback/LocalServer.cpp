@@ -2008,6 +2008,19 @@ private:
         return reads;
     }
 
+    // While any zone plays, to any output and whoever started it, Windows does not sleep; the display still may
+    // (MAC-R27). The state is this thread's, which lives as long as the Server.
+    void keepAwakeWhilePlaying() {
+        const bool playing = std::ranges::any_of(zones_, [](const auto& zone) {
+            const auto playback = zone->engine->snapshot();
+            return playback.state == audio::PlayState::Playing || playback.bufferingSeconds;
+        });
+        if (playing == keptAwake_) return;
+        keptAwake_ = playing;
+        SetThreadExecutionState(playing ? ES_CONTINUOUS | ES_SYSTEM_REQUIRED : ES_CONTINUOUS);
+        log::info(playing ? "power: Windows kept from sleeping while zones play" : "power: Windows may sleep again");
+    }
+
     bool anyZonePlaying() const {
         std::shared_lock zones(zonesMutex_);
         return std::ranges::any_of(zones_,
@@ -3081,6 +3094,7 @@ private:
             }
             if (settingsDue_ && std::chrono::steady_clock::now() >= *settingsDue_) persist();
             for (auto& zone : zones_) saveQueueSession(*zone, false);
+            keepAwakeWhilePlaying();
             publish(pending.has_value());
             if (pending || done) {
                 {
@@ -3301,6 +3315,7 @@ private:
     static constexpr auto kGroupDragSettles = std::chrono::seconds(3);
     std::unique_ptr<AirPlayFinder> airplayFinder_; // from the first device scan
     std::shared_ptr<AirPlayPairings> airplayPairings_;
+    bool keptAwake_ = false; // the worker thread keeps Windows from sleeping
     std::thread worker_;
 };
 

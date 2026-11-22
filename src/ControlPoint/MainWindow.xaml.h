@@ -395,6 +395,9 @@ private:
     winrt::fire_and_forget askTurnOffOutput(camel::server::OutputRow row, winrt::hstring label);
     void selectZone(const std::string& id);
     void selectZoneOf(const camel::server::ZoneSnapshot& zone);
+    std::vector<winrt::hstring> zonesPlaying() const;
+    winrt::fire_and_forget requestExit();
+    bool exitAsking_ = false; // Exit's question is open
     void changeZoneVolume(const std::string& id, double value);
     winrt::hstring zoneName(const camel::server::Snapshot& snapshot, const std::string& id) const;
     struct OutputEdit {

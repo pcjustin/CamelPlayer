@@ -803,7 +803,8 @@ std::string toJson(const Settings& s) {
     j["skippedVersion"] = s.skippedVersion;
     j["hotkeys"] = {{"playPause", {s.hotkeys.playPause.modifiers, s.hotkeys.playPause.key}},
                     {"previous", {s.hotkeys.previous.modifiers, s.hotkeys.previous.key}},
-                    {"next", {s.hotkeys.next.modifiers, s.hotkeys.next.key}}};
+                    {"next", {s.hotkeys.next.modifiers, s.hotkeys.next.key}},
+                    {"pauseAll", {s.hotkeys.pauseAll.modifiers, s.hotkeys.pauseAll.key}}};
     json presets = json::array();
     for (const auto& p : s.eq.presets) presets.push_back({{"name", p.name}, {"bands", eqBandsJson(p.bands)}});
     j["eq"] = eqJson(s.eq);
@@ -913,6 +914,7 @@ Settings fromJson(const std::string& text) {
         s.hotkeys.playPause = hotkey("playPause", defaults.playPause);
         s.hotkeys.previous = hotkey("previous", defaults.previous);
         s.hotkeys.next = hotkey("next", defaults.next);
+        s.hotkeys.pauseAll = hotkey("pauseAll", defaults.pauseAll);
     }
     if (j.contains("eq") && j["eq"].is_object()) {
         const json& e = j["eq"];

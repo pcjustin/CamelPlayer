@@ -15,8 +15,8 @@ namespace ui {
 
 class GlobalHotkeys {
 public:
-    enum class Action : uint8_t { PlayPause, Previous, Next };
-    static constexpr size_t kActions = 3;
+    enum class Action : uint8_t { PlayPause, Previous, Next, PauseAll };
+    static constexpr size_t kActions = 4;
 
     explicit GlobalHotkeys(std::function<void(Action)> pressed);
     ~GlobalHotkeys();

@@ -20,8 +20,14 @@ public:
     struct Handlers {
         std::function<void()> open, exit;
         std::function<bool()> dark; // whether the menu is drawn dark, as the window is
+        // Play or pause the selected zone, whether it plays now, Pause all and whether any zone plays (docs/Plan.md §5.12).
+        std::function<void()> playPause, pauseAll;
+        std::function<bool()> playing, anyPlaying;
     };
-    TrayIcon(Handlers handlers, std::wstring openText, std::wstring exitText);
+    struct Texts {
+        std::wstring open, exit, play, pause, pauseAll;
+    };
+    TrayIcon(Handlers handlers, Texts texts);
     ~TrayIcon();
     TrayIcon(const TrayIcon&) = delete;
     TrayIcon& operator=(const TrayIcon&) = delete;
@@ -36,7 +42,7 @@ private:
     void showMenu();
 
     Handlers handlers_;
-    std::wstring openText_, exitText_;
+    Texts texts_;
     HWND window_ = nullptr;
     HICON icon_ = nullptr;
     UINT taskbarCreated_ = 0;

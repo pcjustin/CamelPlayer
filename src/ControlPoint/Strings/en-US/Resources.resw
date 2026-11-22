@@ -241,6 +241,10 @@
   <data name="Status_Details.Text" xml:space="preserve"><value>Device details</value></data>
   <data name="Status_BufferValue" xml:space="preserve"><value>{0} frames · {1} ms</value></data>
   <data name="Status_NotConnected" xml:space="preserve"><value>Output device not connected</value></data>
+  <data name="Exit_Title" xml:space="preserve"><value>Exit CamelPlayer?</value></data>
+  <data name="Exit_ZonesPlaying" xml:space="preserve"><value>These zones are playing and stop:
+{0}</value></data>
+  <data name="Exit_Confirm" xml:space="preserve"><value>Exit</value></data>
   <data name="Tray_Open" xml:space="preserve"><value>Open CamelPlayer</value></data>
   <data name="Tray_Exit" xml:space="preserve"><value>Exit</value></data>
   <data name="Tray_NoticeTitle" xml:space="preserve"><value>CamelPlayer is still running</value></data>
@@ -432,6 +436,7 @@ Details: {0}</value></data>
   <data name="Hotkey_PlayPause" xml:space="preserve"><value>Play / pause</value></data>
   <data name="Hotkey_Previous" xml:space="preserve"><value>Previous track</value></data>
   <data name="Hotkey_Next" xml:space="preserve"><value>Next track</value></data>
+  <data name="Hotkey_PauseAll" xml:space="preserve"><value>Pause all zones</value></data>
   <data name="Hotkey_Press" xml:space="preserve"><value>Press the new combination…</value></data>
   <data name="Hotkey_None" xml:space="preserve"><value>None</value></data>
   <data name="Hotkey_Clear" xml:space="preserve"><value>Clear</value></data>

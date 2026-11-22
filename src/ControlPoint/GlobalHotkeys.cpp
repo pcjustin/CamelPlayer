@@ -56,6 +56,8 @@ camel::Hotkey GlobalHotkeys::of(const camel::HotkeySettings& hotkeys, Action act
         return hotkeys.playPause;
     case Action::Previous:
         return hotkeys.previous;
+    case Action::PauseAll:
+        return hotkeys.pauseAll;
     default:
         return hotkeys.next;
     }
@@ -68,6 +70,9 @@ void GlobalHotkeys::set(camel::HotkeySettings& hotkeys, Action action, camel::Ho
         break;
     case Action::Previous:
         hotkeys.previous = hotkey;
+        break;
+    case Action::PauseAll:
+        hotkeys.pauseAll = hotkey;
         break;
     default:
         hotkeys.next = hotkey;

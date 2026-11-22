@@ -241,6 +241,10 @@
   <data name="Status_Details.Text" xml:space="preserve"><value>裝置細節</value></data>
   <data name="Status_BufferValue" xml:space="preserve"><value>{0} 個取樣框 · {1} 毫秒</value></data>
   <data name="Status_NotConnected" xml:space="preserve"><value>輸出裝置未連接</value></data>
+  <data name="Exit_Title" xml:space="preserve"><value>要結束 CamelPlayer 嗎？</value></data>
+  <data name="Exit_ZonesPlaying" xml:space="preserve"><value>這些區域正在播放，結束後會停止：
+{0}</value></data>
+  <data name="Exit_Confirm" xml:space="preserve"><value>結束</value></data>
   <data name="Tray_Open" xml:space="preserve"><value>開啟 CamelPlayer</value></data>
   <data name="Tray_Exit" xml:space="preserve"><value>結束</value></data>
   <data name="Tray_NoticeTitle" xml:space="preserve"><value>CamelPlayer 仍在執行</value></data>
@@ -432,6 +436,7 @@
   <data name="Hotkey_PlayPause" xml:space="preserve"><value>播放／暫停</value></data>
   <data name="Hotkey_Previous" xml:space="preserve"><value>上一首</value></data>
   <data name="Hotkey_Next" xml:space="preserve"><value>下一首</value></data>
+  <data name="Hotkey_PauseAll" xml:space="preserve"><value>暫停所有區域</value></data>
   <data name="Hotkey_Press" xml:space="preserve"><value>請按下新的組合…</value></data>
   <data name="Hotkey_None" xml:space="preserve"><value>無</value></data>
   <data name="Hotkey_Clear" xml:space="preserve"><value>清除</value></data>

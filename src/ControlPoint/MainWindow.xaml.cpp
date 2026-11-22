@@ -433,15 +433,26 @@ void MainWindow::InitializeComponent() {
     };
     const auto exit = [this] {
         DispatcherQueue().TryEnqueue([weak = get_weak()] {
-            if (auto self = weak.get()) {
-                self->exiting_ = true;
-                self->Close();
-            }
+            if (auto self = weak.get()) self->requestExit();
         });
     };
     const auto dark = [this] { return Content().as<FrameworkElement>().ActualTheme() == ElementTheme::Dark; };
-    tray_ = std::make_unique<ui::TrayIcon>(ui::TrayIcon::Handlers{open, exit, dark}, std::wstring(tr(L"Tray_Open")),
-                                           std::wstring(tr(L"Tray_Exit")));
+    const auto playPause = [this] {
+        DispatcherQueue().TryEnqueue([weak = get_weak()] {
+            if (auto self = weak.get()) self->submitKind(CommandKind::TogglePause);
+        });
+    };
+    const auto pauseAll = [this] {
+        DispatcherQueue().TryEnqueue([weak = get_weak()] {
+            if (auto self = weak.get()) self->submitKind(CommandKind::PauseAll);
+        });
+    };
+    const auto playing = [this] { return server_ && server_->snapshot().playback.state == PlaybackState::Playing; };
+    const auto anyPlaying = [this] { return server_ && !zonesPlaying().empty(); };
+    tray_ = std::make_unique<ui::TrayIcon>(ui::TrayIcon::Handlers{open, exit, dark, playPause, pauseAll, playing, anyPlaying},
+                                           ui::TrayIcon::Texts{std::wstring(tr(L"Tray_Open")), std::wstring(tr(L"Tray_Exit")),
+                                                               std::wstring(tr(L"Tip_Play")), std::wstring(tr(L"Tip_Pause")),
+                                                               std::wstring(tr(L"Zone_PauseAll"))});
     // The window carries the app's AUMID too: the media session takes its app from the window it was created for.
     if (winrt::com_ptr<IPropertyStore> properties; SUCCEEDED(SHGetPropertyStoreForWindow(
             Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), IID_PPV_ARGS(properties.put())))) {
@@ -468,6 +479,7 @@ void MainWindow::InitializeComponent() {
             using Action = ui::GlobalHotkeys::Action;
             submitKind(action == Action::PlayPause  ? CommandKind::TogglePause
                        : action == Action::Previous ? CommandKind::Previous
+                       : action == Action::PauseAll ? CommandKind::PauseAll
                                                     : CommandKind::Next);
         });
         applyHotkeys();
@@ -490,9 +502,12 @@ void MainWindow::InitializeComponent() {
     ErrorBar().Closed(
         [this](auto&&, auto&&) { ErrorDot().Visibility(shown_.playback.error ? Visibility::Visible : Visibility::Collapsed); });
     AppWindow().Closing([this](auto&&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& e) {
-        if (exiting_ || settings_.closeAction == CloseAction::Exit) return;
+        if (exiting_) return;
         e.Cancel(true);
-        hideToTray();
+        if (settings_.closeAction == CloseAction::Exit)
+            requestExit();
+        else
+            hideToTray();
     });
 
     Closed([this](auto&&, auto&&) {
@@ -508,12 +523,49 @@ void MainWindow::InitializeComponent() {
         setRefreshing(false); // the pages' timers and the UI timer
         if (replaced_) return;
         server_->setListener({});
-        Command pause; // silences the device first; a stop would also forget the position the next start restores
-        pause.kind = CommandKind::Pause;
+        Command pause; // silences the devices first; a stop would also forget the positions the next start restores
+        pause.kind = CommandKind::PauseAll;
         submitCommand(std::move(pause));
         server_.reset();
     });
     refreshFromServer();
+}
+
+// The zones playing now, by the names the zone picker shows.
+std::vector<hstring> MainWindow::zonesPlaying() const {
+    std::vector<hstring> names;
+    if (!server_) return names;
+    const auto snapshot = server_->snapshot();
+    for (const auto& zone : snapshot.zones)
+        if (zone.playback.state == PlaybackState::Playing) names.push_back(zoneLabel(snapshot, zone));
+    return names;
+}
+
+// Exit names the zones playing and goes once confirmed; with none it goes at once (the owner, 2026-11-22).
+winrt::fire_and_forget MainWindow::requestExit() {
+    auto strong = get_strong();
+    if (exitAsking_) co_return;
+    if (const auto playing = zonesPlaying(); !playing.empty()) {
+        exitAsking_ = true;
+        if (inTray_) showFromTray(); // the question needs the window
+        std::wstring list;
+        for (const auto& name : playing) list += (list.empty() ? L"" : L"\n") + std::wstring(name);
+        ContentDialog dialog;
+        ui::placeDialog(dialog, ContentLayout().XamlRoot());
+        dialog.Title(box_value(tr(L"Exit_Title")));
+        TextBlock explanation;
+        explanation.Text(ui::format(L"Exit_ZonesPlaying", {list}));
+        explanation.TextWrapping(TextWrapping::Wrap);
+        dialog.Content(explanation);
+        dialog.PrimaryButtonText(tr(L"Exit_Confirm"));
+        dialog.CloseButtonText(tr(L"Reset_Cancel"));
+        dialog.DefaultButton(ContentDialogButton::Close);
+        const auto answer = co_await ui::showDialog(dialog);
+        exitAsking_ = false;
+        if (answer != ContentDialogResult::Primary) co_return;
+    }
+    exiting_ = true;
+    Close();
 }
 
 void MainWindow::hideToTray() {
@@ -1395,7 +1447,8 @@ void MainWindow::applyHotkeys() {
 void MainWindow::showHotkeys() {
     using Action = ui::GlobalHotkeys::Action;
     HotkeyRows().Children().Clear();
-    const std::array<const wchar_t*, ui::GlobalHotkeys::kActions> names{L"Hotkey_PlayPause", L"Hotkey_Previous", L"Hotkey_Next"};
+    const std::array<const wchar_t*, ui::GlobalHotkeys::kActions> names{L"Hotkey_PlayPause", L"Hotkey_Previous", L"Hotkey_Next",
+                                                                        L"Hotkey_PauseAll"};
     for (size_t i = 0; i < names.size(); ++i) {
         const auto action = Action(i);
         Grid row;
