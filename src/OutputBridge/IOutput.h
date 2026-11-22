@@ -102,8 +102,9 @@ private:
 };
 
 struct DeviceEntry {
-    std::string id;   // value stored in settings
-    std::string name; // display name (UTF-8)
+    std::string id;        // value stored in settings
+    std::string name;      // display name (UTF-8)
+    std::string container; // Windows' container ID, the physical device it is part of; empty when unknown
 };
 
 std::vector<DeviceEntry> listWasapiDevices(); // active render endpoints

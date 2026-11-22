@@ -1197,6 +1197,7 @@ private:
     // device when the file takes its format.
     void startSession(uint64_t startFrame, bool playNow, bool deviceChange = false, bool keepOutput = false) {
         const PlayState onDeviceFailure = deviceChange ? PlayState::Paused : PlayState::Stopped;
+        if (!std::exchange(choosingAgain_, false)) refusedAtStart_ = 0;
         teardown(keepOutput && playNow && !deviceChange);
         // A session that fails before it plays leaves no device open behind its silence.
         struct ReleaseKept {
@@ -1288,6 +1289,14 @@ private:
                          : snprintf(msg, sizeof msg, "%u Hz / %u-bit / %u ch has no bit-perfect format on this device%s",
                                     src.sampleRate, src.bitsPerSample, src.channels, hint);
             if (length < 0 || size_t(length) >= sizeof msg) strcpy_s(msg, "No bit-perfect format available on this device");
+            // A driver that takes several formats and starts none, as Chord's ASIO driver does while WASAPI or Kernel
+            // Streaming holds its DAC (docs/Task-breakdown.md MZ-R00), is held by something else.
+            if (refusedAtStart_ >= 2) {
+                position_ = startFrame;
+                return fail(Error(ErrorCode::DeviceInUse, "the device took " + std::to_string(refusedAtStart_) +
+                                                              " formats and could start none: another program may be using it"),
+                            PlayState::Paused);
+            }
             position_ = deviceChange ? startFrame : 0;
             return fail(Error(ErrorCode::FormatNotSupported, msg), onDeviceFailure);
         }
@@ -1425,6 +1434,8 @@ private:
                 // only with permission (docs/Plan.md §5.3).
                 if (e.code() == ErrorCode::DriverError && plan_.dsd == DsdPath::None && !output_->supports(fmt_)) {
                     log::warn("engine: %s; choosing another format", e.what());
+                    ++refusedAtStart_;
+                    choosingAgain_ = true;
                     return startSession(startFrame, playNow, deviceChange);
                 }
                 if (plan_.dsd != DsdPath::Dop) throw;
@@ -1772,6 +1783,9 @@ private:
     uint64_t loggedUnderruns_ = 0;
     std::chrono::steady_clock::time_point underrunsLoggedAt_;
     uint64_t loggedLateCallbacks_ = 0;
+    // Formats the device took and then could not start, since the last start the user asked for.
+    size_t refusedAtStart_ = 0;
+    bool choosingAgain_ = false;
     std::chrono::steady_clock::time_point lateCallbacksLoggedAt_;
     std::atomic<bool> active_{false};
     DeviceFormat fmt_;

@@ -29,7 +29,7 @@ namespace {
 struct Device {
     std::vector<uint32_t> rates;
     std::vector<SampleType> types;
-    std::vector<uint32_t> unstartable{}; // accepted, but start() fails
+    std::vector<uint32_t> unstartable; // accepted, but start() fails
     bool takes(const DeviceFormat& f) const {
         return std::find(rates.begin(), rates.end(), f.sampleRate) != rates.end() &&
                std::find(types.begin(), types.end(), f.type) != types.end();
@@ -47,7 +47,7 @@ struct Played {
 };
 
 std::vector<int32_t> tone(uint32_t rate, uint32_t channels, uint32_t bits, double seconds, double level = 0.5) {
-    const size_t frames = size_t(seconds * rate);
+    const auto frames = size_t(seconds * rate);
     std::vector<int32_t> out(frames * channels);
     const double full = std::ldexp(1.0, int(bits) - 1);
     for (size_t i = 0; i < frames; i++)
@@ -229,4 +229,23 @@ TEST(Conversion, ResampledTracksAreGaplessAndPositionsCountSourceFrames) {
     EXPECT_EQ(sourceTotal, 22050u); // the source's length, not the device's
     EXPECT_EQ(played.snapshot.transitions, 1u);
     EXPECT_EQ(played.samples.size() / 2, 2 * 24000u); // each track resampled to exactly its length at 48 kHz
+}
+
+// Chord's ASIO driver takes every rate while WASAPI or Kernel Streaming holds its DAC and starts none (MZ-R00): that reads
+// as a device in use, which waits paused, not as a format the device lacks.
+TEST(Conversion, ADeviceThatTakesSeveralFormatsAndStartsNoneIsInUse) {
+    const auto file = wav("in-use", tone(96000, 2, 24, 0.5), 96000, 24, 2);
+    const Device device{{44100, 48000, 96000, 192000}, {SampleType::Int32}, {44100, 48000, 96000, 192000}};
+    Settings settings;
+    settings.convertWhenUnsupported = true;
+    CaptureOptions options;
+    options.file = testutil::tempDir() / "conversion-in-use.raw";
+    options.accepts = [&device](const DeviceFormat& f) { return device.takes(f); };
+    options.starts = [&device](const DeviceFormat& f) { return device.starts(f); };
+    PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
+    engine.openAndPlay(file);
+    ASSERT_TRUE(engine.waitForState(PlayState::Paused, std::chrono::seconds(10)));
+    const auto s = engine.snapshot();
+    EXPECT_EQ(s.error, ErrorCode::DeviceInUse);
+    EXPECT_NE(s.errorDetail.find("could start none"), std::string::npos) << s.errorDetail;
 }

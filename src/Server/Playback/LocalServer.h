@@ -12,6 +12,12 @@
 
 namespace camel::server {
 
+// The local devices a device scan finds.
+struct LocalDevices {
+    std::vector<audio::DeviceEntry> wasapi, asio, ks;
+    std::string defaultWasapi;
+};
+
 class LocalServer final : public IServer {
 public:
     // An existing settings directory also hosts library.db; an omitted or missing directory disables the library.
@@ -98,6 +104,8 @@ public:
     void setFinderOptions(const FinderOptions& options);
     void setAirPlayFinderOptions(const AirPlayFinderOptions& options);
     void setHQPlayerFinderOptions(const hqplayer::FinderOptions& options);
+    // Tests: the local devices device scans find, in place of Windows'.
+    void setLocalDevices(std::function<LocalDevices()> list);
     // How the settings passed in were obtained (openSettings).
     void setSettingsRecovery(SettingsRecovery recovery);
 

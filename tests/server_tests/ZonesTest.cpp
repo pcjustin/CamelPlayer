@@ -104,12 +104,21 @@ protected:
 
     void open(const Settings& settings) {
         server = std::make_unique<LocalServer>(settings, settingsFile, [this](const Settings& s) {
+            const std::string name = s.backend == Backend::Ks     ? s.ks.deviceId
+                                     : s.backend == Backend::Asio ? s.asio.driverClsid
+                                     : s.wasapi.deviceId.empty()  ? std::string("default")
+                                                                  : s.wasapi.deviceId;
             CaptureOptions options;
-            options.file = capture(s.wasapi.deviceId);
+            options.file = capture(name);
             options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Int32; };
             options.realtime = true;
-            return std::make_unique<ZoneOutput>(*this, s.wasapi.deviceId, createCaptureOutput(options));
+            return std::make_unique<ZoneOutput>(*this, name, createCaptureOutput(options));
         });
+        if (localDevices)
+            server->setLocalDevices([this] {
+                std::scoped_lock lock(mutex);
+                return *localDevices;
+            });
         server->waitIdle();
     }
 
@@ -125,6 +134,7 @@ protected:
     }
 
     std::filesystem::path settingsFile;
+    std::optional<LocalDevices> localDevices; // under mutex; what device scans find, set before start()
 
     void TearDown() override {
         server.reset();
@@ -794,4 +804,172 @@ TEST_F(ZonesTest, PlaysInTwoZonesAtOnceAreEachCountedOnceUnderTheirZonesNames) {
     EXPECT_EQ(db.scalar("SELECT count(*) FROM play_events WHERE zone='Zone 1'"), 1);
     EXPECT_EQ(db.scalar("SELECT count(*) FROM play_events WHERE zone='Zone 2'"), 1);
     EXPECT_EQ(db.scalar("SELECT sum(play_count) FROM stats"), 2);
+}
+
+namespace {
+
+SavedOutput enabled(Backend backend, const std::string& id, const std::string& name) {
+    SavedOutput output;
+    output.backend = backend;
+    output.id = output.wasapi.deviceId = output.asio.driverClsid = output.ks.deviceId = id;
+    output.name = name;
+    output.enabled = true;
+    output.zone.autoplay = false;
+    return output;
+}
+
+// The DAVE through WASAPI, Kernel Streaming and its ASIO driver, the Cirrus, and FlexASIO, as this computer lists them.
+LocalDevices daveAndCirrus() {
+    LocalDevices d;
+    d.wasapi = {{"w-dave", "Digital Output (Chord Async USB 44.1kHz-768kHz)", "{C-DAVE}"},
+                {"w-cirrus", "Speakers (Cirrus Logic CS4208 (AB 126))", "{C-CIRRUS}"}};
+    d.ks = {{"k-dave", "Chord Async USB 44.1kHz-768kHz / Chord Electronics Ltd. Streaming [Standard]", "{C-DAVE}"}};
+    d.asio = {{"a-dave", "ASIO Chord  1.05", ""}, {"a-flex", "FlexASIO", ""}};
+    d.defaultWasapi = "w-cirrus";
+    return d;
+}
+
+void outputsOf(Settings& s, std::vector<SavedOutput> outputs, Backend inUse, const std::string& id) {
+    s.outputs = std::move(outputs);
+    s.backend = inUse;
+    s.wasapi.deviceId = inUse == Backend::Wasapi ? id : "";
+    s.asio.driverClsid = inUse == Backend::Asio ? id : "";
+    s.ks.deviceId = inUse == Backend::Ks ? id : "";
+}
+
+Command playIn(const std::string& zoneOf, const std::filesystem::path& file) {
+    Command c;
+    c.kind = CommandKind::QueueReplace;
+    c.zone = zoneOf;
+    c.sources.emplace_back(toUtf8(file.wstring()));
+    return c;
+}
+
+Command refresh() {
+    Command c;
+    c.kind = CommandKind::RefreshDevices;
+    return c;
+}
+
+const ZoneSnapshot& in(const Snapshot& s, const std::string& id) {
+    const auto found = std::ranges::find(s.zones, id, &ZoneSnapshot::id);
+    if (found == s.zones.end()) throw std::runtime_error("no zone " + id);
+    return *found;
+}
+
+} // namespace
+
+TEST_F(ZonesTest, AHeldDeviceIsInUseForEveryOtherZoneOfItAndPlayThereIsRefused) {
+    localDevices = daveAndCirrus();
+    start(0, [](Settings& s) {
+        outputsOf(s,
+                  {enabled(Backend::Wasapi, "w-dave", "DAVE"), enabled(Backend::Ks, "k-dave", "DAVE KS"),
+                   enabled(Backend::Asio, "a-dave", "DAVE ASIO"), enabled(Backend::Wasapi, "w-cirrus", "Cirrus")},
+                  Backend::Wasapi, "w-cirrus");
+    });
+    send(refresh());
+    const auto wDave = zoneId(Backend::Wasapi, "w-dave"), kDave = zoneId(Backend::Ks, "k-dave"),
+               aDave = zoneId(Backend::Asio, "a-dave"), cirrus = zoneId(Backend::Wasapi, "w-cirrus");
+    send(playIn(wDave, track(1, 6.0)));
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return playing(in(s, wDave)); }));
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return in(s, kDave).inUseBy == wDave; }));
+    auto s = server->snapshot();
+    EXPECT_EQ(in(s, aDave).inUseBy, wDave); // the driver that names Chord is the DAVE
+    EXPECT_TRUE(in(s, cirrus).inUseBy.empty());
+    EXPECT_TRUE(in(s, wDave).inUseBy.empty());
+    for (const auto& other : {kDave, aDave}) {
+        s = send(playIn(other, track(2, 3.0)));
+        ASSERT_TRUE(s.commandError) << other;
+        EXPECT_EQ(s.commandError->code, ErrorCode::DeviceInUse) << other;
+        EXPECT_EQ(s.commandError->detail, "in use by " + in(s, wDave).name);
+        EXPECT_NE(in(s, other).playback.state, PlaybackState::Playing) << other;
+    }
+    {
+        std::scoped_lock lock(mutex);
+        EXPECT_EQ(opens["k-dave"], 0);
+        EXPECT_EQ(opens["a-dave"], 0); // the driver was never asked
+    }
+    send(playIn(cirrus, track(3, 3.0)));
+    EXPECT_TRUE(waitFor([&](const Snapshot& now) { return playing(in(now, cirrus)) && playing(in(now, wDave)); }));
+}
+
+TEST_F(ZonesTest, TwoDacsOfOneNameAreTwoDevicesAndTwoAsioDriversPlayAtOnce) {
+    localDevices = daveAndCirrus();
+    localDevices->wasapi.push_back({"w-dac1", "USB DAC", "{C-1}"});
+    localDevices->wasapi.push_back({"w-dac2", "USB DAC", "{C-2}"});
+    start(0, [](Settings& s) {
+        outputsOf(s,
+                  {enabled(Backend::Wasapi, "w-dac1", "USB DAC"), enabled(Backend::Wasapi, "w-dac2", "USB DAC 2"),
+                   enabled(Backend::Asio, "a-dave", "DAVE ASIO"), enabled(Backend::Asio, "a-flex", "FlexASIO")},
+                  Backend::Wasapi, "w-dac1");
+    });
+    send(refresh());
+    const std::vector zonesOf{zoneId(Backend::Wasapi, "w-dac1"), zoneId(Backend::Wasapi, "w-dac2"),
+                              zoneId(Backend::Asio, "a-dave"), zoneId(Backend::Asio, "a-flex")};
+    for (size_t i = 0; i < zonesOf.size(); ++i) {
+        const auto s = send(playIn(zonesOf[i], track(i + 1, 4.0)));
+        EXPECT_FALSE(s.commandError) << zonesOf[i];
+    }
+    EXPECT_TRUE(waitFor([](const Snapshot& s) {
+        return std::ranges::all_of(s.zones, [](const ZoneSnapshot& z) { return playing(z, 0.3) && z.inUseBy.empty(); });
+    }));
+}
+
+TEST_F(ZonesTest, ADevicePausedLongEnoughToBeReleasedGoesToTheNextZone) {
+    localDevices = daveAndCirrus();
+    start(0, [](Settings& s) {
+        outputsOf(s, {enabled(Backend::Wasapi, "w-dave", "DAVE"), enabled(Backend::Ks, "k-dave", "DAVE KS")}, Backend::Wasapi,
+                  "w-dave");
+    });
+    send(refresh());
+    const auto wDave = zoneId(Backend::Wasapi, "w-dave"), kDave = zoneId(Backend::Ks, "k-dave");
+    send(playIn(wDave, track(1, 8.0)));
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return playing(in(s, wDave)); }));
+    Command pause;
+    pause.kind = CommandKind::Pause;
+    pause.zone = wDave;
+    send(std::move(pause));
+    EXPECT_EQ(in(server->snapshot(), kDave).inUseBy, wDave); // a paused zone holds its device for a while
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return in(s, kDave).inUseBy.empty(); }));
+    const auto s = send(playIn(kDave, track(2, 3.0)));
+    EXPECT_FALSE(s.commandError);
+    EXPECT_TRUE(waitFor([&](const Snapshot& now) { return playing(in(now, kDave)); }));
+    EXPECT_EQ(in(server->snapshot(), wDave).inUseBy, kDave);
+}
+
+TEST_F(ZonesTest, TheWindowsDefaultMovingOntoAHeldDevicePausesTheZoneFollowingIt) {
+    localDevices = daveAndCirrus();
+    start(0, [](Settings& s) {
+        outputsOf(s, {enabled(Backend::Wasapi, "", "Default"), enabled(Backend::Wasapi, "w-dave", "DAVE")}, Backend::Wasapi,
+                  "w-dave");
+    });
+    send(refresh());
+    const auto followed = zoneId(Backend::Wasapi, ""), wDave = zoneId(Backend::Wasapi, "w-dave");
+    send(playIn(wDave, track(1, 8.0)));
+    send(playIn(followed, track(2, 8.0)));
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return playing(in(s, wDave)) && playing(in(s, followed)); }));
+    {
+        std::scoped_lock lock(mutex);
+        localDevices->defaultWasapi = "w-dave";
+    }
+    send(refresh());
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return in(s, followed).playback.state == PlaybackState::Paused; }));
+    EXPECT_EQ(in(server->snapshot(), followed).inUseBy, wDave);
+    EXPECT_EQ(in(server->snapshot(), wDave).playback.state, PlaybackState::Playing);
+}
+
+TEST_F(ZonesTest, OtherZonesPlayOnWhileTheOutputInUseChanges) {
+    start(3);
+    send(play(1, {track(1, 6.0)}));
+    send(play(3, {track(3, 6.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1)) && playing(of(s, 3)); }));
+    Settings s = nativeSettings(server->snapshot().settings);
+    selectOutput(s, Backend::Wasapi, device(2), server->snapshot().devices);
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(s);
+    send(std::move(apply));
+    EXPECT_TRUE(waitFor([](const Snapshot& now) { return playing(of(now, 2)) && playing(of(now, 3), 0.8); }));
+    EXPECT_EQ(opened(3), 1);
+    EXPECT_EQ(closed(3), 0);
 }

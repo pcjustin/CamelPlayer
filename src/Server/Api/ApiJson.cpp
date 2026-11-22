@@ -388,8 +388,12 @@ PlaybackSnapshot playbackFrom(const json& j) {
 json toJson(const std::vector<DeviceInfo>& devices) {
     json out = json::array();
     for (const auto& d : devices)
-        out.push_back(
-            {{"id", d.id}, {"name", d.name}, {"unsupported", d.unsupported}, {"speakers", d.speakers}, {"model", d.model}});
+        out.push_back({{"id", d.id},
+                       {"name", d.name},
+                       {"unsupported", d.unsupported},
+                       {"speakers", d.speakers},
+                       {"model", d.model},
+                       {"container", d.container}});
     return out;
 }
 
@@ -402,7 +406,7 @@ std::vector<DeviceInfo> devicesFrom(const json& j, const char* key) {
             speakers.push_back(speaker.get<std::string>());
         }
         out.push_back({value<std::string>(d, "id"), value<std::string>(d, "name"), value<std::string>(d, "unsupported"),
-                       std::move(speakers), value<std::string>(d, "model")});
+                       std::move(speakers), value<std::string>(d, "model"), value<std::string>(d, "container")});
     }
     return out;
 }
@@ -558,7 +562,8 @@ json toJson(const ZoneSnapshot& z) {
             {"queueEntryId", z.queueEntryId},
             {"track", optionalJson(z.track)},
             {"queue", toJson(z.queue)},
-            {"playback", toJson(z.playback)}};
+            {"playback", toJson(z.playback)},
+            {"inUseBy", z.inUseBy}};
 }
 
 ZoneSnapshot zoneFrom(const json& j) {
@@ -571,6 +576,7 @@ ZoneSnapshot zoneFrom(const json& j) {
     z.track = optional<TrackSource>(j, "track", trackSourceFrom);
     z.queue = queueFrom(field(j, "queue"));
     z.playback = playbackFrom(field(j, "playback"));
+    z.inUseBy = value<std::string>(j, "inUseBy");
     return z;
 }
 

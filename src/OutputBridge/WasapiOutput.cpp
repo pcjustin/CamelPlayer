@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "OutputBridge/WaveFormat.h"
+#include "OutputBridge/GuidText.h"
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "OutputBridge/Mmcss.h"
@@ -41,6 +42,14 @@ wil::com_ptr<IMMDevice> findDevice(const std::string& id) {
     if (SUCCEEDED(dev->GetState(&state)) && state != DEVICE_STATE_ACTIVE)
         throw Error(ErrorCode::DeviceNotFound, "WASAPI device not connected");
     return dev;
+}
+
+std::string containerOf(IMMDevice* device) {
+    wil::com_ptr<IPropertyStore> ps;
+    if (FAILED(device->OpenPropertyStore(STGM_READ, &ps))) return {};
+    wil::unique_prop_variant v;
+    if (FAILED(ps->GetValue(PKEY_Device_ContainerId, &v)) || v.vt != VT_CLSID || !v.puuid) return {};
+    return guidText(*v.puuid);
 }
 
 std::string friendlyName(IMMDevice* device) {
@@ -393,7 +402,7 @@ std::vector<DeviceEntry> listWasapiDevices() {
             if (FAILED(col->Item(i, &d))) continue;
             wil::unique_cotaskmem_string id;
             d->GetId(&id);
-            out.push_back({toUtf8(id.get()), friendlyName(d.get())});
+            out.push_back({toUtf8(id.get()), friendlyName(d.get()), containerOf(d.get())});
         }
     } catch (const wil::ResultException& e) {
         log::error("wasapi: enumerate failed 0x%08lX", (unsigned long)e.GetErrorCode());

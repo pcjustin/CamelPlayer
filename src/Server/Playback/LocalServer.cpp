@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <deque>
@@ -202,7 +203,7 @@ PlaybackSnapshot playback(const audio::EngineSnapshot& s) {
 std::vector<DeviceInfo> devices(const std::vector<audio::DeviceEntry>& entries) {
     std::vector<DeviceInfo> result;
     result.reserve(entries.size());
-    for (const auto& e : entries) result.push_back({e.id, e.name});
+    for (const auto& e : entries) result.push_back({e.id, e.name, {}, {}, {}, e.container});
     return result;
 }
 
@@ -602,6 +603,7 @@ public:
     void setFinderOptions(const FinderOptions& options) { finderOptions_ = options; }
     void setAirPlayFinderOptions(const AirPlayFinderOptions& options) { airplayFinderOptions_ = options; }
     void setHQPlayerFinderOptions(const hqplayer::FinderOptions& options) { hqplayerFinderOptions_ = options; }
+    void setLocalDevices(std::function<LocalDevices()> list) { localDevices_ = std::move(list); }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
         coversInFlight_.fetch_add(1);
@@ -685,6 +687,103 @@ private:
         for (auto& zone : zones_)
             if (zone->id == c.zone) return *zone;
         throw std::invalid_argument("no such zone: " + c.zone);
+    }
+
+    // The hardware a zone plays to (docs/Plan.md §5.12): a local device by Windows' container ID, which one DAC has
+    // through WASAPI and Kernel Streaming alike; an ASIO driver by the device its name names, as no container is known
+    // for it; "Windows default device" by the device it follows. Any other output is a device of its own.
+    std::string deviceKey(const Zone& z) const {
+        const auto& d = state_.devices;
+        const auto containerOf = [](const std::vector<DeviceInfo>& list, const std::string& id) {
+            const auto found = std::ranges::find(list, id, &DeviceInfo::id);
+            return found == list.end() ? std::string() : found->container;
+        };
+        std::string container;
+        if (z.backend == Backend::Wasapi)
+            container = containerOf(d.wasapi, z.output.empty() ? d.defaultWasapi : z.output);
+        else if (z.backend == Backend::Ks)
+            container = containerOf(d.ks, z.output);
+        else if (z.backend == Backend::Asio)
+            container = asioContainer(z.output);
+        return container.empty() ? z.id : "container:" + container;
+    }
+
+    // The container of the one local device whose name holds a word of the ASIO driver's own, such as Chord in
+    // "ASIO Chord 1.05"; none when no device or several do.
+    std::string asioContainer(const std::string& driver) const {
+        const auto& d = state_.devices;
+        const auto named = std::ranges::find(d.asio, driver, &DeviceInfo::id);
+        if (named == d.asio.end()) return {};
+        static const std::unordered_set<std::string> kGeneric{"asio", "driver", "usb",   "audio",  "device",    "output", "pro",
+                                                              "hd",   "high",   "speed", "series", "interface", "sound"};
+        const auto lower = [](std::string text) {
+            std::ranges::transform(text, text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            return text;
+        };
+        std::vector<std::string> words;
+        std::string word;
+        for (const char c : named->name + " ") {
+            if (std::isalpha(static_cast<unsigned char>(c))) {
+                word += c;
+                continue;
+            }
+            if (word.size() >= 3 && !kGeneric.contains(lower(word))) words.push_back(lower(word));
+            word.clear();
+        }
+        std::string found;
+        for (const auto* list : {&d.wasapi, &d.ks})
+            for (const auto& device : *list) {
+                const auto name = lower(device.name);
+                if (device.container.empty() ||
+                    std::ranges::none_of(words, [&](const std::string& w) { return name.find(w) != std::string::npos; }))
+                    continue;
+                if (!found.empty() && found != device.container) return {};
+                found = device.container;
+            }
+        return found;
+    }
+
+    static bool holdsDevice(const Zone& z) { return z.engine->snapshot().output.has_value(); }
+
+    // The zone holding z's device: the first to have opened it, which keeps it until it stops or lets it go after a
+    // pause (docs/Plan.md §6).
+    const Zone* holderFor(const Zone& z) const {
+        const auto key = deviceKey(z);
+        const Zone* holder = nullptr;
+        for (const auto& zone : zones_) {
+            if (zone.get() == &z || !zone->holdingSince || deviceKey(*zone) != key) continue;
+            if (!holder || *zone->holdingSince < *holder->holdingSince) holder = zone.get();
+        }
+        if (holder && z.holdingSince && *z.holdingSince <= *holder->holdingSince) return nullptr;
+        if (!holder)
+            for (const auto& zone : zones_)
+                if (zone.get() != &z && deviceKey(*zone) == key && holdsDevice(*zone)) return zone.get();
+        return holder;
+    }
+
+    // Play in a zone whose device another holds plays nothing and says which zone has it (the owner, 2026-11-21).
+    bool mayPlay(const Zone& z) {
+        const Zone* holder = holderFor(z);
+        if (!holder) return true;
+        state_.commandError =
+            Failure{audio::ErrorCode::DeviceInUse, "in use by " + (holder->state.name.empty() ? holder->id : holder->state.name)};
+        return false;
+    }
+
+    // A zone that came to share a held device, as one following the Windows default onto it, pauses.
+    void followHolding() {
+        const auto now = std::chrono::steady_clock::now();
+        for (auto& zone : zones_) {
+            if (!holdsDevice(*zone))
+                zone->holdingSince.reset();
+            else if (!zone->holdingSince)
+                zone->holdingSince = now;
+        }
+        for (auto& zone : zones_)
+            if (zone->holdingSince && zone->engine->snapshot().state == audio::PlayState::Playing && holderFor(*zone)) {
+                log::info("zone %s pauses: its device is in use by zone %s", zone->id.c_str(), holderFor(*zone)->id.c_str());
+                zone->engine->pause();
+            }
     }
 
     // The AirPlay group in use; other receivers become zones of their own once several groups play (MZ-R05).
@@ -879,6 +978,7 @@ private:
     }
 
     void resumePlayback(Zone& z) {
+        if (!mayPlay(z)) return;
         if (z.q.entries.empty() && autoplayAllowed(z) && appendAutoplay(z)) {
             startEntry(z, z.q.policy.select(z.q.entries.front().id), true);
             return;
@@ -895,6 +995,7 @@ private:
 
     // The restored current entry opens its file only now, at the position it was left at.
     void resumeRestored(Zone& z, uint64_t position) {
+        if (!mayPlay(z)) return;
         const auto current = z.q.policy.current();
         z.q.restored.reset();
         if (!current || z.q.policy.unavailable(current->entryId)) {
@@ -1204,7 +1305,7 @@ private:
                     resumeRestored(z, z.q.restored->position);
                 else if (z.engine->snapshot().state == audio::PlayState::Stopped)
                     resumePlayback(z);
-                else
+                else if (z.engine->snapshot().state == audio::PlayState::Playing || mayPlay(z))
                     z.engine->togglePause();
                 break;
             case CommandKind::Stop:
@@ -1626,6 +1727,7 @@ private:
     // `afterEnd`: the previous entry ended naturally. Changing to another entry otherwise is manual and crossfades while
     // crossfade is on (docs/Plan.md §5.4); restarting the same entry does not.
     void startEntry(Zone& z, const QueuePosition& position, bool play, bool afterEnd = false) {
+        if (play && !afterEnd && !mayPlay(z)) play = false;
         if (z.q.policy.unavailable(position.entryId)) throw std::invalid_argument("queue entry is unavailable");
         z.q.restored.reset();
         if (!afterEnd) z.q.failuresInARow = 0;
@@ -2034,6 +2136,10 @@ private:
         }
         z.state.queueEntryId = z.q.entryId;
         z.state.track = z.q.track;
+        const Zone* holder = holderFor(z);
+        const std::string inUseBy = holder ? holder->id : std::string();
+        changed = changed || inUseBy != z.state.inUseBy;
+        z.state.inUseBy = inUseBy;
         z.queueChanged = false;
         return changed;
     }
@@ -2132,10 +2238,13 @@ private:
 
     void refreshDevices() {
         DeviceCatalog catalog;
-        catalog.wasapi = devices(audio::listWasapiDevices());
-        catalog.asio = devices(audio::listAsioDrivers());
-        catalog.ks = devices(audio::listKsPins());
-        catalog.defaultWasapi = audio::defaultWasapiDevice();
+        const LocalDevices local = localDevices_ ? localDevices_()
+                                                 : LocalDevices{audio::listWasapiDevices(), audio::listAsioDrivers(),
+                                                                audio::listKsPins(), audio::defaultWasapiDevice()};
+        catalog.wasapi = devices(local.wasapi);
+        catalog.asio = devices(local.asio);
+        catalog.ks = devices(local.ks);
+        catalog.defaultWasapi = local.defaultWasapi;
         findNetworkPlayers(catalog);
         findAirPlayReceivers(catalog);
         findHQPlayers(catalog);
@@ -2812,6 +2921,7 @@ private:
                 }
             }
             try {
+                followHolding();
                 refreshDevicesAfterChange();
                 followPlayerVolume();
                 followAirPlayGroup();
@@ -2939,6 +3049,7 @@ private:
         ZoneSnapshot state;                   // as last built for publishing
         std::filesystem::path queuedRead;     // the file last queued in the engine to follow; under readsMutex_
         bool sessionRestored = false;         // nothing is saved before its saved session is read back
+        std::optional<std::chrono::steady_clock::time_point> holdingSince; // its device open, from when
         SavedState saved;
         std::vector<size_t> savedRows; // rowHash() of each queue row as last written: rows before the first changed stay
         std::future<void> sessionWrite;
@@ -3010,6 +3121,7 @@ private:
     static constexpr std::chrono::seconds kResumeAsPairWithin{60};
     std::atomic<int64_t> devicesChangedAt_{0}; // steady_clock ticks of the last device event; 0 when none is pending
     FinderOptions finderOptions_;
+    std::function<LocalDevices()> localDevices_;
     std::mutex finderMutex_;
     _Guarded_by_(finderMutex_) std::unique_ptr<PlayerFinder> finder_; // from the first device scan
     hqplayer::FinderOptions hqplayerFinderOptions_;
@@ -3062,6 +3174,9 @@ void LocalServer::setAirPlayFinderOptions(const AirPlayFinderOptions& options) {
 }
 void LocalServer::setHQPlayerFinderOptions(const hqplayer::FinderOptions& options) {
     impl_->setHQPlayerFinderOptions(options);
+}
+void LocalServer::setLocalDevices(std::function<LocalDevices()> list) {
+    impl_->setLocalDevices(std::move(list));
 }
 CommandStamp LocalServer::submit(Command command) {
     return impl_->enqueue(std::move(command));

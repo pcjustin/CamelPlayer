@@ -19,6 +19,7 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "OutputBridge/GuidText.h"
 #include "OutputBridge/Mmcss.h"
 #include "OutputBridge/OutputChoices.h"
 #include "OutputBridge/PaceCheck.h"
@@ -96,10 +97,14 @@ template <class T> bool pinProp(HANDLE f, ULONG pin, ULONG id, T& out) {
     return ksIoctl(f, IOCTL_KS_PROPERTY, &p, sizeof p, &out, sizeof out);
 }
 
+// DEVPKEY_Device_ContainerId, which devpkey.h defines only where INITGUID is.
+constexpr DEVPROPKEY kContainerId = {{0x8c7ed206, 0x3f8a, 0x4827, {0xb3, 0xab, 0xae, 0x9e, 0x1f, 0xae, 0xfc, 0x6c}}, 2};
+
 struct Filter {
     std::wstring path;
     std::string name;
     bool realtime = false;
+    std::string container;
 };
 
 std::string regString(HKEY k, const wchar_t* value) {
@@ -142,7 +147,12 @@ std::vector<Filter> renderFilters() {
                                               sizeof devName, nullptr);
         std::string name = toUtf8(devName);
         if (!ifName.empty()) name += " / " + ifName;
-        out.push_back({det->DevicePath, name, realtime});
+        GUID container{};
+        DEVPROPTYPE type = 0;
+        const bool known = SetupDiGetDevicePropertyW(di, &dev, &kContainerId, &type, reinterpret_cast<BYTE*>(&container),
+                                                     sizeof container, nullptr, 0) &&
+                           type == DEVPROP_TYPE_GUID;
+        out.push_back({det->DevicePath, name, realtime, known ? guidText(container) : std::string()});
     }
     SetupDiDestroyDeviceInfoList(di);
     return out;
@@ -794,7 +804,7 @@ std::vector<DeviceEntry> listKsPins() {
             std::string name = f.name;
             if (!pi.name.empty()) name += " · " + pi.name;
             name += f.realtime && pi.looped ? " [WaveRT]" : " [Standard]";
-            out.push_back({toUtf8(f.path) + "|" + std::to_string(pin), name});
+            out.push_back({toUtf8(f.path) + "|" + std::to_string(pin), name, f.container});
         }
         CloseHandle(h);
     }

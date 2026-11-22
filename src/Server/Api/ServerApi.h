@@ -278,6 +278,7 @@ struct DeviceInfo {
     std::string unsupported;           // why an AirPlay receiver cannot be used, as airplay::supportId; empty when it can
     std::vector<std::string> speakers; // of an AirPlay stereo pair, as SavedOutput::speakers
     std::string model;                 // a network player's maker and model, as its description gives them
+    std::string container;             // a local device's Windows container ID: the hardware it is part of
     bool operator==(const DeviceInfo&) const = default;
 };
 
@@ -355,6 +356,8 @@ struct ZoneSnapshot {
     std::optional<TrackSource> track;
     QueueSnapshot queue;
     PlaybackSnapshot playback;
+    // The zone holding the device this zone plays to; Play here is refused with "in use by" that zone meanwhile.
+    std::string inUseBy;
     bool operator==(const ZoneSnapshot&) const = default;
 };
 

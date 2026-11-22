@@ -22,6 +22,7 @@
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "OutputBridge/AsioAbi.h"
+#include "OutputBridge/AsioCallbacks.h"
 #include "OutputBridge/AsioLayout.h"
 #include "OutputBridge/CallbackTiming.h"
 #include "OutputBridge/Mmcss.h"
@@ -74,10 +75,7 @@ const char* asioTypeName(asio::SampleType t) {
     }
 }
 
-class AsioOutput;
-std::atomic<AsioOutput*> g_active{nullptr}; // ASIO callbacks carry no user pointer (§5.6)
-
-class AsioOutput final : public IOutput {
+class AsioOutput final : public IOutput, asio::CallbackTarget {
 public:
     explicit AsioOutput(AsioSettings s) : cfg_(std::move(s)) {
         thread_ = std::thread([this] { staMain(); });
@@ -155,8 +153,7 @@ public:
             buffersCreated_ = false;
             if (dsdMode_) setIoFormat(asio::IoFormatType::Pcm); // leave the driver in PCM mode for the next stream
             source_.store(nullptr);
-            AsioOutput* self = this;
-            g_active.compare_exchange_strong(self, nullptr);
+            asio::releaseCallbacks(this);
         });
     }
 
@@ -193,7 +190,7 @@ public:
     }
 
     // --- driver callbacks (driver thread) ---
-    void onBufferSwitch(long index) noexcept {
+    void onBufferSwitch(long index) noexcept override {
         joinMmcss();
         timing_.tick();
         IRenderSource* src = source_.load(std::memory_order_acquire);
@@ -231,7 +228,7 @@ public:
         mmcss_.store(task ? Mmcss::Joined : Mmcss::Refused, std::memory_order_relaxed);
     }
 
-    long onMessage(long selector, long value) noexcept {
+    long onMessage(long selector, long value) noexcept override {
         switch (selector) {
         case asio::message::kSelectorSupported:
             return value == asio::message::kResetRequest || value == asio::message::kEngineVersion ||
@@ -252,7 +249,7 @@ public:
             return 0;
         }
     }
-    void onRateChanged() noexcept { raiseRestart(); }
+    void onRateChanged() noexcept override { raiseRestart(); }
 
 private:
     // Runs `fn` on the STA thread and waits; exceptions propagate to the caller.
@@ -413,22 +410,6 @@ private:
                                                     "1/2 (driver has " + std::to_string(numOutputs_) + " outputs)"));
         buffers_[0] = {asio::kFalse, channels_.left, {nullptr, nullptr}};
         buffers_[1] = {asio::kFalse, channels_.right, {nullptr, nullptr}};
-        static asio::Callbacks callbacks = {
-            [](long index, asio::Bool) {
-                if (auto* active = g_active.load(std::memory_order_acquire)) active->onBufferSwitch(index);
-            },
-            [](asio::SampleRate) {
-                if (auto* active = g_active.load(std::memory_order_acquire)) active->onRateChanged();
-            },
-            [](long selector, long value, void*, double*) -> long {
-                auto* active = g_active.load(std::memory_order_acquire);
-                return active ? active->onMessage(selector, value) : 0;
-            },
-            [](asio::Time* t, long index, asio::Bool) -> asio::Time* {
-                if (auto* active = g_active.load(std::memory_order_acquire)) active->onBufferSwitch(index);
-                return t;
-            },
-        };
         fmt_ = f;
         bufferSize_ = size;
         // In DSD mode the driver counts buffer sizes in DSD samples, eight per byte (docs/Plan.md §5.6).
@@ -438,9 +419,12 @@ private:
         periodMs_ = double(bufferFrames_) * 1000.0 / f.sampleRate;
         timing_.reset(periodMs_);
         interleaved_.assign(bufferFrames_ * f.bytesPerFrame(), dsd ? kDsdSilence : 0);
-        g_active = this;
-        if (drv_->createBuffers(buffers_, 2, size, &callbacks) != asio::kOk) {
-            g_active = nullptr;
+        asio::Callbacks* callbacks = asio::bindCallbacks(this);
+        if (!callbacks)
+            throw Error(ErrorCode::DriverError, "more ASIO drivers play at once than CamelPlayer can follow (" +
+                                                    std::to_string(asio::kCallbackSlots) + ")");
+        if (drv_->createBuffers(buffers_, 2, size, callbacks) != asio::kOk) {
+            asio::releaseCallbacks(this);
             throw Error(ErrorCode::DriverError, "ASIOCreateBuffers failed");
         }
         buffersCreated_ = true;
