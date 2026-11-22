@@ -76,7 +76,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 35> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 36> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -110,7 +110,8 @@ constexpr Names<CommandKind, 35> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::ShowAirPlayCode, "showAirPlayCode"},
                                                   {CommandKind::PairAirPlay, "pairAirPlay"},
                                                   {CommandKind::DeleteOutput, "deleteOutput"},
-                                                  {CommandKind::PauseAll, "pauseAll"}};
+                                                  {CommandKind::PauseAll, "pauseAll"},
+                                                  {CommandKind::Transfer, "transfer"}};
 constexpr Names<AirPlayChannels, 3> kAirPlayChannels = {
     {AirPlayChannels::Stereo, "stereo"}, {AirPlayChannels::Left, "left"}, {AirPlayChannels::Right, "right"}};
 constexpr Names<LibraryGroupField, 2> kArtistFields = {{LibraryGroupField::Artist, "artist"},
@@ -510,7 +511,8 @@ json toJson(const Command& c) {
             {"playerMute", c.playerMute ? json(*c.playerMute) : json(nullptr)},
             {"receiver", c.receiver},
             {"code", c.code},
-            {"zone", c.zone}};
+            {"zone", c.zone},
+            {"target", c.target}};
 }
 
 Command commandFromJson(const json& j) {
@@ -551,6 +553,7 @@ Command commandFromJson(const json& j) {
     if (j.contains("receiver") || c.kind == CommandKind::SetReceiverVolume) c.receiver = value<std::string>(j, "receiver");
     if (j.contains("code") || c.kind == CommandKind::PairAirPlay) c.code = value<std::string>(j, "code");
     if (j.contains("zone")) c.zone = value<std::string>(j, "zone");
+    if (j.contains("target") || c.kind == CommandKind::Transfer) c.target = value<std::string>(j, "target");
     return c;
 }
 

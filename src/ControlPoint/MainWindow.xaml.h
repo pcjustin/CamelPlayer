@@ -123,6 +123,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnEqResetClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnDspMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
     void OnOutputButtonClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnQueueMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&);
     void OnStartWithWindowsToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnLyricsScrollerSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnAddFirewallRuleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -385,10 +386,15 @@ private:
     Microsoft::UI::Xaml::Controls::Button pauseAllButton_{nullptr};
     bool showingZones_ = false; // the rows' sliders are set from a snapshot, not moved by the user
     void showZoneRows(const camel::server::Snapshot& snapshot);
+    // Transfer to… (docs/Plan.md §5.12): the other zones, one of which takes `from`'s queue.
+    void fillTransferMenu(Microsoft::UI::Xaml::Controls::MenuFlyoutSubItem const& menu, const std::string& from);
+    winrt::fire_and_forget transferZone(std::string from, std::string to);
+    winrt::hstring zoneLabel(const camel::server::Snapshot& snapshot, const camel::server::ZoneSnapshot& zone) const;
     void nameZoneButton(const camel::server::Snapshot& snapshot);
     bool zonePlays(const camel::server::OutputRow& row) const;
     winrt::fire_and_forget askTurnOffOutput(camel::server::OutputRow row, winrt::hstring label);
     void selectZone(const std::string& id);
+    void selectZoneOf(const camel::server::ZoneSnapshot& zone);
     void changeZoneVolume(const std::string& id, double value);
     winrt::hstring zoneName(const camel::server::Snapshot& snapshot, const std::string& id) const;
     struct OutputEdit {

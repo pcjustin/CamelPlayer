@@ -1151,3 +1151,101 @@ TEST_F(ZonesTest, EachZonePlaysAtItsOwnSoftwareVolume) {
     EXPECT_EQ(selected.settings.volume.db, -12.0);
     EXPECT_EQ(at(selected, 1), -6.0);
 }
+
+namespace {
+
+Command transfer(const std::string& from, const std::string& to) {
+    Command c;
+    c.kind = CommandKind::Transfer;
+    c.zone = from;
+    c.target = to;
+    return c;
+}
+
+} // namespace
+
+// A transfer while playing: the queue, current entry and audible position go on in the other zone, and the zone left is
+// empty and stopped with its device closed (MZ-R09).
+TEST_F(ZonesTest, ATransferWhilePlayingPlaysOnInTheOtherZoneFromWhereItWas) {
+    start(2);
+    send(play(1, {track(1, 8.0), track(1, 1.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1), 1.5); }));
+    const auto before = server->snapshot();
+    auto s = send(transfer(zone(1), zone(2)));
+    EXPECT_FALSE(s.commandError);
+    ASSERT_TRUE(waitFor([](const Snapshot& now) { return playing(of(now, 2)); }));
+    s = server->snapshot();
+    EXPECT_EQ(of(s, 2).queue.entries, of(before, 1).queue.entries);
+    EXPECT_EQ(of(s, 2).queueEntryId, of(before, 1).queueEntryId);
+    EXPECT_GE(of(s, 2).playback.position + 4410, of(before, 1).playback.position);
+    EXPECT_LT(of(s, 2).playback.position, of(before, 1).playback.position + uint64_t{3} * 44100);
+    EXPECT_TRUE(of(s, 1).queue.entries.empty());
+    EXPECT_EQ(of(s, 1).playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(closed(1), opened(1));
+    EXPECT_EQ(commandFromJson(toJson(transfer(zone(1), zone(2)))), transfer(zone(1), zone(2)));
+}
+
+TEST_F(ZonesTest, ATransferWhilePausedStaysPausedAtItsPosition) {
+    start(2);
+    send(play(1, {track(1, 8.0)}));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1), 1.0); }));
+    send(command(CommandKind::Pause, 1));
+    const auto position = of(server->snapshot(), 1).playback.position;
+    auto s = send(transfer(zone(1), zone(2)));
+    EXPECT_EQ(of(s, 2).playback.state, PlaybackState::Paused);
+    EXPECT_NEAR(double(of(s, 2).playback.position), double(position), 4410.0);
+    EXPECT_EQ(of(s, 1).playback.state, PlaybackState::Stopped);
+    send(command(CommandKind::Play, 2));
+    EXPECT_TRUE(waitFor([&](const Snapshot& now) {
+        return now.zones.size() == 2 && playing(of(now, 2)) && of(now, 2).playback.position + 4410 >= position;
+    }));
+}
+
+// The target's own queue is replaced; saved first as a playlist, it is kept there.
+TEST_F(ZonesTest, ATransferOntoAZoneWithAQueueReplacesItAndAQueueSavedFirstStaysAPlaylist) {
+    start(3, {}, true);
+    send(play(1, {track(1, 8.0)}));
+    send(play(2, {track(2, 3.0), track(2, 2.0)}));
+    send(command(CommandKind::Stop, 2));
+    send(play(3, {track(3, 3.0)}));
+    send(command(CommandKind::Stop, 3));
+    ASSERT_TRUE(waitFor([](const Snapshot& s) { return playing(of(s, 1)); }));
+    const auto saved = server->saveQueueAsPlaylist("Zone 2's queue", zone(2));
+    const auto ones = of(server->snapshot(), 1).queue.entries;
+    auto s = send(transfer(zone(1), zone(2)));
+    EXPECT_EQ(of(s, 2).queue.entries, ones);
+    s = send(transfer(zone(2), zone(3)));
+    EXPECT_EQ(of(s, 3).queue.entries, ones);
+    EXPECT_TRUE(of(s, 2).queue.entries.empty());
+    const auto playlists = server->playlists();
+    const auto kept = std::ranges::find(playlists, saved.playlist, &PlaylistSummary::id);
+    ASSERT_NE(kept, playlists.end());
+    EXPECT_EQ(kept->tracks, 2);
+}
+
+TEST_F(ZonesTest, ATransferOntoADeviceAnotherZoneHoldsIsRefused) {
+    localDevices = daveAndCirrus();
+    start(0, [](Settings& s) {
+        outputsOf(s,
+                  {enabled(Backend::Wasapi, "w-dave", "DAVE"), enabled(Backend::Ks, "k-dave", "DAVE KS"),
+                   enabled(Backend::Wasapi, "w-cirrus", "Cirrus")},
+                  Backend::Wasapi, "w-cirrus");
+    });
+    send(refresh());
+    const auto wDave = zoneId(Backend::Wasapi, "w-dave"), kDave = zoneId(Backend::Ks, "k-dave"),
+               cirrus = zoneId(Backend::Wasapi, "w-cirrus");
+    send(playIn(wDave, track(1, 6.0)));
+    send(playIn(cirrus, track(2, 6.0)));
+    ASSERT_TRUE(waitFor([&](const Snapshot& s) { return playing(in(s, wDave)) && playing(in(s, cirrus)); }));
+    const auto before = in(server->snapshot(), cirrus).queue.entries;
+    auto s = send(transfer(cirrus, kDave));
+    ASSERT_TRUE(s.commandError);
+    EXPECT_EQ(s.commandError->code, ErrorCode::DeviceInUse);
+    EXPECT_EQ(s.commandError->detail, "in use by " + in(s, wDave).name);
+    EXPECT_EQ(in(s, cirrus).queue.entries, before);
+    EXPECT_EQ(in(s, cirrus).playback.state, PlaybackState::Playing);
+    // The zone holding the device may move its own queue onto another backend of it.
+    s = send(transfer(wDave, kDave));
+    EXPECT_FALSE(s.commandError);
+    EXPECT_TRUE(waitFor([&](const Snapshot& now) { return playing(in(now, kDave)); }));
+}

@@ -132,7 +132,8 @@ enum class CommandKind : uint8_t {
     ShowAirPlayCode,   // receiver: one that pairs with a code shows it
     PairAirPlay,       // receiver + code: pairs with the password or code the user typed
     DeleteOutput,      // zone: the output it names, enabled or not; its zone's queue goes and a zone playing stops
-    PauseAll           // every zone playing pauses
+    PauseAll,          // every zone playing pauses
+    Transfer           // zone + target: the zone's queue, current entry and position go to the target zone
 };
 
 struct Command {
@@ -160,6 +161,7 @@ struct Command {
     // The zone a playback, queue or output command acts on, as ZoneSnapshot::id; empty for the selected zone. Other
     // commands name none.
     std::string zone;
+    std::string target; // Transfer: the zone that takes the queue
     bool operator==(const Command&) const = default;
 };
 

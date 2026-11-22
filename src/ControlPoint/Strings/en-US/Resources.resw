@@ -764,6 +764,13 @@ Details: {0}</value></data>
   <data name="Output_Unsupported" xml:space="preserve"><value>{0} (not supported)</value></data>
   <data name="Output_InUseUnsupported" xml:space="preserve"><value>In use; {0}</value></data>
   <data name="Zone_ReceiverInUse" xml:space="preserve"><value>{0}, in use by {1}</value></data>
+  <data name="Zone_Transfer" xml:space="preserve"><value>Transfer to</value></data>
+  <data name="Zone_MoreName" xml:space="preserve"><value>More for {0}</value></data>
+  <data name="Zone_TransferReplaceTitle" xml:space="preserve"><value>Replace the queue of {0}?</value></data>
+  <data name="Zone_TransferReplaceText" xml:space="preserve"><value>Its queue is replaced by the one transferred, which plays on there.</value></data>
+  <data name="Zone_TransferKeepQueue" xml:space="preserve"><value>Save its queue as a playlist first</value></data>
+  <data name="Zone_TransferReplace" xml:space="preserve"><value>Replace</value></data>
+  <data name="Queue_Transfer.Text" xml:space="preserve"><value>Transfer to</value></data>
   <data name="Zone_PickerName" xml:space="preserve"><value>Zones</value></data>
   <data name="Zone_GroupHeading" xml:space="preserve"><value>Receivers in this group</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>Pause all</value></data>

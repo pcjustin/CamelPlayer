@@ -79,7 +79,7 @@ bool changesQueue(CommandKind kind) {
     return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueReorder ||
            kind == CommandKind::QueueAdd || kind == CommandKind::QueuePlayNext || kind == CommandKind::QueueRemove ||
            kind == CommandKind::QueueClear || kind == CommandKind::SetShuffle || kind == CommandKind::SetRepeat ||
-           kind == CommandKind::RemoveLibraryRoot || kind == CommandKind::DeleteOutput;
+           kind == CommandKind::RemoveLibraryRoot || kind == CommandKind::DeleteOutput || kind == CommandKind::Transfer;
 }
 
 // Problems of one track rather than of the device: report them and move on to the next eligible entry.
@@ -120,7 +120,7 @@ std::string partsReadBackOtherwise(const SettingsDto& sent, const SettingsDto& b
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::PauseAll)
+    if (c.apiVersion != kApiVersion || c.kind > CommandKind::Transfer)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -145,7 +145,7 @@ void validate(const Command& c) {
         (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite &&
          c.kind != CommandKind::SetArtistFavorite) ||
         (!c.zone.empty() && !actsOnZone(c.kind) && c.kind != CommandKind::DeleteOutput) ||
-        (c.kind == CommandKind::DeleteOutput && c.zone.empty()))
+        (c.kind == CommandKind::DeleteOutput && c.zone.empty()) || c.target.empty() == (c.kind == CommandKind::Transfer))
         throw std::invalid_argument("invalid Server command payload");
     if (std::ranges::any_of(c.artists, [](const LibraryGroupFilter& a) {
             return (a.field != LibraryGroupField::Artist && a.field != LibraryGroupField::Composer) || a.value.empty() ||
@@ -245,6 +245,7 @@ bool actsOnZone(CommandKind kind) {
     case CommandKind::SetPlayerVolume:
     case CommandKind::SetPlayerMute:
     case CommandKind::SetReceiverVolume:
+    case CommandKind::Transfer:
         return true;
     default:
         return false;
@@ -449,7 +450,7 @@ public:
         CommandStamp next = issued_;
         ++next.id;
         if (startsEntry(c.kind) || c.kind == CommandKind::Stop || c.kind == CommandKind::Seek ||
-            c.kind == CommandKind::ApplySettings || c.kind == CommandKind::DeleteOutput)
+            c.kind == CommandKind::ApplySettings || c.kind == CommandKind::DeleteOutput || c.kind == CommandKind::Transfer)
             ++next.generation;
         if (changesQueue(c.kind)) ++next.queueRevision;
         queue_.push_back({std::move(c), next, restore});
@@ -692,6 +693,63 @@ private:
         for (auto& zone : zones_)
             if (zone->id == c.zone) return *zone;
         throw std::invalid_argument("no such zone: " + c.zone);
+    }
+
+    Zone& zoneNamed(const std::string& id) {
+        for (auto& zone : zones_)
+            if (zone->id == id) return *zone;
+        throw std::invalid_argument("no such zone: " + id);
+    }
+
+    // The queue, current entry and position of `from` go to `to`, replacing its own: it plays on from the audible
+    // position, or stays paused when paused; `from` is left empty and stopped, its device closed (MZ-R09). The queue's
+    // shuffle and repeat become the target output's.
+    void transfer(Zone& from, Zone& to) {
+        if (&from == &to) throw std::invalid_argument("a zone cannot take its own queue");
+        if (const Zone* holder = holderFor(to); holder && holder != &from) {
+            state_.commandError = Failure{audio::ErrorCode::DeviceInUse,
+                                          "in use by " + (holder->state.name.empty() ? holder->id : holder->state.name)};
+            return;
+        }
+        from.engine->waitIdle();
+        const auto playback = from.engine->snapshot();
+        const bool playing = playback.state == audio::PlayState::Playing || playback.bufferingSeconds;
+        std::optional<SavedTrack> at = from.q.restored;
+        if (!at && playback.state != audio::PlayState::Stopped && from.q.track &&
+            playback.file == toWide(from.q.track->pathUtf8()))
+            at = SavedTrack{playback.position, playback.total, playback.source, playback.format};
+        log::info("zone %s goes to zone %s%s", from.id.c_str(), to.id.c_str(), playing ? ", playing on" : "");
+        // Its play session ends here; the target's starts as it plays.
+        if (from.q.session && library_) from.q.session->persist(*library_);
+        from.q.session.reset();
+        for (Zone* zone : {&from, &to}) {
+            zone->engine->stop();
+            zone->engine->waitIdle();
+            finishWrite(*zone);
+            const auto stopped = zone->engine->snapshot();
+            zone->seenTrackEnds = stopped.trackEnds;
+            zone->seenTransitions = stopped.transitions;
+            zone->chain.clear();
+            zone->attempted = {};
+            zone->checked = {};
+            zone->queueChanged = true;
+            zone->holdingSince.reset(); // stopped, it holds its device no more
+        }
+        if (to.q.session && library_) to.q.session->persist(*library_);
+        to.q = std::move(from.q);
+        from.q = ZoneQueue();
+        from.q.policy.setShuffle(from.settings.shuffle);
+        from.q.policy.setRepeat(from.settings.repeat);
+        {
+            std::lock_guard lock(readsMutex_);
+            from.queuedRead.clear();
+            to.queuedRead.clear();
+        }
+        rememberQueueChoices(to);
+        // A queue that did not play stays as it was; one paused or playing opens at its audible position.
+        if (!to.q.policy.current() || !at) return;
+        to.q.restored = at;
+        if (playing) resumeRestored(to, at->position);
     }
 
     // The hardware a zone plays to (docs/Plan.md §5.12): a local device by Windows' container ID, which one DAC has
@@ -1475,6 +1533,9 @@ private:
                 break;
             case CommandKind::DeleteOutput:
                 deleteSavedOutput(c.zone);
+                break;
+            case CommandKind::Transfer:
+                transfer(z, zoneNamed(c.target));
                 break;
             case CommandKind::PauseAll:
                 for (auto& zone : zones_)

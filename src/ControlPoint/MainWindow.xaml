@@ -756,10 +756,13 @@
                                 VerticalAlignment="Top">
                             <FontIcon Glyph="&#xE712;" FontSize="14" />
                             <Button.Flyout>
-                                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuFlyout Placement="BottomEdgeAlignedRight" Opening="OnQueueMenuOpening">
                                     <ToggleMenuFlyoutItem x:Name="QueueAutoplayItem" x:Uid="Queue_Autoplay"
                                                           Click="OnQueueAutoplayClick" />
                                     <MenuFlyoutSeparator />
+                                    <MenuFlyoutSubItem x:Name="QueueTransferItem" x:Uid="Queue_Transfer">
+                                        <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE8AB;" /></MenuFlyoutSubItem.Icon>
+                                    </MenuFlyoutSubItem>
                                     <MenuFlyoutItem x:Uid="Queue_Save" Click="OnQueueSaveClick">
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74E;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>

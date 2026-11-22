@@ -820,8 +820,8 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
         }
         Grid grid;
         grid.ColumnSpacing(8);
-        for (const auto width :
-             {GridLengthHelper::FromValueAndType(1, GridUnitType::Star), GridLengthHelper::Auto(), GridLengthHelper::Auto()}) {
+        for (const auto width : {GridLengthHelper::FromValueAndType(1, GridUnitType::Star), GridLengthHelper::Auto(),
+                                 GridLengthHelper::Auto(), GridLengthHelper::Auto()}) {
             ColumnDefinition column;
             column.Width(width);
             grid.ColumnDefinitions().Append(column);
@@ -891,6 +891,21 @@ void MainWindow::OnOutputButtonClick(Windows::Foundation::IInspectable const&, R
         });
         Grid::SetColumn(row.volume, 2);
         grid.Children().Append(row.volume);
+        Button more;
+        more.Content(FontIcon());
+        more.Content().as<FontIcon>().Glyph(L"\xE712");
+        more.Style(PlayPauseButton().Style());
+        more.VerticalAlignment(VerticalAlignment::Center);
+        Automation::AutomationProperties::SetName(more, ui::format(L"Zone_MoreName", {std::wstring(outputMenuLabel(*output))}));
+        MenuFlyout actions;
+        MenuFlyoutSubItem transfer;
+        transfer.Text(tr(L"Zone_Transfer"));
+        fillTransferMenu(transfer, zone.id);
+        transfer.IsEnabled(!zone.queue.entries.empty() && transfer.Items().Size() > 0);
+        actions.Items().Append(transfer);
+        more.Flyout(actions);
+        Grid::SetColumn(more, 3);
+        grid.Children().Append(more);
         rows.Children().Append(grid);
         zoneRows_.push_back(std::move(row));
     }
@@ -1052,9 +1067,107 @@ void MainWindow::showZoneRows(const Snapshot& snapshot) {
     showingZones_ = false;
 }
 
+hstring MainWindow::zoneLabel(const Snapshot& snapshot, const ZoneSnapshot& zone) const {
+    if (zone.playback.receivers.size() > 1) return ui::utf8(zone.name) + L" (AirPlay)";
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
+    const auto row = std::ranges::find_if(
+        rows, [&](const camel::server::OutputRow& r) { return r.backend == zone.backend && r.id == zone.output; });
+    return row == rows.end() ? ui::utf8(zone.name) : outputMenuLabel(*row);
+}
+
+void MainWindow::OnQueueMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {
+    const auto snapshot = server_->snapshot();
+    fillTransferMenu(QueueTransferItem(), snapshot.selectedZone);
+    QueueTransferItem().IsEnabled(!snapshot.queue.entries.empty() && QueueTransferItem().Items().Size() > 0);
+}
+
+// Each other zone takes the queue; one whose device another zone holds is greyed and says which.
+void MainWindow::fillTransferMenu(MenuFlyoutSubItem const& menu, const std::string& from) {
+    menu.Items().Clear();
+    const auto snapshot = server_->snapshot();
+    for (const auto& zone : snapshot.zones) {
+        if (zone.id == from) continue;
+        MenuFlyoutItem item;
+        const hstring label = zoneLabel(snapshot, zone);
+        const bool held = !zone.inUseBy.empty() && zone.inUseBy != from;
+        item.Text(held ? label + L" · " + ui::format(L"Zone_InUseBy", {std::wstring(zoneName(snapshot, zone.inUseBy))}) : label);
+        item.IsEnabled(!held);
+        item.Click([this, from, to = zone.id](auto&&, auto&&) {
+            if (zonePicker_) zonePicker_.Hide();
+            transferZone(from, to);
+        });
+        menu.Items().Append(item);
+    }
+}
+
+// The queue goes to `to`, replacing its own after one question, which offers to save it as a playlist first; moved from
+// the zone the window follows, the window follows it to `to`.
+winrt::fire_and_forget MainWindow::transferZone(std::string from, std::string to) {
+    auto strong = get_strong();
+    const auto snapshot = server_->snapshot();
+    const auto target = std::ranges::find(snapshot.zones, to, &ZoneSnapshot::id);
+    if (target == snapshot.zones.end()) co_return;
+    const hstring label = zoneLabel(snapshot, *target);
+    if (!target->queue.entries.empty()) {
+        ContentDialog dialog;
+        ui::placeDialog(dialog, ContentLayout().XamlRoot());
+        dialog.Title(box_value(ui::format(L"Zone_TransferReplaceTitle", {std::wstring(label)})));
+        StackPanel content;
+        content.Spacing(12);
+        TextBlock explanation;
+        explanation.Text(tr(L"Zone_TransferReplaceText"));
+        explanation.TextWrapping(TextWrapping::Wrap);
+        content.Children().Append(explanation);
+        CheckBox keep;
+        keep.Content(box_value(tr(L"Zone_TransferKeepQueue")));
+        content.Children().Append(keep);
+        dialog.Content(content);
+        dialog.PrimaryButtonText(tr(L"Zone_TransferReplace"));
+        dialog.CloseButtonText(tr(L"Reset_Cancel"));
+        dialog.DefaultButton(ContentDialogButton::Close);
+        if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
+        if (keep.IsChecked().Value()) {
+            const auto name = toUtf8(std::wstring(ui::format(L"Output_DeletedQueueName", {std::wstring(label)})));
+            auto server = server_;
+            winrt::apartment_context ui;
+            co_await resume_background();
+            std::optional<PlaylistChange> change;
+            try {
+                change = server->saveQueueAsPlaylist(name, to);
+            } catch (const std::exception& e) {
+                camel::log::warn("save queue as playlist: %s", e.what());
+            }
+            co_await ui;
+            if (!change) {
+                showPlaylistNotice(tr(L"Queue_SaveFailed"), {}, true);
+                co_return; // its queue is not replaced unsaved
+            }
+            showPlaylistChange(*change, true);
+        }
+    }
+    Command command;
+    command.kind = CommandKind::Transfer;
+    command.zone = from;
+    command.target = to;
+    submitCommand(std::move(command));
+    if (from == server_->snapshot().selectedZone) selectZoneOf(*target);
+}
+
 hstring MainWindow::zoneName(const Snapshot& snapshot, const std::string& id) const {
     const auto found = std::ranges::find(snapshot.zones, id, &ZoneSnapshot::id);
     return found == snapshot.zones.end() ? ui::utf8(id) : ui::utf8(found->name);
+}
+
+void MainWindow::selectZoneOf(const ZoneSnapshot& zone) {
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), server_->snapshot().devices);
+    const auto row = std::ranges::find_if(
+        rows, [&](const camel::server::OutputRow& r) { return r.backend == zone.backend && r.id == zone.output; });
+    if (row == rows.end() || row->selected) return;
+    const auto& output = *row;
+    changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
+        camel::server::selectOutput(s, output.backend, output.id, devices);
+    });
+    populateSettings();
 }
 
 // Selecting a zone makes its output the one in use; every zone keeps its queue and playback.
