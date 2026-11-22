@@ -4,6 +4,17 @@ This file records how each CamelPlayer release was checked beyond their ordinary
 
 ## Automated tests
 
+On 2026-11-22, for 0.5.1, the release build was made from clean intermediates and its run on `15f1999`, the commit the package was made from, passed all 1404 enabled C++ tests, the 100k-track library targets included, and the Rust tests of every crate: 132 Engine tests, two ignored, 364 and 14 DTS decoder tests and its one doc test, and 6 Symphonia bridge tests. The first run, on `7464507`, failed one test, which looked a moved file up after the folder watch could mark it unavailable; the test takes the file's id first in `2104478`, on which every test then passed, and `15f1999` changes one wait for `/analyze` (Sanitizers). No Debug run was made for 0.5.1.
+
+The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt` by path, size and hash, the program reports version 0.5.1 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started through Explorer on an empty data folder, it showed the first-run guide and recorded the installation as checked.
+
+Updates were checked from a packaged build to a packaged build, the packaged 0.5.0 updated to the packaged 0.5.1 from its offer through a local stand-in for the release feed, then a deleted program file repaired from the repair offer, which 0.5.1's own updater installs. Each offer showed at the start, and each restarted player came back on its own test data folder:
+
+- in a folder of its own, on 2026-11-22: the update upgraded the demo library and kept `library.db.v23.bak`, and the update and the repair each left the 250 files matching the manifest and nothing else in the folder;
+- in a folder under Program Files, which needs administrator rights, on 2026-11-22: 0.5.0's updater and then 0.5.1's, whose run as administrator now installs only into its own folder, asked for them, the owner allowed each in the UAC prompt, and both left the 250 files matching the manifest, with no backup or journal left.
+
+These checks and the NAS runs below used the package made from `2104478`; the released one, from `15f1999`, differs only by that commit's one wait.
+
 On 2026-11-20, for 0.5.0, a full Release run of the release build passed all 1318 enabled C++ tests, the 100k-track library targets included, and 126 Rust Engine tests passed, two ignored, on the code of `18b96de`. The two commits after it change three test files only, whose 83 tests passed again on `9a1ba08`, the commit the package was made from. No Debug run was made for 0.5.0.
 
 The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt` by path, size and hash, the program reports version 0.5.0 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started through Explorer on an empty data folder, it recorded the installation as checked for 0.5.0, and left through the tray's Exit at 12 s it exited in 1.6 s.
@@ -37,6 +48,14 @@ On 2026-11-08, for 0.3.0, a full Release run of the release build passed all 904
 The package was checked the same day: its three files matched their SHA-256 sums, the 250 installed files matched `install-manifest.txt`, the program reports version 0.3.0 and is the build the tests ran on, and no PDB, sanitizer runtime, test or FFmpeg file is in it. Started on an empty data folder and closed through the tray at 6–20 s, it exited cleanly every time. Before the fix to exiting, 3 of 8 such runs crashed on exit.
 
 ## Sanitizers
+
+On 2026-11-22, for 0.5.1, 8 of the 9 checks passed, the C++ suite under AddressSanitizer, Loom and Miri on `2104478`, and the builds made after the fix below, for UndefinedBehaviorSanitizer and fuzzing, on the code of `15f1999`:
+
+- Loom on the Engine's ring, and Miri on the DTS and DSD-to-PCM C ABIs and the ring;
+- the C++ suite under AddressSanitizer, 1403 tests in 3,182 s, and under UndefinedBehaviorSanitizer, the same 1403 in 2,954 s, with no test left out but the Control Flow Guard check, which only a release build can pass;
+- 600 s each of fuzzing: the DTS frame reader 63,208 runs, the format probe 61,120, the network messages 343,674 and the zip reader 834,155, none failing.
+
+`/analyze` read the wait of the deferred library worker added for 0.5.1, a predicate lambda reading the worker's queue and stop flag, as reading them without the lock: two findings in `LocalServer.cpp`. The wait is a loop under the lock in `15f1999`, as the other waits of the annotated files are, after which `/analyze` on the four files reported nothing.
 
 On 2026-11-20, for 0.5.0, on `111621b`, 6 of the 9 checks passed:
 
@@ -81,6 +100,8 @@ From 0.3.0 on, every release runs `build.ps1 -Sanitizers` before it is published
 Two earlier runs that day also passed all 8: on `52449ef`, before Symphonia left FLAC covers out, in 4,884 s, and on `c245561`, before the three fixes ahead of that; `/analyze` had found a local variable shadowing another in `LocalServer.cpp`, renamed in `c245561`. A first run before that stopped in the AddressSanitizer step when the disk filled.
 
 ## Hardware
+
+On 2026-11-22, before 0.5.1, the 115 hardware tests of the Chord DAVE and the built-in Cirrus codec passed twice, on the build of `2104478` in 284 s and on the build of `15f1999` in 272 s; the network-player cases read the Essential Bravo (the KECES), the DMP-A6 and the Chord Poly as UPnP AV, took each one's events and sent them nothing. The AirPlay receiver tests, which play a tone on the receivers, were left out.
 
 On 2026-11-20, before 0.5.0, the 116 hardware tests of the Chord DAVE and the built-in Cirrus codec passed twice on the build of `9a1ba08`; the network-player case read the DMP-A6 as UPnP AV and sent it nothing. The filter also took in the two AirPlay receiver tests added for 0.5.0, which are not part of the matrix: the DMP-A6's test played its quiet tone there for a second in each run, before the owner had been told, and the one for the HomePod pair and the KECES did not find the KECES, which was off. With the KECES switched on by the owner it passed: the HomePod pair and the KECES each paired and played 5 s alone, then both with the DMP-A6 unpaired 8 s in one group, with no error and no receiver leaving.
 
@@ -216,6 +237,17 @@ Measured on 2026-10-24 after the scan speed-up, in Release with caches not flush
 The run before the speed-up, earlier the same day, measured a 100k-track search first page at p95 85.4 ms and one- and two-character fallback searches at p95 1,146 and 939 ms. Its synthetic first scan took 897.3 s, with the first 500-file batch at 633.3 s; the same NAS share took 10,507 s to scan fully (147 diagnostics) and 192.7 s to rescan unchanged (no updates, 4 diagnostics). Fingerprinting then hashed whole files: a run over that share was stopped after 157 of 86,680 files (3.21 GB) in 438 s, a rate that projected about 109 hours for its 2.87 TB, and the local index passed the SQLite integrity check afterwards. Fingerprints have since been sampled from the first and last 64 KiB of each file.
 
 ## NAS
+
+On 2026-11-22, for 0.5.1, the release package played from the NAS on the Chord DAVE over ASIO, over the 100 Mbps wire, on a copy of the owner's library at schema 23, settings and cover cache, so that the start upgraded it and kept `library.db.v23.bak`, the volume in software at -80 dB and muted and DSD converted to PCM so that the mute held. The first startup scan read the 86,541 files in 370.0 s and was complete; the next starts' scans took 75.6 to 82.7 s. No underrun was logged. The tracks were played once before the measured start, as on 0.5.0's own run on the same copy at schema 23 and the same tracks, measured the same way for comparison, with the CPU as a share of one core:
+
+| Span | Seconds | 0.5.1 read (MB) | 0.5.1 network (MB) | 0.5.1 CPU | 0.5.0 read (MB) | 0.5.0 network (MB) | 0.5.0 CPU |
+|---|---|---|---|---|---|---|---|
+| Idle after the scan | 30 | 32.3 | 0.0 | 0.5% | 32.2 | 0.0 | 0.6% |
+| A FLAC 16/44.1 track (30.5 MB) | 90 | 104.8 | 86.5 | 2.4% | 47.5 | 26.8 | 1.7% |
+| A DSD64 track to PCM (233 MB) | 90 | 154.6 | 127.1 | 3.8% | 137.5 | 107.8 | 3.2% |
+| An MP3 track (9.2 MB) | 90 | 70.4 | 54.0 | 2.6% | 70.6 | 54.3 | 3.0% |
+
+Both versions also made waveforms for six other tracks during their runs, reading those files whole from the NAS, and took different ones: what each span read beyond its own track depends on which fell into it. The first measured start of each version also made the day's library backup in its idle span, 556 to 561 MB of local reads; it is made once a day.
 
 On 2026-11-20, for 0.5.0, the release package played from the NAS on the Chord DAVE over ASIO, over the 100 Mbps wire, on a copy of the owner's library at schema 22 and settings, so that the start upgraded it and kept `library.db.v22.bak`, the volume in software at -80 dB and muted and DSD converted to PCM so that the mute held. The first startup scan read the 86,578 files in 402.7 s and was complete; the next start's scan took 98.3 s. No underrun was logged. Measured on that next start, with the CPU as a share of one core:
 
