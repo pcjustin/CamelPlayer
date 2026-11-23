@@ -299,7 +299,7 @@ void MainWindow::showOutputParameters(const SettingsDto& p) {
     limits.front() = tr(L"Limit_FollowPlayer");
     fill(NetworkRateCombo(), limits, rateIndex(p.network.maxSampleRate));
     fill(NetworkBitsCombo(), {tr(L"Limit_FollowPlayer"), L"16"}, p.network.maxBits ? 1 : 0);
-    fill(NetworkDsdCombo(), {tr(L"Dsd_Dsf"), tr(L"Dsd_Pcm")}, p.network.dsdOutput == DsdOutput::Pcm ? 1 : 0);
+    fill(NetworkDsdCombo(), {tr(L"Dsd_Dsf"), tr(L"Dsd_Dop"), tr(L"Dsd_Pcm")}, int(p.network.dsdOutput));
     fill(NetworkDsdRateCombo(), dsdRates, dsdRateIndex(p.network.dsdPcmRate));
     fill(NetworkMaxDsdCombo(), maxDsdItems(tr(L"Limit_FollowPlayer")), maxDsdIndex(p.network.maxDsdRate));
     NetworkGaplessSwitch().IsOn(p.network.gapless);
@@ -412,7 +412,7 @@ void MainWindow::readOutputParameters(SettingsDto& p) {
     readRateControls(networkRateControls(*this), p.network);
     p.network.maxSampleRate = rateAt(idx(NetworkRateCombo()));
     p.network.maxBits = idx(NetworkBitsCombo()) == 1 ? 16 : 0;
-    p.network.dsdOutput = idx(NetworkDsdCombo()) == 1 ? DsdOutput::Pcm : DsdOutput::Native;
+    p.network.dsdOutput = DsdOutput(std::min(idx(NetworkDsdCombo()), 2));
     p.network.dsdPcmRate = dsdRateAt(idx(NetworkDsdRateCombo()));
     p.network.maxDsdRate = maxDsdAt(idx(NetworkMaxDsdCombo()));
     p.network.gapless = NetworkGaplessSwitch().IsOn();

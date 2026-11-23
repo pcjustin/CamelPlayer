@@ -499,6 +499,13 @@ TEST(OutputsTest, ANetworkPlayerStartsOnItsOwnVolumeAndKeepsEachPlayersChoices) 
     EXPECT_FALSE(read.network.gapless);
 }
 
+// DoP chosen for a network player, even one that declares DSD, is kept as chosen.
+TEST(OutputsTest, ANetworkPlayersDopIsKept) {
+    Settings s;
+    s.network.dsdOutput = DsdOutput::Dop;
+    EXPECT_EQ(fromJson(toJson(s)).network.dsdOutput, DsdOutput::Dop);
+}
+
 TEST(OutputsTest, ANetworkPlayerNeverKeepsSoftwareVolume) {
     DeviceCatalog devices;
     devices.revision = 1;

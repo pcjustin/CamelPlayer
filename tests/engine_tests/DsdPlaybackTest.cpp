@@ -249,6 +249,27 @@ TEST(DsdPlayback, NativeRequestFallsBackToDopNeverToPcm) {
     EXPECT_EQ(refused.snapshot.error, ErrorCode::FormatNotSupported);
 }
 
+// A network player that declares no DSD, as the DMP-A6 and the KECES do, is sent DSD as DoP, as a USB device is, by
+// default or with DoP chosen, and as PCM once that is chosen for one that does not decode DoP (the KECES).
+TEST(DsdPlayback, ANetworkPlayerWithoutDsfTakesDopUnlessPcmIsChosen) {
+    const Bytes raw = rawDsd(5000, 2, 25);
+    Settings settings;
+    settings.backend = Backend::Network;
+    settings.convertDsdWhenUnsupported = true;
+    const auto takes = [](const DeviceFormat& f) { return f.type == SampleType::Int24 && f.sampleRate <= 192000; };
+    for (const DsdOutput mode : {DsdOutput::Native, DsdOutput::Dop}) {
+        settings.network.dsdOutput = mode;
+        const auto dop = play(dsfFile("network", raw), settings, takes);
+        ASSERT_TRUE(dop.plan) << dop.snapshot.errorDetail;
+        EXPECT_EQ(dop.plan->dsd, DsdPath::Dop) << int(mode);
+        expectDop(dop, raw);
+    }
+    settings.network.dsdOutput = DsdOutput::Pcm;
+    const auto converted = play(dsfFile("network", raw), settings, takes);
+    ASSERT_TRUE(converted.plan) << converted.snapshot.errorDetail;
+    EXPECT_EQ(converted.plan->dsd, DsdPath::Pcm);
+}
+
 TEST(DsdPlayback, SeekStartsAtTheRequestedByteFrame) {
     const Bytes raw = rawDsd(3 * 4096 + 500, 2, 24);
     const auto played =

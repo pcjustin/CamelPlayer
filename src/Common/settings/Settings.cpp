@@ -633,7 +633,7 @@ static void readNetwork(const json& o, NetworkSettings& n, ResampleQuality quali
     n.udn = str(o, "player", "");
     readRate(o, n, quality);
     n.maxBits = integer(o, "maxBits", 0, 0, 16) == 16 ? 16 : 0;
-    n.dsdOutput = str(o, "dsdOutput", "") == dsdOutputId(DsdOutput::Pcm) ? DsdOutput::Pcm : DsdOutput::Native;
+    n.dsdOutput = dsdOutputFromId(str(o, "dsdOutput", ""), DsdOutput::Native);
     n.gapless = boolean(o, "gapless", true);
     readTiming(o, n.timing);
 }
