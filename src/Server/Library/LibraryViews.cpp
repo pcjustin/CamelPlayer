@@ -529,6 +529,20 @@ std::vector<LibraryNamePart> creditParts(const LibraryCreditNames& names, std::s
     return parts;
 }
 
+// A name both credited and composing a track counts that track's plays once.
+std::vector<ArtistPictureName> artistPictureNames(const LibraryStore& store) {
+    auto db = store.openReader();
+    auto rows = db.prepare("SELECT p.name,min(f.path) FROM (SELECT DISTINCT name,track FROM (" +
+                           groupValues(LibraryGroupField::Artist) + " UNION ALL " + groupValues(LibraryGroupField::Composer) +
+                           ")) p JOIN tracks t ON t.id=p.track JOIN files f ON f.id=t.file_id LEFT JOIN stats s ON "
+                           "s.file_id=t.file_id WHERE coalesce(p.name,'')<>'' GROUP BY p.name ORDER BY "
+                           "EXISTS(SELECT 1 FROM favorite_names n WHERE n.name=p.name) DESC,coalesce(sum(s.play_count),0) "
+                           "DESC,p.name");
+    std::vector<ArtistPictureName> names;
+    while (rows.step()) names.push_back({rows.text(0), toWide(rows.text(1))});
+    return names;
+}
+
 // The jump bar's initials, read once per library revision like the listings' orders: grouping every visible track
 // again took 0.4 to 0.7 s for the artists of a library of 86,541 files at each opening of the page.
 std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGroupField field, const CancellationToken& token) {

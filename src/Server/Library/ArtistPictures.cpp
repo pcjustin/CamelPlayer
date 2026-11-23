@@ -13,9 +13,11 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <thread>
 
 #include "Common/util/Text.h"
 #include "Server/Artwork/ArtworkCache.h"
+#include "Server/Library/LibraryViews.h"
 
 namespace camel::server {
 
@@ -311,6 +313,26 @@ ArtistPicture chooseArtistCandidate(LibraryStore& store, const std::string& name
     r.replaceFound = true; // the picture of another artist of the name goes
     record(store, name, r);
     return artistPicture(store, name);
+}
+
+ArtistPictureCounts findArtistPictures(LibraryStore& store, const ArtistPictureJob& job, const CancellationToken& token) {
+    ArtistPictureCounts counts;
+    for (const auto& [name, track] : artistPictureNames(store)) {
+        while (!token.cancelled() && ((job.waiting && job.waiting()) || (job.pace && job.pace(track) == BackgroundPace::Wait)))
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        if (token.cancelled()) break;
+        const bool online = job.online && job.online();
+        if (!due(readRow(store, name), online, now())) continue;
+        const auto picture = lookUpArtistPicture(store, name, online, job.services, token);
+        if (token.cancelled()) break;
+        if (picture.found)
+            ++counts.found;
+        else if (picture.candidates.size() > 1)
+            ++counts.ambiguous;
+        else
+            ++counts.none;
+    }
+    return counts;
 }
 
 } // namespace camel::server

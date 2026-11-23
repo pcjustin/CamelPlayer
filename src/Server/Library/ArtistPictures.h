@@ -6,6 +6,8 @@
 // library database so they outlast rescans and rebuilds. The user's own picture wins over a found one.
 #pragma once
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -43,5 +45,20 @@ ArtistPicture removeArtistPicture(LibraryStore& store, const std::string& name);
 // stay, so another can be chosen. Throws std::runtime_error when the lookup fails.
 ArtistPicture chooseArtistCandidate(LibraryStore& store, const std::string& name, const std::string& mbid,
                                     const online::Services& services, const CancellationToken& token);
+
+// The background lookup (docs/Plan.md §7.7): what it asks of the Server as it goes.
+struct ArtistPictureJob {
+    std::function<bool()> online;  // the settings allow online lookups now
+    std::function<bool()> waiting; // work that goes first: a page's own lookup, a scan, covers being shown
+    std::function<BackgroundPace(const std::filesystem::path&)> pace; // playback's yield rule for a track's storage
+    online::Services services;
+};
+// Names a pass looked up: kept with a picture, with several artists for the user to choose, or with neither.
+struct ArtistPictureCounts {
+    size_t found = 0, ambiguous = 0, none = 0;
+};
+// Looks up every name of artistPictureNames that is due, as its artist page would, never asking anyone; before each
+// name it waits while `waiting` says so or while playback needs the storage of the name's track.
+ArtistPictureCounts findArtistPictures(LibraryStore& store, const ArtistPictureJob& job, const CancellationToken& token);
 
 } // namespace camel::server

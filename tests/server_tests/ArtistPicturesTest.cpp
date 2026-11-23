@@ -8,13 +8,17 @@
 #include <wrl/client.h>
 
 #include <taglib/flacfile.h>
+#include <taglib/tpropertymap.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <regex>
+#include <thread>
 
 #include "Common/util/Text.h"
 #include "Server/Artwork/ArtworkCache.h"
@@ -126,6 +130,49 @@ protected:
     }
 
     void search(const std::string& artists) { web.route("/ws/2/artist?query=", R"({"artists":[)" + artists + "]}"); }
+    // MusicBrainz's answer to a search for `name`, a single word.
+    void searchFor(const std::string& name, const std::string& artists) {
+        web.route("/ws/2/artist?query=artist%3A%22" + name + "%22", R"({"artists":[)" + artists + "]}");
+    }
+    static std::string artist(const std::string& mbid, const std::string& name, const std::string& about = {}) {
+        return R"({"id":")" + mbid + R"(","name":")" + name + R"(","disambiguation":")" + about + R"("})";
+    }
+    // The names MusicBrainz was asked about, in order.
+    std::vector<std::string> searched() {
+        std::vector<std::string> names;
+        const std::regex query(R"(/ws/2/artist\?query=artist%3A%22([^%]+)%22)");
+        for (const auto& request : web.requests())
+            if (std::smatch m; std::regex_search(request, m, query)) names.push_back(m[1]);
+        return names;
+    }
+
+    // A track credited to `artist`, and to `composer` when given, on an album of its own.
+    std::filesystem::path addTrack(const std::string& artist, const std::string& composer = {}) {
+        const auto music = dir / "music";
+        std::filesystem::create_directories(music);
+        const auto file = music / (artist + ".flac");
+        std::filesystem::copy_file(testutil::testFile("16-44.1k"), file);
+        TagLib::FLAC::File tags(file.c_str());
+        tags.tag()->setArtist(TagLib::String(artist, TagLib::String::UTF8));
+        tags.tag()->setAlbum(TagLib::String(artist + " Album", TagLib::String::UTF8));
+        if (!composer.empty()) {
+            auto properties = tags.properties();
+            properties.insert("COMPOSER", TagLib::StringList(TagLib::String(composer, TagLib::String::UTF8)));
+            tags.setProperties(properties);
+        }
+        EXPECT_TRUE(tags.save());
+        return file;
+    }
+    void scanMusic() {
+        LibraryScanner scanner(*store);
+        ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
+    }
+    ArtistPictureJob job(bool online = true) {
+        ArtistPictureJob job;
+        job.online = [online] { return online; };
+        job.services = services;
+        return job;
+    }
 
     void age(const std::string& name, int64_t milliseconds) {
         store
@@ -382,6 +429,130 @@ TEST_F(ArtistPicturesTest, RetriesFailuresAtTheNextVisitAndNothingFoundAfterThir
     lookUpArtistPicture(*store, "Zed", true, services, token);
     auto db = store->openReader();
     EXPECT_FALSE(db.prepare("SELECT 1 FROM artist_pictures WHERE name='Zed'").step());
+}
+
+// OP-R59: the library's names are looked up in the background, artists and composers alike, without their pages
+// opened: one MusicBrainz artist of the name gives its picture, several are kept for the user to choose and none is kept
+// as none; the user's own picture stays and its name is asked about nowhere.
+TEST_F(ArtistPicturesTest, TheBackgroundFindsPicturesWithoutTheirPagesOpened) {
+    addTrack("Amy");
+    addTrack("Juno");
+    addTrack("Nix", "Cleo");
+    addTrack("Zed");
+    scanMusic();
+    searchFor("Amy", artist(kMbid, "Amy"));
+    publish(kMbid, "Q1", 0xFF0000);
+    searchFor("Juno", artist(kMbid, "Juno", "singer") + "," + artist(kOther, "Juno", "band"));
+    searchFor("Nix", "");
+    searchFor("Cleo", artist(kOther, "Cleo"));
+    publish(kOther, "Q2", 0x00FF00);
+    ASSERT_TRUE(setArtistPicture(*store, "Zed", bitmap(20, 20, 0x0000FF, 0x0000FF)).chosen);
+
+    const auto counts = findArtistPictures(*store, job(), {});
+    EXPECT_EQ(counts.found, 2u);
+    EXPECT_EQ(counts.ambiguous, 1u);
+    EXPECT_EQ(counts.none, 1u);
+    EXPECT_EQ(artistPicture(*store, "Amy").source, "commons");
+    EXPECT_EQ(artistPicture(*store, "Cleo").mbid, kOther);
+    const auto juno = artistPicture(*store, "Juno");
+    EXPECT_FALSE(juno.found);
+    EXPECT_TRUE(juno.mbid.empty());
+    EXPECT_EQ(juno.candidates.size(), 2u);
+    EXPECT_FALSE(artistPicture(*store, "Nix").found);
+    const auto zed = artistPicture(*store, "Zed");
+    EXPECT_TRUE(zed.chosen);
+    EXPECT_FALSE(zed.found);
+    EXPECT_EQ(std::ranges::count(searched(), "Zed"), 0);
+
+    // What was kept is not looked up again.
+    const auto asked = web.requests().size();
+    const auto again = findArtistPictures(*store, job(), {});
+    EXPECT_EQ(again.found + again.ambiguous + again.none, 0u);
+    EXPECT_EQ(web.requests().size(), asked);
+}
+
+// Favorite names go first, then the names most played, then the rest by name.
+TEST_F(ArtistPicturesTest, TheBackgroundTakesFavoritesThenTheMostPlayedThenTheRestByName) {
+    for (const auto* name : {"Bea", "Cid", "Dot", "Amy"}) addTrack(name);
+    scanMusic();
+    search("");
+    store
+        ->write([](sqlite::Database& db) {
+            db.exec("INSERT INTO favorite_names(field,name,added) VALUES('artist','Dot',0);"
+                    "INSERT INTO stats(file_id,play_count) SELECT file_id,5 FROM tracks WHERE artist='Cid';");
+        })
+        .get();
+    findArtistPictures(*store, job(), {});
+    EXPECT_EQ(searched(), (std::vector<std::string>{"Dot", "Cid", "Amy", "Bea"}));
+}
+
+// While the settings do not allow it, the background looks only in the library and asks no one; once they do, the
+// names it found nothing for are looked up online.
+TEST_F(ArtistPicturesTest, TheBackgroundGoesOnlineOnlyOnceAllowed) {
+    addTrack("Amy");
+    scanMusic();
+    searchFor("Amy", artist(kMbid, "Amy"));
+    publish(kMbid, "Q1", 0xFF0000);
+    EXPECT_EQ(findArtistPictures(*store, job(false), {}).none, 1u);
+    EXPECT_TRUE(web.requests().empty());
+    EXPECT_EQ(findArtistPictures(*store, job(true), {}).found, 1u);
+    EXPECT_TRUE(artistPicture(*store, "Amy").found);
+}
+
+// A page's own lookup, which LocalServer counts while it goes on, comes before the background's next name.
+TEST_F(ArtistPicturesTest, TheBackgroundStartsNoNameWhileAPageLooksUp) {
+    addTrack("Amy");
+    scanMusic();
+    search("");
+    std::atomic<bool> page = true;
+    auto waiting = job();
+    waiting.waiting = [&] { return page.load(); };
+    std::thread run([&] { findArtistPictures(*store, waiting, {}); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    EXPECT_TRUE(web.requests().empty());
+    page = false;
+    run.join();
+    EXPECT_EQ(searched(), std::vector<std::string>{"Amy"});
+
+    // Stopped while it waits, it ends at once.
+    addTrack("Bea");
+    scanMusic();
+    page = true;
+    CancellationToken token;
+    std::thread stopped([&] { findArtistPictures(*store, waiting, token); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    token.cancel();
+    stopped.join();
+    EXPECT_EQ(searched(), std::vector<std::string>{"Amy"});
+}
+
+// The yield rule (docs/Plan.md §7.7): a name waits while a zone plays from its storage without enough ahead, and goes
+// on once nothing plays there.
+TEST_F(ArtistPicturesTest, TheBackgroundWaitsWhilePlaybackNeedsTheNamesStorage) {
+    const auto track = addTrack("Amy");
+    scanMusic();
+    search("");
+    std::mutex mutex;
+    PlaybackReads reads;
+    reads.files = {track};
+    std::vector<std::filesystem::path> paced;
+    auto yielding = job();
+    yielding.pace = [&](const std::filesystem::path& storage) {
+        std::lock_guard lock(mutex);
+        paced.push_back(storage);
+        return backgroundPace(reads, storage);
+    };
+    std::thread run([&] { findArtistPictures(*store, yielding, {}); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    EXPECT_TRUE(web.requests().empty());
+    {
+        std::lock_guard lock(mutex);
+        reads.files.clear();
+    }
+    run.join();
+    EXPECT_EQ(searched(), std::vector<std::string>{"Amy"});
+    ASSERT_FALSE(paced.empty());
+    EXPECT_TRUE(std::filesystem::equivalent(paced.front(), track)) << paced.front();
 }
 
 TEST_F(ArtistPicturesTest, PrefersTheUsersOwnPictureAndAFolderPictureOverTheInternet) {

@@ -168,6 +168,14 @@ std::shared_ptr<const LibraryCreditNames> libraryCreditNames(const LibraryStore&
 // artist's albums.
 std::vector<LibraryNamePart> creditParts(const LibraryCreditNames& names, std::string_view credit);
 
+// The names the background looks artist pictures up for (docs/Plan.md §7.7): every name of the Artists and Composers
+// lists, favorites first, then the most played, then the rest by name, each with the path of one of its tracks.
+struct ArtistPictureName {
+    std::string name;
+    std::filesystem::path track;
+};
+std::vector<ArtistPictureName> artistPictureNames(const LibraryStore& store);
+
 // The initials of browseGroups(field); none for years.
 std::vector<LibraryInitial> groupInitials(const LibraryStore& store, LibraryGroupField field,
                                           const CancellationToken& token = {});

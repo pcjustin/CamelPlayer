@@ -361,6 +361,7 @@ public:
                 return playingTracks_;
             };
             loudness_ = std::make_unique<LoudnessAnalyzer>(*library_, std::move(loudness));
+            pictureFinder_ = std::jthread([this](const std::stop_token& stop) { findArtistPicturesInBackground(stop); });
         }
         if (library_ && [&] {
                 auto reader = library_->openReader();
@@ -424,6 +425,7 @@ public:
         release(loudness_);
         release(libraryMonitor_);
         coverWarmer_ = {};
+        pictureFinder_ = {};
         if (working) {
             backgroundStopped_.set_value();
             worker_.join();
@@ -610,6 +612,52 @@ public:
     void setLocalDevices(std::function<LocalDevices()> list) { localDevices_ = std::move(list); }
     BackgroundPace backgroundPace(const std::filesystem::path& storage) const {
         return server::backgroundPace(playbackReads(), storage);
+    }
+
+    // Artist pictures found in the background (docs/Plan.md §7.7): a pass soon after the start, then whenever albums
+    // change or online lookups become allowed, and an hour after the last. Each name waits while a page looks its own up,
+    // a scan runs or covers are being shown, and yields to playback on its storage.
+    void findArtistPicturesInBackground(const std::stop_token& stop) {
+        CancellationToken token;
+        const std::stop_callback cancel(stop, [&token] { token.cancel(); });
+        const auto allowed = [this] { return snapshot().settings.artistPictures == OnlineLookup::Allowed; };
+        ArtistPictureJob job;
+        job.online = allowed;
+        job.waiting = [this] {
+            return pageLookups_.load() > 0 || coversInFlight_.load() > 0 || library_->scanProgress().scans > 0;
+        };
+        job.pace = [this](const std::filesystem::path& track) { return backgroundPace(track); };
+        auto albums = library_->albumChanges();
+        bool online = allowed();
+        std::mutex idle;
+        std::condition_variable_any stopped;
+        for (auto next = std::chrono::steady_clock::now() + std::chrono::seconds(30); !stop.stop_requested();) {
+            while (!stop.stop_requested() && std::chrono::steady_clock::now() < next && library_->albumChanges() == albums &&
+                   allowed() == online) {
+                std::unique_lock lock(idle);
+                stopped.wait_for(lock, stop, std::chrono::seconds(2), [] { return false; });
+            }
+            if (stop.stop_requested()) break;
+            albums = library_->albumChanges();
+            online = allowed();
+            const auto started = std::chrono::steady_clock::now();
+            try {
+                const auto counts = findArtistPictures(*library_, job, token);
+                const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
+                if (counts.found + counts.ambiguous + counts.none)
+                    log::info("artist pictures: %zu found, %zu left to choose, %zu without one, in %lld s", counts.found,
+                              counts.ambiguous, counts.none, static_cast<long long>(seconds.count()));
+            } catch (const std::exception& e) {
+                log::warn("artist pictures: %s", e.what());
+            }
+            next = std::chrono::steady_clock::now() + std::chrono::hours(1);
+        }
+    }
+
+    // Held while an artist page's own picture lookup goes on, which the background's next name waits for.
+    [[nodiscard]] auto pageLookup() {
+        ++pageLookups_;
+        return wil::scope_exit([this] { --pageLookups_; });
     }
 
     std::optional<ArtworkReference> artwork(const ArtworkRequest& request, const CancellationToken& token) const {
@@ -3252,13 +3300,15 @@ private:
     std::optional<std::chrono::steady_clock::time_point> settingsDue_; // when a change kept by persistSoon() is saved
     audio::OutputFactory factory_;
     mutable std::atomic<int> coversInFlight_{0}; // covers being read for the window; read by scan workers, so declared first
+    std::atomic<int> pageLookups_{0};            // artist pages' own picture lookups going on
     std::unique_ptr<ArtworkCache> artwork_;
     std::unique_ptr<LibraryStore> library_;
     mutable std::mutex creditMutex_;
     _Guarded_by_(creditMutex_) mutable std::shared_ptr<const LibraryCreditNames> creditNames_;
     std::unique_ptr<LibraryTextIndex> libraryText_;
     std::unique_ptr<LibraryMonitor> libraryMonitor_;
-    std::jthread coverWarmer_; // uses artwork_, library_ and engine_, so it stops before they go
+    std::jthread coverWarmer_;   // uses artwork_, library_ and engine_, so it stops before they go
+    std::jthread pictureFinder_; // uses library_ and the zones' reads, so it stops before they go
     mutable std::mutex loudnessMutex_;
     _Guarded_by_(loudnessMutex_) ReplayGainSettings loudnessSettings_;
     _Guarded_by_(loudnessMutex_) DecoderByFormat loudnessDecoders_;
@@ -3457,6 +3507,7 @@ std::optional<ArtworkReference> LocalServer::artwork(const ArtworkRequest& reque
 ArtistPicture LocalServer::artistPicture(const std::string& name, bool lookUp, const CancellationToken& token) {
     if (!lookUp) return camel::server::artistPicture(impl_->library(), name);
     const bool online = impl_->snapshot().settings.artistPictures == OnlineLookup::Allowed;
+    const auto page = impl_->pageLookup();
     return lookUpArtistPicture(impl_->library(), name, online, {}, token);
 }
 ArtistPicture LocalServer::setArtistPicture(const std::string& name, const std::vector<uint8_t>& image) {
@@ -3469,6 +3520,7 @@ ArtistPicture LocalServer::chooseArtistCandidate(const std::string& name, const 
                                                  const CancellationToken& token) {
     if (impl_->snapshot().settings.artistPictures != OnlineLookup::Allowed)
         throw std::logic_error("online artist pictures are off");
+    const auto page = impl_->pageLookup();
     return camel::server::chooseArtistCandidate(impl_->library(), name, mbid, {}, token);
 }
 
