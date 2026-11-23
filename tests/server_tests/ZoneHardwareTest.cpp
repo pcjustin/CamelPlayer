@@ -511,9 +511,13 @@ TEST(ZoneHardware, DISABLED_ThreeDsd256ZonesFromTheNasStartedOneAfterAnother) {
     scout.shutdown();
     if (!d) GTEST_SKIP() << "not every device of MZ-R12 is on";
     settings.wasapi.deviceId = d->cirrus;
-    settings.outputs = {mz12Output(Backend::Asio, d->daveAsio), mz12Output(Backend::Network, d->dmpA6),
-                        mz12Output(Backend::Network, d->keces), mz12Output(Backend::Wasapi, d->cirrus)};
-    settings.convertDsdWhenUnsupported = true; // the network players declare no DSD and take it as PCM
+    // The DMP-A6 takes DSD as DoP; the KECES, which declares no DSD, as 176.4 kHz PCM, the owner's setting for it.
+    SavedOutput keces = mz12Output(Backend::Network, d->keces);
+    keces.network.dsdOutput = DsdOutput::Pcm;
+    keces.network.dsdPcmRate = 176400;
+    settings.outputs = {mz12Output(Backend::Asio, d->daveAsio), mz12Output(Backend::Network, d->dmpA6), keces,
+                        mz12Output(Backend::Wasapi, d->cirrus)};
+    settings.convertDsdWhenUnsupported = true;
     settings = fromJson(toJson(settings));
     const auto nas = mz12Nas();
     const std::vector<std::string> order{zoneId(Backend::Asio, d->daveAsio), zoneId(Backend::Network, d->dmpA6),
