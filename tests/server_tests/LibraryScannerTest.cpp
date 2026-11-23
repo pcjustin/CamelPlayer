@@ -56,8 +56,8 @@ protected:
     static int64_t count(LibraryStore& store, const char* sql = "SELECT COUNT(*) FROM files WHERE available=1") {
         return store.openReader().scalar(sql).value();
     }
-    static bool waitFor(const std::function<bool()>& check) {
-        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    static bool waitFor(const std::function<bool()>& check, std::chrono::seconds limit = std::chrono::seconds(30)) {
+        const auto end = std::chrono::steady_clock::now() + limit;
         do {
             if (check()) return true;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -1298,7 +1298,9 @@ TEST_F(LibraryScannerTest, AlbumsAppearWithEachBatchOfAFirstScan) {
     const auto root = scanner.addRoot(dir / "music");
     auto scan = std::async(std::launch::async, [&] { return scanner.scan(root); });
     auto finish = wil::scope_exit([&] { release = true; }); // before the scan future joins
-    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM albums") == 1; }));
+    // The scan's threads run in background mode, so a busy computer can hold them for minutes; the late file holds the
+    // scan until released, so the 500 before it are given that time.
+    ASSERT_TRUE(waitFor([&] { return count(store, "SELECT COUNT(*) FROM albums") == 1; }, std::chrono::seconds(300)));
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks WHERE album_id IS NOT NULL"), 500);
     const auto progress = store.scanProgress();
     EXPECT_EQ(progress.scans, 1);

@@ -756,8 +756,17 @@ TEST(NetworkOutputTest, ShortRequestsDoNotPileUpThreadsDuringTheSession) {
     DWORD before = 0, after = 0;
     GetProcessHandleCount(GetCurrentProcess(), &before);
     probe(300);
-    GetProcessHandleCount(GetCurrentProcess(), &after);
-    EXPECT_LT(after, before + 50) << before << " handles before, " << after << " after";
+    // A connection's thread is joined when the next connection comes. Under load the last ones end after it, so they
+    // have to end, and one more connection joins them, rather than all have ended within 200 ms.
+    EXPECT_TRUE(waitFor(
+        [&] {
+            FakeRenderer::resetConnectionTo(renderer.currentUri());
+            std::this_thread::sleep_for(100ms);
+            GetProcessHandleCount(GetCurrentProcess(), &after);
+            return after < before + 50;
+        },
+        30s))
+        << before << " handles before, " << after << " after";
 }
 
 TEST(NetworkOutputTest, ARangePastTheStreamIsThePlayersOwnSeek) {

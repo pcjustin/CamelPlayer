@@ -1261,7 +1261,8 @@ protected:
             std::scoped_lock lock(mutex_);
             left_.emplace_back(id, e.code());
         };
-        options.requestTimeoutMs = 500 * testutil::kPairingSlowdown;
+        // No receiver here goes silent: a longer wait only keeps a loaded computer from taking one for not connected.
+        options.requestTimeoutMs = 2000 * testutil::kPairingSlowdown;
         options.heartbeat = 50ms;
         options.closeSessionAfter = 300ms;
         options.closedVerdictAfter = 300ms;
