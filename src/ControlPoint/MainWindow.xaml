@@ -1084,8 +1084,13 @@
                     </Grid>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                         <!-- The enabled outputs (docs/Plan.md §8.1), the one in use checked. -->
-                        <Button x:Name="OutputButton" x:Uid="Output_Button" Style="{StaticResource TransportButtonStyle}" Click="OnOutputButtonClick">
-                            <FontIcon Glyph="&#xE7F5;" />
+                        <Button x:Name="OutputButton" x:Uid="Output_Button" Style="{StaticResource TransportButtonStyle}" Width="Auto"
+                                Padding="12,0" Click="OnOutputButtonClick">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon x:Name="OutputIcon" Glyph="&#xE7F5;" />
+                                <TextBlock x:Name="OutputName" MaxWidth="160" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                <FontIcon Glyph="&#xE70E;" FontSize="10" />
+                            </StackPanel>
                         </Button>
                         <!-- Volume (docs/Plan.md §5.9): fixed volume shows a lock and says who sets the level; software volume
                              opens a vertical slider with mute, and the wheel over the button moves it 1 dB a notch. -->

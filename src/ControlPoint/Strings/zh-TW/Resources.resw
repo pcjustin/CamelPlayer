@@ -775,23 +775,24 @@
   <data name="Output_Unsupported" xml:space="preserve"><value>{0}（不支援）</value></data>
   <data name="Output_InUseUnsupported" xml:space="preserve"><value>使用中；{0}</value></data>
   <data name="Zone_ReceiverInUse" xml:space="preserve"><value>{0}，{1} 正在使用</value></data>
-  <data name="Zone_Transfer" xml:space="preserve"><value>轉移到</value></data>
-  <data name="Zone_MoreName" xml:space="preserve"><value>{0} 的更多選項</value></data>
   <data name="Zone_TransferReplaceTitle" xml:space="preserve"><value>要取代 {0} 的佇列嗎？</value></data>
   <data name="Zone_TransferReplaceText" xml:space="preserve"><value>它的佇列會被轉移過來的佇列取代，並在那裡接著播放。</value></data>
   <data name="Zone_TransferKeepQueue" xml:space="preserve"><value>先把它的佇列存成播放清單</value></data>
   <data name="Zone_TransferReplace" xml:space="preserve"><value>取代</value></data>
   <data name="Queue_Transfer.Text" xml:space="preserve"><value>轉移到</value></data>
   <data name="Zone_PickerName" xml:space="preserve"><value>區域</value></data>
+  <data name="Zone_Controlling" xml:space="preserve"><value>正在控制</value></data>
+  <data name="Zone_Others" xml:space="preserve"><value>其他區域</value></data>
+  <data name="Zone_Transfer" xml:space="preserve"><value>轉移到</value></data>
+  <data name="Zone_TransferHere" xml:space="preserve"><value>把佇列轉移到這裡</value></data>
+  <data name="Zone_OutputSettings" xml:space="preserve"><value>輸出設定…</value></data>
+  <data name="Zone_PlayName" xml:space="preserve"><value>{0} {1}</value></data>
   <data name="Zone_GroupHeading" xml:space="preserve"><value>這個群組的接收器</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>全部暫停</value></data>
   <data name="Zone_Offline" xml:space="preserve"><value>未連線</value></data>
   <data name="Zone_InUseBy" xml:space="preserve"><value>{0} 正在使用</value></data>
-  <data name="Zone_RowName" xml:space="preserve"><value>{0}：{1}，{2}</value></data>
-  <data name="Zone_RowSelectedName" xml:space="preserve"><value>{0}，已選取：{1}，{2}</value></data>
-  <data name="Zone_NoTrack" xml:space="preserve"><value>沒有排入曲目</value></data>
-  <data name="Zone_PlayName" xml:space="preserve"><value>{0} {1}</value></data>
-  <data name="Zone_VolumeName" xml:space="preserve"><value>{0} 的音量</value></data>
+  <data name="Zone_RowName" xml:space="preserve"><value>{0}：{1}</value></data>
+  <data name="Zone_RowSelectedName" xml:space="preserve"><value>{0}，已選取：{1}</value></data>
   <data name="Zone_SettingsFor" xml:space="preserve"><value>下方的自動播放與淡入淡出屬於 {0}，也就是目前選取的區域。每個區域各自保留。</value></data>
   <data name="Output_MenuSettings" xml:space="preserve"><value>音訊輸出設定…</value></data>
   <data name="Output_Button.AutomationProperties.Name" xml:space="preserve"><value>區域</value></data>

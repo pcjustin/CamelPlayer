@@ -370,22 +370,18 @@ private:
     struct ZoneRow {
         std::string zone;
         camel::server::OutputRow output;
-        camel::VolumeMode volumeMode = camel::VolumeMode::Fixed;
-        double volumeDb = 0.0;
         Microsoft::UI::Xaml::Controls::Button select{nullptr};
-        Microsoft::UI::Xaml::Shapes::Rectangle mark{nullptr};
-        Microsoft::UI::Xaml::Controls::Image cover{nullptr};
+        Microsoft::UI::Xaml::Controls::FontIcon icon{nullptr};
         Microsoft::UI::Xaml::Controls::TextBlock title{nullptr}, detail{nullptr};
-        Microsoft::UI::Xaml::Controls::Button playPause{nullptr};
-        Microsoft::UI::Xaml::Controls::SymbolIcon playIcon{nullptr};
-        Microsoft::UI::Xaml::Controls::Slider volume{nullptr};
-        std::string coverPath;
+        Microsoft::UI::Xaml::Controls::Button pause{nullptr};
     };
     Microsoft::UI::Xaml::Controls::Flyout zonePicker_{nullptr};
     std::vector<ZoneRow> zoneRows_;
     Microsoft::UI::Xaml::Controls::Button pauseAllButton_{nullptr};
-    bool showingZones_ = false; // the rows' sliders are set from a snapshot, not moved by the user
     void showZoneRows(const camel::server::Snapshot& snapshot);
+    void addReceiversRow(Microsoft::UI::Xaml::Controls::StackPanel const& content, const camel::server::Snapshot& snapshot,
+                         const std::vector<camel::server::OutputRow>& outputs);
+    void fillZoneActions(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, const std::string& id);
     // Transfer to… (docs/Plan.md §5.12): the other zones, one of which takes `from`'s queue.
     void fillTransferMenu(Microsoft::UI::Xaml::Controls::MenuFlyoutSubItem const& menu, const std::string& from);
     winrt::fire_and_forget transferZone(std::string from, std::string to);
@@ -402,7 +398,6 @@ private:
     std::vector<winrt::hstring> zonesPlaying() const;
     winrt::fire_and_forget requestExit();
     bool exitAsking_ = false; // Exit's question is open
-    void changeZoneVolume(const std::string& id, double value);
     winrt::hstring zoneName(const camel::server::Snapshot& snapshot, const std::string& id) const;
     struct OutputEdit {
         camel::Backend backend = camel::Backend::Wasapi;
