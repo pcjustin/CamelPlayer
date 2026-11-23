@@ -441,7 +441,8 @@ TEST(ZoneHardware, DISABLED_SixZonesPlayAtOnceForHalfAnHour) {
 }
 
 // HQPlayer on this computer, set to the DAVE, against the DAVE's own zone, in both orders: the second to start is
-// refused, by the device or by HQPlayer, and the first plays on.
+// refused, by the device or by HQPlayer, and the first plays on. While HQPlayer, stopped, still keeps the driver, the
+// DAVE's zone is refused as in use.
 TEST(ZoneHardware, DISABLED_HQPlayerAndTheDavesOwnZoneInBothOrders) {
     Settings settings;
     settings.autoplay = false;
@@ -460,9 +461,31 @@ TEST(ZoneHardware, DISABLED_HQPlayerAndTheDavesOwnZoneInBothOrders) {
     for (const auto& [first, second] : {std::pair{hqp, dave}, std::pair{dave, hqp}}) {
         server.submit(queueIn(first, {toneA}));
         server.waitIdle();
-        ASSERT_TRUE(waitFor(
-            server, [&](const Snapshot& s) { return seconds(in(s, first)) > 3.0; }, 60s))
-            << first << ": " << stateText(in(server.snapshot(), first));
+        // HQPlayer may keep the DAVE's ASIO driver after it stopped (6.3, for minutes): the zone is refused as in use.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(first == dave ? 2 : 1);
+        bool held = false;
+        while (!waitFor(server, [&](const Snapshot& s) { return seconds(in(s, first)) > 3.0; }, 15s)) {
+            const auto now = server.snapshot();
+            const auto& z = in(now, first);
+            if (z.playback.error) {
+                EXPECT_EQ(z.playback.error, ErrorCode::DeviceInUse) << stateText(z);
+                held = true;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) break;
+            if (z.playback.error) {
+                server.submit(zoneCommand(CommandKind::Play, first));
+                server.waitIdle();
+            }
+        }
+        if (seconds(in(server.snapshot(), first)) <= 3.0) {
+            const auto now = server.snapshot();
+            const auto& z = in(now, first);
+            std::cout << first << " still held by HQPlayer: " << stateText(z) << '\n' << std::flush;
+            EXPECT_TRUE(first == dave && held && z.playback.error == ErrorCode::DeviceInUse) << stateText(z);
+            server.submit(zoneCommand(CommandKind::Stop, first));
+            server.waitIdle();
+            continue;
+        }
         server.submit(queueIn(second, {toneB}));
         server.waitIdle();
         std::this_thread::sleep_for(12s);

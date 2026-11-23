@@ -250,8 +250,9 @@ TEST(Conversion, ADeviceThatTakesSeveralFormatsAndStartsNoneIsInUse) {
     EXPECT_NE(s.errorDetail.find("could start none"), std::string::npos) << s.errorDetail;
 }
 
-// Chord's ASIO driver refuses every rate while another program holds it without playing, as HQPlayer does once stopped:
-// an ASIO driver that takes no format at all is in use, which waits paused, not short of the track's format.
+// Chord's ASIO driver refuses every PCM rate while another program holds it without playing, as HQPlayer does once
+// stopped, while what it said of DSD before is remembered: an ASIO driver that takes no PCM format is in use, which
+// waits paused, not short of the track's format.
 TEST(Conversion, AnAsioDriverThatTakesNoFormatIsInUse) {
     const auto file = wav("taken", tone(96000, 2, 24, 0.5), 96000, 24, 2);
     Settings settings;
@@ -259,7 +260,7 @@ TEST(Conversion, AnAsioDriverThatTakesNoFormatIsInUse) {
     settings.convertWhenUnsupported = true;
     CaptureOptions options;
     options.file = testutil::tempDir() / "conversion-taken.raw";
-    options.accepts = [](const DeviceFormat&) { return false; };
+    options.accepts = [](const DeviceFormat& f) { return f.type == SampleType::Dsd8; };
     PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
     engine.openAndPlay(file);
     ASSERT_TRUE(engine.waitForState(PlayState::Paused, std::chrono::seconds(10))) << engine.snapshot().errorDetail;
