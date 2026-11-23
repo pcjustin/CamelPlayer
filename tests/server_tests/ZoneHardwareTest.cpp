@@ -615,30 +615,37 @@ TEST(ZoneHardware, DISABLED_TwoZonesModulatePcmToDsd256AtOnce) {
     server.shutdown();
 }
 
-// One network player alone (CAMEL_MZ12_PLAYER, part of its name), playing the six-zone run's NAS tones over and over for
-// two minutes (CAMEL_MZ12_MINUTES), its state every ten seconds: for a fault MZ-R12 found.
-TEST(ZoneHardware, DISABLED_OneNetworkPlayerFromTheNas) {
+namespace {
+
+// The settings that make one network player (CAMEL_MZ12_PLAYER, part of its name) a zone of its own, and the zone.
+std::optional<std::pair<Settings, std::string>> onePlayer() {
     wchar_t part[64] = {};
     GetEnvironmentVariableW(L"CAMEL_MZ12_PLAYER", part, 64);
     const std::string name = toUtf8(part);
-    if (name.empty()) GTEST_SKIP() << "set CAMEL_MZ12_PLAYER";
+    if (name.empty()) return std::nullopt;
     Settings settings;
     settings.autoplay = false;
     LocalServer scout(fromJson(toJson(settings)));
     const auto d = findMz12Devices(scout);
+    if (!d) return std::nullopt;
+    const std::string udn = idNamed(scout.snapshot().devices.network, name);
     scout.shutdown();
-    if (!d) GTEST_SKIP();
-    LocalServer probe(fromJson(toJson(settings)));
-    findMz12Devices(probe);
-    const std::string udn = idNamed(probe.snapshot().devices.network, name);
-    probe.shutdown();
-    ASSERT_FALSE(udn.empty()) << name;
+    if (udn.empty()) return std::nullopt;
     settings.wasapi.deviceId = d->cirrus;
     settings.outputs = {mz12Output(Backend::Network, udn), mz12Output(Backend::Wasapi, d->cirrus)};
-    settings = fromJson(toJson(settings));
+    return std::pair{fromJson(toJson(settings)), zoneId(Backend::Network, udn)};
+}
+
+} // namespace
+
+// One network player alone, playing the six-zone run's NAS tones over and over for two minutes (CAMEL_MZ12_MINUTES), its
+// state every ten seconds: for a fault MZ-R12 found.
+TEST(ZoneHardware, DISABLED_OneNetworkPlayerFromTheNas) {
+    const auto one = onePlayer();
+    if (!one) GTEST_SKIP() << "set CAMEL_MZ12_PLAYER to part of a player's name, with every device of MZ-R12 on";
+    const auto& [settings, zone] = *one;
     LocalServer server(settings);
     ASSERT_TRUE(findMz12Devices(server));
-    const auto zone = zoneId(Backend::Network, udn);
     wchar_t minutesText[16] = {};
     const double minutes =
         GetEnvironmentVariableW(L"CAMEL_MZ12_MINUTES", minutesText, 16) ? std::wcstod(minutesText, nullptr) : 2.0;
@@ -654,5 +661,40 @@ TEST(ZoneHardware, DISABLED_OneNetworkPlayerFromTheNas) {
     }
     server.submit(zoneCommand(CommandKind::Stop, zone));
     server.waitIdle();
+    server.shutdown();
+}
+
+// One network player started and stopped twelve times, three seconds apart, and how long each start took to play: for
+// the 20 s the KECES took at times.
+TEST(ZoneHardware, DISABLED_ANetworkPlayerStartedAgainAndAgain) {
+    const auto one = onePlayer();
+    if (!one) GTEST_SKIP() << "set CAMEL_MZ12_PLAYER to part of a player's name, with every device of MZ-R12 on";
+    const auto& [settings, zone] = *one;
+    LocalServer server(settings);
+    ASSERT_TRUE(findMz12Devices(server));
+    const auto tone = onNas(quietTone("mz-r12-keces-a", 44100, 16, 180));
+    double longest = 0;
+    for (int start = 1; start <= 12; ++start) {
+        const auto asked = std::chrono::steady_clock::now();
+        server.submit(queueIn(zone, {tone}));
+        server.waitIdle();
+        bool waited = false;
+        const bool played = waitFor(
+            server,
+            [&](const Snapshot& s) {
+                waited = waited || in(s, zone).playback.waitingForPlayer;
+                return seconds(in(s, zone)) > 0.5;
+            },
+            40s);
+        const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - asked).count();
+        longest = std::max(longest, took);
+        std::cout << start << ": " << (played ? "playing after " : "not playing after ") << std::fixed << std::setprecision(1)
+                  << took << " s" << (waited ? ", shown as waited for" : "") << '\n'
+                  << std::flush;
+        server.submit(zoneCommand(CommandKind::Stop, zone));
+        server.waitIdle();
+        std::this_thread::sleep_for(3s);
+    }
+    std::cout << "longest start " << longest << " s\n";
     server.shutdown();
 }

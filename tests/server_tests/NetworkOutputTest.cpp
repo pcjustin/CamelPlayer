@@ -1094,6 +1094,20 @@ TEST(NetworkOutputTest, APlayerRunningThroughItsStreamFasterThanItPlaysIsReporte
     EXPECT_TRUE(std::ranges::none_of(output.events(), [](const PlayerEvent& e) { return e.kind == PlayerEventKind::Seeked; }));
 }
 
+// A player that takes long to start, as the KECES took 20 s at times, is shown as waited for, then as playing.
+TEST(NetworkOutputTest, APlayerSlowToStartIsShownAsWaitedFor) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    renderer.startSlowly(4000);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    output->start();
+    EXPECT_FALSE(output->status().waitingForPlayer) << "only just asked";
+    EXPECT_TRUE(waitFor([&] { return output->status().waitingForPlayer; }, 4s));
+    EXPECT_TRUE(waitFor([&] { return !output->status().waitingForPlayer; }, 10s));
+    EXPECT_EQ(renderer.state(), "PLAYING");
+}
+
 TEST(NetworkOutputTest, TheEndOfTheLastTrackIsNotAStopOfItsOwn) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);

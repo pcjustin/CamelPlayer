@@ -1110,9 +1110,10 @@ void MainWindow::showZoneRows(const Snapshot& snapshot) {
                                   ? ui::format(L"Zone_InUseBy", {std::wstring(zoneName(snapshot, zone.inUseBy))})
                               : p.error            ? ui::errorTitle(*p.error)
                               : p.bufferingSeconds ? ui::format(L"State_Buffering", {std::to_wstring(*p.bufferingSeconds)})
-                              : p.state == PlaybackState::Playing ? tr(L"State_Playing")
-                              : p.state == PlaybackState::Paused  ? tr(L"State_Paused")
-                                                                  : tr(L"State_Stopped");
+                              : p.state == PlaybackState::Playing && p.waitingForPlayer ? tr(L"State_WaitingForPlayer")
+                              : p.state == PlaybackState::Playing                       ? tr(L"State_Playing")
+                              : p.state == PlaybackState::Paused                        ? tr(L"State_Paused")
+                                                                                        : tr(L"State_Stopped");
         row.title.Text(name);
         row.title.FontWeight(selected ? Microsoft::UI::Text::FontWeights::SemiBold()
                                       : Microsoft::UI::Text::FontWeights::Normal());

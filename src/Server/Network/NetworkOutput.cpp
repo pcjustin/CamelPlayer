@@ -361,12 +361,20 @@ public:
         status.mode = player_->mode();
         status.detail = player_->detail();
         status.heldFrames = held();
+        status.waitingForPlayer = waitingForPlayer();
         if (options_.gapless && !gapless_)
             status.adjustments.emplace_back("this player cannot follow one track with the next without a gap");
         return status;
     }
 
 private:
+    // Asked to play a moment ago and neither reported playing nor moved since it took the track.
+    bool waitingForPlayer() const {
+        std::scoped_lock lock(mutex_);
+        return started_ && playing_ && !released_ && !closing_ && link_ && askedToPlay_ != Clock::time_point{} &&
+               Clock::now() - askedToPlay_ >= kPatience && !link_->played() && link_->positionMs() == 0;
+    }
+
     // What the player takes, read again later for what it could not tell yet, as when it was waking from standby.
     // A player that does not answer takes the requests' time to fail, 8 s, which every format a negotiation tries took
     // again; it is asked again only after a while. One that refuses at once, as when it wakes, is asked at every call.

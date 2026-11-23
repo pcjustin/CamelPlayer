@@ -767,11 +767,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     // shows whether it plays: a ring turns around it while a slow source is buffered, and a dot on it stays for an error
     // once its bar is closed; its tip says how long playback waits, or what failed.
     const bool buffering = !s.error && s.bufferingSeconds;
+    const bool waiting = !s.error && !buffering && s.waitingForPlayer && s.state == PlaybackState::Playing;
     const Symbol symbol = s.state == PlaybackState::Playing || s.bufferingSeconds ? Symbol::Pause : Symbol::Play;
     if (PlayPauseIcon().Symbol() != symbol) PlayPauseIcon().Symbol(symbol);
     const hstring action = tr(symbol == Symbol::Pause ? L"Tip_Pause" : L"Tip_Play");
     const hstring playTip = s.error     ? ui::errorTitle(*s.error)
                             : buffering ? ui::format(L"State_Buffering", {std::to_wstring(*s.bufferingSeconds)})
+                            : waiting   ? tr(L"State_WaitingForPlayer")
                                         : action;
     if (action != shownPlayName_ || playTip != shownPlayTip_) {
         shownPlayName_ = action;
@@ -781,11 +783,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         Automation::AutomationProperties::SetHelpText(PlayPauseButton(), playTip == action ? hstring{} : playTip);
     }
     // What the play button shows, said as it changes, as the state badge did.
-    setAnnounced(PlaybackStateText(), s.error || buffering                ? playTip
+    setAnnounced(PlaybackStateText(), s.error || buffering || waiting     ? playTip
                                       : s.state == PlaybackState::Playing ? tr(L"State_Playing")
                                       : s.state == PlaybackState::Paused  ? tr(L"State_Paused")
                                                                           : tr(L"State_Stopped"));
-    BufferingRing().IsActive(buffering);
+    BufferingRing().IsActive(buffering || waiting);
     // The waveform appears once the Server has it: made at once for the playing track, asked for every 2 seconds. Stopped,
     // there is none: the plain slider shows until a track plays or pauses again.
     if (const std::string shown = s.state == PlaybackState::Stopped ? std::string() : s.pathUtf8; shown != waveformPath_) {

@@ -222,6 +222,7 @@
   <data name="State_Stopped" xml:space="preserve"><value>Stopped</value></data>
   <data name="State_Buffering" xml:space="preserve"><value>Buffering, about {0} s</value></data>
   <data name="State_BufferingDetail" xml:space="preserve"><value>The file reads slower than it plays, so it is buffered first to avoid breaks.</value></data>
+  <data name="State_WaitingForPlayer" xml:space="preserve"><value>Waiting for the player to start</value></data>
   <data name="State_ReceiverAsking" xml:space="preserve"><value>Allow CamelPlayer on {0}</value></data>
   <data name="State_ReceiverAskingDetail" xml:space="preserve"><value>Accept CamelPlayer in the notification on the receiver; it waits up to 15 seconds.</value></data>
   <data name="Lamp_BitPerfectToHQPlayer" xml:space="preserve"><value>Bit-perfect to HQPlayer</value></data>

@@ -333,6 +333,7 @@ json toJson(const PlaybackSnapshot& p) {
             {"bufferFrames", p.bufferFrames},
             {"underruns", p.underruns},
             {"bufferingSeconds", p.bufferingSeconds ? json(*p.bufferingSeconds) : json(nullptr)},
+            {"waitingForPlayer", p.waitingForPlayer},
             {"playerVolume", p.playerVolume ? json(*p.playerVolume) : json(nullptr)},
             {"playerVolumeDb", p.playerVolumeDb ? json(*p.playerVolumeDb) : json(nullptr)},
             {"playerMuted", p.playerMuted},
@@ -369,6 +370,7 @@ PlaybackSnapshot playbackFrom(const json& j) {
     p.underruns = value<uint64_t>(j, "underruns");
     p.bufferingSeconds =
         optional<uint32_t>(j, "bufferingSeconds", [](const json& v) { return unsignedFrom<uint32_t>(v, "bufferingSeconds"); });
+    p.waitingForPlayer = j.contains("waitingForPlayer") && value<bool>(j, "waitingForPlayer");
     p.playerVolume =
         optional<uint32_t>(j, "playerVolume", [](const json& v) { return unsignedFrom<uint32_t>(v, "playerVolume"); });
     if (j.contains("playerVolumeDb") && !j["playerVolumeDb"].is_null()) p.playerVolumeDb = value<double>(j, "playerVolumeDb");

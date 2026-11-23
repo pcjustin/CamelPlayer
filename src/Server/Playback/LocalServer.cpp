@@ -195,6 +195,7 @@ PlaybackSnapshot playback(const audio::EngineSnapshot& s) {
     p.bufferFrames = s.outputStatus.bufferFrames;
     p.underruns = s.underruns;
     p.bufferingSeconds = s.bufferingSeconds;
+    p.waitingForPlayer = s.outputStatus.waitingForPlayer;
     p.error = s.error;
     p.errorDetail = s.errorDetail;
     p.revision = s.revision;

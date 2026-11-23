@@ -964,11 +964,14 @@ private:
         uint64_t buffered = 0;
         const OutputStatus status = outputStatus(); // drivers add measurements once the stream runs
         logLateCallbacks(status);
+        bool waitingChanged = false;
         {
             std::lock_guard lock(snapMutex_);
+            waitingChanged = snap_.outputStatus.waitingForPlayer != status.waitingForPlayer;
             snap_.outputStatus = status;
             buffered = snap_.outputStatus.bufferFrames;
         }
+        if (waitingChanged) publish();
         const uint64_t consumed = consumed_.load(std::memory_order_relaxed);
         held_.store(status.heldFrames, std::memory_order_relaxed);
         const uint64_t rendered = renderedFrames_.load(std::memory_order_relaxed);

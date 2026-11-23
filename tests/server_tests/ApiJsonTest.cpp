@@ -88,6 +88,7 @@ Snapshot fullSnapshot() {
     p.bufferFrames = 512;
     p.underruns = 2;
     p.bufferingSeconds = 37;
+    p.waitingForPlayer = true;
     p.playerVolume = 48;
     p.playerMuted = true;
     p.error = ErrorCode::DeviceLost;

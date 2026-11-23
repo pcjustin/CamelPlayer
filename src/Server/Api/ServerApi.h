@@ -262,6 +262,7 @@ struct PlaybackSnapshot {
     uint32_t bufferFrames = 0;
     uint64_t underruns = 0;
     std::optional<uint32_t> bufferingSeconds; // paused until a slow source is buffered: about this many seconds left
+    bool waitingForPlayer = false;            // a network player asked to play that has not begun to
     std::optional<uint32_t> playerVolume;     // the network player's own level, 0-100; nothing without one to follow
     std::optional<double> playerVolumeDb;     // what `playerVolume` stands for on a player whose volume is in dB (HQPlayer)
     bool playerMuted = false;

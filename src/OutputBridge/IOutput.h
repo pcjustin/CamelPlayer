@@ -64,6 +64,8 @@ struct OutputStatus {
     double periodMs = 0; // the buffer period
     // Frames rendered that the device has not played yet, where that is far more than its buffer (a network player).
     uint64_t heldFrames = 0;
+    // A network player asked to play that has not begun to (the KECES has taken 20 s).
+    bool waitingForPlayer = false;
 };
 
 class IOutput {

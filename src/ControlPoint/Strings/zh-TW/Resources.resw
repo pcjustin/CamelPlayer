@@ -222,6 +222,7 @@
   <data name="State_Stopped" xml:space="preserve"><value>已停止</value></data>
   <data name="State_Buffering" xml:space="preserve"><value>緩衝中，約 {0} 秒</value></data>
   <data name="State_BufferingDetail" xml:space="preserve"><value>來源讀取速度比播放慢，先緩衝再播，避免斷斷續續。</value></data>
+  <data name="State_WaitingForPlayer" xml:space="preserve"><value>等待播放機開始播放</value></data>
   <data name="State_ReceiverAsking" xml:space="preserve"><value>請在「{0}」上允許 CamelPlayer</value></data>
   <data name="State_ReceiverAskingDetail" xml:space="preserve"><value>請在接收端跳出的通知中接受 CamelPlayer；它最多等 15 秒。</value></data>
   <data name="Lamp_BitPerfectToHQPlayer" xml:space="preserve"><value>Bit-perfect 到 HQPlayer</value></data>
