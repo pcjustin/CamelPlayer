@@ -389,8 +389,40 @@ TEST_F(AirPlayFinderTest, AReceiverThatTurnsItsPasswordOnAsksForItAndIsAskedAgai
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Password; }));
 
     announce("0x4");
-    EXPECT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 2; }));
+    // Asked on a thread of its own, every 100 ms once it is free: a busy computer takes longer.
+    EXPECT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 2; }, 20s));
     EXPECT_TRUE(waitFor([&] { return supportOf() == Support::Supported; }));
+}
+
+// The receivers are asked one after another on a thread of their own, which one that does not answer holds until it
+// times out, a second here: a password turned on and off again meanwhile is a setting announced all the same, so the
+// receiver is asked again once the thread is free.
+TEST_F(AirPlayFinderTest, APasswordTurnedOnAndOffWhileAnotherIsAskedIsAskedAgain) {
+    FakeRtsp silent;
+    silent.stopAnswering();
+    const auto announce = [&](const std::string& flags) {
+        mdns_.setRaop("C0FFEE000004", {"am=Mac14,2", "cn=0,1", "et=0,3,5", "sf=" + flags, "vs=1005.13.5"});
+        mdns_.announce("C0FFEE000004", {"deviceid=C0:FF:EE:00:00:04", "flags=" + flags, "acl=0"});
+    };
+    const auto supportOfMac = [&] {
+        const auto all = receivers();
+        const auto mac = std::ranges::find(all, std::string("C0FFEE000004"), &Receiver::id);
+        return mac == all.end() ? Support::Refused : mac->support;
+    };
+    mdns_.add(record(rtsp_, "C0FFEE000004", "MacBook Pro"));
+    mdns_.add(record(silent, "C0FFEE000005", "Silent"));
+    announce("0x4");
+    start();
+    ASSERT_TRUE(found(2));
+    ASSERT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 1 && silent.count("OPTIONS") == 1; }));
+    std::this_thread::sleep_for(1500ms); // past the silent one's first ask
+    mdns_.setRaop("C0FFEE000005", {"am=AudioAccessory5,1", "cn=0,1", "et=0,4", "sf=0x4", "vs=999.1"});
+    ASSERT_TRUE(waitFor([&] { return silent.count("OPTIONS") == 2; })) << "the silent one asked again, for a second";
+    announce("0x284");
+    ASSERT_TRUE(waitFor([&] { return supportOfMac() == Support::Password; }));
+    announce("0x4");
+    // Asked on a thread of its own, every 100 ms once it is free: a busy computer takes longer.
+    EXPECT_TRUE(waitFor([&] { return rtsp_.count("OPTIONS") == 2; }, 20s));
 }
 
 TEST_F(AirPlayFinderTest, AReceiverWithAirPlayAloneIsFound) {

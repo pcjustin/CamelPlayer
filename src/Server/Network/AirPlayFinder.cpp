@@ -159,8 +159,11 @@ struct AirPlayFinder::Impl {
     std::map<std::string, Host> hosts;       // by host name
     // Only the asking thread.
     std::map<std::string, std::string> lastAsked; // by receiver
+    std::map<std::string, uint64_t> changesAsked; // by receiver, `settingChanges` as it was last asked
     mutable std::mutex mutex;
     std::map<std::string, Verdict> verdicts; // by receiver
+    // By receiver, each other setting it announced, even one it went back to before the asking thread looked again.
+    std::map<std::string, uint64_t> settingChanges;
     std::atomic<bool> verdictsChanged = false;
     std::vector<Receiver> known;
     std::set<std::string> toCheck;
@@ -339,6 +342,8 @@ struct AirPlayFinder::Impl {
         {
             std::scoped_lock lock(mutex);
             for (auto& receiver : receivers) {
+                const auto before = std::ranges::find(known, receiver.id, &Receiver::id);
+                if (before != known.end() && askedAt(*before) != askedAt(receiver)) ++settingChanges[receiver.id];
                 const auto verdict = verdicts.find(receiver.id);
                 if (verdict != verdicts.end() && verdict->second.asked == askedAt(receiver) &&
                     (receiver.support == Support::Supported || receiver.support == Support::Password)) {
@@ -363,9 +368,11 @@ struct AirPlayFinder::Impl {
     void askReceivers() {
         std::vector<Receiver> receivers;
         std::set<std::string> wanted, paired;
+        std::map<std::string, uint64_t> changes;
         {
             std::scoped_lock lock(mutex);
             receivers = known;
+            changes = settingChanges;
             wanted.swap(toCheck);
             paired.swap(pairedNow);
             for (const auto& receiver : receivers)
@@ -385,8 +392,10 @@ struct AirPlayFinder::Impl {
             }();
             const bool askable = receiver.support == Support::Supported || keptPairing || (session && judged);
             std::string& last = lastAsked[receiver.id];
-            const bool unchanged = last == askedAt(receiver);
+            uint64_t& changesBefore = changesAsked[receiver.id];
+            const bool unchanged = last == askedAt(receiver) && changesBefore == changes[receiver.id];
             last = askedAt(receiver);
+            changesBefore = changes[receiver.id];
             if (askable && (session || !unchanged)) judge(receiver, session);
             if (session) {
                 std::scoped_lock lock(mutex);
