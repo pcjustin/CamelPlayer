@@ -270,6 +270,8 @@ public:
             queuedNext_ = 0;
             announcedBody_ = 0;
             followedChange_ = false;
+            filled_ = false;
+            refetched_.reset();
             closing_ = false;
             bodies_.push_back(makeBody(first, details));
         }
@@ -407,8 +409,12 @@ private:
             if (!started_) return;
         }
         if (event.kind == PlayerEventKind::Stopped) {
-            // Another source playing by other means than AVTransport, or the player's own remote, stopped it.
-            if (stoppedByItself()) release(Error(ErrorCode::DeviceInUse, player_->inUseByAnother()));
+            // Another source playing by other means than AVTransport, or the player's own remote, stopped it; or the
+            // track it fetched again from its start, which a player cannot go on with where it was (the KECES).
+            if (stoppedByItself())
+                release(refetchedFromStart()
+                            ? Error(ErrorCode::DriverError, "the player stopped after it fetched the track again from its start")
+                            : Error(ErrorCode::DeviceInUse, player_->inUseByAnother()));
             return;
         }
         if (event.kind == PlayerEventKind::NextTrack) {
@@ -443,6 +449,11 @@ private:
         std::scoped_lock lock(mutex_);
         return playing_ && !closing_ && !released_ && link_->stopped() && link_->played() && !bodies_.empty() &&
                !bodies_.front().complete && Clock::now() - askedToPlay_ >= kChangeSettles;
+    }
+
+    bool refetchedFromStart() const {
+        std::scoped_lock lock(mutex_);
+        return !bodies_.empty() && refetched_ == bodies_.front().id;
     }
 
     // Some seconds after Play, a player stopped while its track is still being sent: one that never got going, as the
@@ -795,6 +806,8 @@ private:
             if (follow_) follow_({PlayerEventKind::Seeked, positionMs});
             return respond(client, "503 Service Unavailable");
         }
+        if (!ranged && !head && body == &bodies_.front() && link_ && link_->played() && link_->positionMs() >= kNearStartMs)
+            refetched_ = body->id;
         const uint64_t last = end ? std::min(*end, total - 1) : total - 1;
         std::string reply = ranged ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n";
         reply += "Content-Type: " + body->contentType + "\r\nContent-Length: " + std::to_string(last - start + 1) +
@@ -872,9 +885,12 @@ private:
         if (!source_ || ((!started_ || !playing_) && !loading_)) return false;
         const auto now = Clock::now();
         const uint64_t played = allPlayed();
-        // A player whose position stands still may want more in its buffer before it goes on (a Linkplay module does).
+        // A player whose position stands still may want more in its buffer before it goes on (a Linkplay module does), and
+        // is kept that full: the KECES fetched its track again when the stream stood still after the 30 s it took.
         const bool waiting = playingSince_ != Clock::time_point{} && now - std::max(playingSince_, lastAdvance_) > kPatience;
-        const auto ahead = bodies_.size() > 1 ? options_.nextTrackLead : waiting ? options_.aheadBeforePlay : options_.ahead;
+        if (waiting) filled_ = true;
+        auto ahead = bodies_.size() > 1 ? options_.nextTrackLead : waiting ? options_.aheadBeforePlay : options_.ahead;
+        if (filled_) ahead = std::max(ahead, options_.aheadBeforePlay);
         return framesRendered_ < played + uint64_t(ahead.count()) * format_.sampleRate / 1000;
     }
 
@@ -1052,7 +1068,9 @@ private:
     _Guarded_by_(mutex_) mutable uint64_t highestMs_ = 0; // of the track playing
     _Guarded_by_(mutex_) mutable bool reportsPosition_ = false;
     _Guarded_by_(mutex_) Clock::time_point changedAt_;
-    _Guarded_by_(mutex_) bool followedChange_ = false; // the last change of track was seen by the position first
+    _Guarded_by_(mutex_) bool followedChange_ = false;       // the last change of track was seen by the position first
+    _Guarded_by_(mutex_) bool filled_ = false;               // the player took `aheadBeforePlay` before it went on
+    _Guarded_by_(mutex_) std::optional<uint32_t> refetched_; // the track the player fetched again from its start
     _Guarded_by_(mutex_) mutable uint64_t lastReported_ = 0;
     _Guarded_by_(mutex_) mutable uint64_t clockMs_ = 0;
     _Guarded_by_(mutex_) mutable Clock::time_point clockAt_;

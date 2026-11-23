@@ -4,7 +4,8 @@
 
 // The output that streams to a UPnP AV or OpenHome player (docs/Plan.md §5.10). The Engine renders as for any device;
 // the player fetches one URL per track from this output's HTTP server, as WAV, L16 or L24, or raw DSD as DSF. Rendering
-// stays a few seconds ahead of what the player has played, so a change is heard about a second after it is asked for.
+// stays a few seconds ahead of what the player has played, so a change is heard about a second after it is asked for; a
+// player that filled its buffer before it played is kept that full.
 #pragma once
 
 #include <chrono>

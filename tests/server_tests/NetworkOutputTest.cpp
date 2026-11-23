@@ -608,6 +608,34 @@ TEST(NetworkOutputTest, TheStandInClockStopsWhileThePlayerIsPaused) {
         << "the pause was counted as played: " << heldWhenPaused << " held when paused, " << heldWhenResumed << " after";
 }
 
+// A player that took 30 s before it played, as a Linkplay module does, is sent more as it plays: the stream does not
+// stand still until it has played down to the usual few seconds (the KECES fetched its track again then).
+TEST(NetworkOutputTest, APlayerThatFilledItsBufferBeforePlayingIsKeptFilled) {
+    auto script = std::make_shared<Script>();
+    auto output = createStreamOutput(std::make_unique<ScriptedPlayer>(script), sampleDetails, {});
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 120);
+    output->open(k16, &source);
+    output->start();
+    const auto started = std::chrono::steady_clock::now();
+    std::atomic<bool> done = false;
+    std::thread player([&] {
+        while (!done) {
+            const auto since = std::chrono::steady_clock::now() - started;
+            if (since > 2s)
+                script->positionMs = uint64_t(std::chrono::duration_cast<std::chrono::seconds>(since - 2s).count()) * 1000;
+            std::this_thread::sleep_for(250ms);
+        }
+    });
+    std::this_thread::sleep_until(started + 5s);
+    const uint64_t early = source.rendered();
+    std::this_thread::sleep_until(started + 15s);
+    const uint64_t later = source.rendered();
+    done = true;
+    player.join();
+    output->close();
+    EXPECT_GT(later, early + 44100ULL * 8) << "the stream stood still while the player played";
+}
+
 // A player whose RelTime now and then comes a second late, as the DMP-A6's did, still plays on: the position played is
 // not pulled back to the late report.
 TEST(NetworkOutputTest, APositionReportedLateIsNotPulledBack) {
@@ -753,8 +781,9 @@ struct Exchange {
     std::string reply;
 };
 
-// `request` sent from the local address `from` to `url`'s host and port, and what comes back.
-Exchange exchangeFrom(const char* from, const std::string& url, const std::string& request, DWORD waitMs = 3000) {
+// `request` sent from the local address `from` to `url`'s host and port, and what comes back, read until `enough`.
+Exchange exchangeFrom(const char* from, const std::string& url, const std::string& request, DWORD waitMs = 3000,
+                      size_t enough = SIZE_MAX) {
     const size_t hostAt = url.find("//") + 2, portAt = url.find(':', hostAt), pathAt = url.find('/', hostAt);
     const std::string host = url.substr(hostAt, portAt - hostAt);
     const auto port = uint16_t(std::stoi(url.substr(portAt + 1, pathAt - portAt - 1)));
@@ -773,7 +802,8 @@ Exchange exchangeFrom(const char* from, const std::string& url, const std::strin
         if (!request.empty()) send(s, request.data(), int(request.size()), 0);
         char buffer[4096];
         int n = 0;
-        while ((n = recv(s, buffer, sizeof(buffer), 0)) > 0) result.reply.append(buffer, size_t(n));
+        while (result.reply.size() < enough && (n = recv(s, buffer, sizeof(buffer), 0)) > 0)
+            result.reply.append(buffer, size_t(n));
         result.closed = n == 0 || (n < 0 && WSAGetLastError() == WSAECONNRESET);
     }
     closesocket(s);
@@ -1010,6 +1040,35 @@ TEST(NetworkOutputTest, APlayerThatStopsMidTrackIsInUseByAnotherSource) {
     ASSERT_TRUE(waitFor([&] { return raised == int(audio::ErrorCode::DeviceInUse); }));
     output->close();
     EXPECT_TRUE(controlsSince(renderer, before).empty()) << controlsSince(renderer, before).front();
+}
+
+// The KECES fetched its track again, now and then from its start, when the stream stood still after the 30 s it took
+// before it played; what it fetched from the start it could not go on with, and it stopped. Such a stop is not taken
+// for another source.
+TEST(NetworkOutputTest, AStopAfterThePlayerFetchedTheTrackAgainFromItsStartIsNoTakeover) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 60);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    std::string message;
+    std::mutex mutex;
+    output->setErrorHandler([&](const audio::Error& e) {
+        std::scoped_lock lock(mutex);
+        message = e.what();
+        raised = int(e.code());
+    });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return !renderer.currentUri().empty() && source.rendered() > 0; }));
+    std::this_thread::sleep_for(3500ms);
+    const auto url = renderer.currentUri();
+    const std::string again = "GET " + url.substr(url.find('/', url.find("//") + 2)) + " HTTP/1.1\r\nHost: player\r\n\r\n";
+    EXPECT_EQ(exchangeFrom("127.0.0.1", url, again, 3000, 12).reply.substr(0, 12), "HTTP/1.1 200");
+    renderer.stopOnItsOwn();
+    ASSERT_TRUE(waitFor([&] { return raised != kNoError; }));
+    std::scoped_lock lock(mutex);
+    EXPECT_EQ(raised, int(audio::ErrorCode::DriverError)) << message;
+    EXPECT_NE(message.find("from its start"), std::string::npos) << message;
 }
 
 TEST(NetworkOutputTest, TheEndOfTheLastTrackIsNotAStopOfItsOwn) {
