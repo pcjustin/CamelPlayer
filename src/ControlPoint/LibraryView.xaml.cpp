@@ -475,6 +475,10 @@ void LibraryView::open(View view, bool push) {
     PictureCredit().Visibility(Visibility::Collapsed);
     PictureConsent().IsOpen(false);
     PictureError().IsOpen(false);
+    // The picture's menu offers no candidate and no Remove picture until the open artist's own lookup says so.
+    RemovePictureItem().Visibility(Visibility::Collapsed);
+    PictureCandidates().Items().Clear();
+    PictureCandidates().Visibility(Visibility::Collapsed);
     if (pictured) {
         ArtistInitial().Text(ui::initialOf(view.title));
         ArtistPictureFrame().Background(Media::SolidColorBrush(ui::avatarColor(view.title)));
