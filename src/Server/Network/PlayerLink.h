@@ -56,15 +56,24 @@ public:
     std::vector<PlayerEvent> lost();
 
 private:
+    struct Report {
+        uint64_t positionMs = 0;
+        std::chrono::milliseconds at{};
+    };
+
     void followTrack(const std::string& track, std::chrono::milliseconds now, std::vector<PlayerEvent>& events);
+    void followPosition(const Report& report, std::vector<PlayerEvent>& events);
+    bool foresaw(const std::optional<Report>& from, const Report& report) const;
+    void forgetPosition();
 
     ExpectedTracks expected_;
     std::string left_;     // the track `advance` moved on from
     std::string justLeft_; // the track a change the player reported left, which it may report a while longer
     std::chrono::milliseconds leftUntil_{};
     std::optional<TransportState> state_;
-    std::optional<uint64_t> position_;
-    std::chrono::milliseconds positionAt_{};
+    std::optional<Report> position_; // where the player is
+    std::optional<Report> before_;   // the report before it, which is where the player is when that one came late
+    std::optional<Report> jump_;     // off both, a seek once the next report bears it out
     bool ended_ = false;
     std::chrono::milliseconds settledAt_{};
 };

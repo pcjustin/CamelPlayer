@@ -355,6 +355,27 @@ TEST(PlayerFollowerTest, FollowsThePlayersOwnPausePlayAndStop) {
     EXPECT_EQ(follower.observe(seen, 30ms), (std::vector<PlayerEvent>{{PlayerEventKind::Stopped}}));
 }
 
+// RelTime has whole seconds and a report can come late, so a late one and the one on time after it can be further
+// apart than the margin while the player plays on: neither is a seek (the KECES, 2026-11-22).
+TEST(PlayerFollowerTest, ALateReportFollowedByOneOnTimeIsNoSeek) {
+    PlayerFollower follower;
+    follower.expect({"a", "", ""});
+    PlayerObservation seen;
+    seen.state = TransportState::Playing;
+    const auto at = [&](uint64_t positionMs, std::chrono::milliseconds now) {
+        seen.positionMs = positionMs;
+        return follower.observe(seen, now);
+    };
+    at(60000, 0ms);
+    EXPECT_TRUE(at(59000, 1000ms).empty()) << "late, within the margin";
+    EXPECT_TRUE(at(62000, 1900ms).empty()) << "on time";
+    EXPECT_TRUE(at(63000, 2900ms).empty());
+    EXPECT_TRUE(at(60000, 3900ms).empty()) << "late, past the margin";
+    EXPECT_TRUE(at(65000, 4900ms).empty()) << "on time";
+    EXPECT_TRUE(at(66000, 5900ms).empty());
+}
+
+// A seek made on the player itself, with its remote or its app, is followed once the next report bears it out.
 TEST(PlayerFollowerTest, ReportsASeekOnlyWhenThePositionJumps) {
     PlayerFollower follower;
     follower.expect({"a", "", ""});
@@ -365,9 +386,60 @@ TEST(PlayerFollowerTest, ReportsASeekOnlyWhenThePositionJumps) {
     seen.positionMs = 15000;
     EXPECT_TRUE(follower.observe(seen, 5000ms).empty());
     seen.positionMs = 60000;
-    EXPECT_EQ(follower.observe(seen, 6000ms), (std::vector<PlayerEvent>{{PlayerEventKind::Seeked, 60000}}));
+    EXPECT_TRUE(follower.observe(seen, 6000ms).empty());
+    seen.positionMs = 61000;
+    EXPECT_EQ(follower.observe(seen, 7000ms), (std::vector<PlayerEvent>{{PlayerEventKind::Seeked, 61000}}));
     seen.positionMs = 5000;
-    EXPECT_EQ(follower.observe(seen, 7000ms), (std::vector<PlayerEvent>{{PlayerEventKind::Seeked, 5000}}));
+    EXPECT_TRUE(follower.observe(seen, 8000ms).empty());
+    seen.positionMs = 6000;
+    EXPECT_EQ(follower.observe(seen, 9000ms), (std::vector<PlayerEvent>{{PlayerEventKind::Seeked, 6000}}));
+    seen.positionMs = 7000;
+    EXPECT_TRUE(follower.observe(seen, 10000ms).empty());
+}
+
+// One report off the course that the next one does not bear out is neither a seek nor what the next is measured from.
+TEST(PlayerFollowerTest, AStrayReportIsNoSeek) {
+    PlayerFollower follower;
+    follower.expect({"a", "", ""});
+    PlayerObservation seen;
+    seen.state = TransportState::Paused;
+    seen.positionMs = 30000;
+    follower.observe(seen, 0ms);
+    seen.positionMs = 90000;
+    EXPECT_TRUE(follower.observe(seen, 500ms).empty());
+    seen.positionMs = 30000;
+    EXPECT_TRUE(follower.observe(seen, 1000ms).empty());
+    seen.positionMs = 30000;
+    EXPECT_TRUE(follower.observe(seen, 1500ms).empty());
+}
+
+// Near the start of the next track, whether the player said it moved on or only its position shows it, is no seek.
+TEST(PlayerFollowerTest, AReportNearTheStartAfterAChangeOfTrackIsNoSeek) {
+    PlayerFollower follower;
+    follower.expect({"a", "b", ""});
+    PlayerObservation seen;
+    seen.state = TransportState::Playing;
+    seen.positionMs = 178000;
+    follower.observe(seen, 0ms);
+    seen.track = "b";
+    seen.positionMs = 0;
+    EXPECT_EQ(follower.observe(seen, 1000ms), (std::vector<PlayerEvent>{{PlayerEventKind::NextTrack}}));
+    seen.positionMs = 1000;
+    EXPECT_TRUE(follower.observe(seen, 2000ms).empty());
+    seen.positionMs = 2000;
+    EXPECT_TRUE(follower.observe(seen, 3000ms).empty());
+
+    follower.expectNext("c");
+    seen.track.reset();
+    seen.positionMs = 179000;
+    EXPECT_TRUE(follower.observe(seen, 180000ms).empty());
+    seen.positionMs = 500; // the next track, which the player still reports as the one before
+    EXPECT_TRUE(follower.observe(seen, 181000ms).empty());
+    follower.advance();
+    seen.positionMs = 1500;
+    EXPECT_TRUE(follower.observe(seen, 182000ms).empty());
+    seen.positionMs = 2500;
+    EXPECT_TRUE(follower.observe(seen, 183000ms).empty());
 }
 
 TEST(PlayerFollowerTest, AStoppedPlayersPositionIsNotASeek) {
@@ -828,8 +900,9 @@ TEST(PlayerLinkTest, FollowsAnOpenHomePlayer) {
     ASSERT_TRUE(events->waitFor(PlayerEventKind::PreviousTrack));
     renderer.emitVariable("Time", "Seconds", "10");
     renderer.emitVariable("Time", "Seconds", "200");
+    renderer.emitVariable("Time", "Seconds", "201");
     ASSERT_TRUE(events->waitFor(PlayerEventKind::Seeked));
-    EXPECT_EQ(events->find(PlayerEventKind::Seeked)->positionMs, 200000U);
+    EXPECT_EQ(events->find(PlayerEventKind::Seeked)->positionMs, 201000U);
 }
 
 // A connection reset before it is read, as a port probe's, leaves the player's events coming.

@@ -51,7 +51,7 @@ void PlayerFollower::expect(ExpectedTracks tracks) {
     left_.clear();
     justLeft_.clear();
     ended_ = false;
-    position_.reset();
+    forgetPosition();
 }
 
 void PlayerFollower::expectLoaded(ExpectedTracks tracks, milliseconds now) {
@@ -66,7 +66,7 @@ void PlayerFollower::expectNext(std::string track) {
 void PlayerFollower::advance() {
     left_ = expected_.current;
     expected_ = {expected_.next, {}, {}};
-    position_.reset();
+    forgetPosition();
 }
 
 void PlayerFollower::followTrack(const std::string& track, milliseconds now, std::vector<PlayerEvent>& events) {
@@ -86,7 +86,42 @@ void PlayerFollower::followTrack(const std::string& track, milliseconds now, std
         events.push_back({PlayerEventKind::TakenOver});
         return;
     }
+    forgetPosition();
+}
+
+// RelTime has whole seconds and a report can come late: one off the course is a seek only once the next bears it out,
+// and one the report before the last foresaw is on course, the last having come late.
+void PlayerFollower::followPosition(const Report& report, std::vector<PlayerEvent>& events) {
+    if (!position_ || report.at < settledAt_) {
+        position_ = report;
+        before_.reset();
+        jump_.reset();
+        return;
+    }
+    if (foresaw(jump_, report)) {
+        events.push_back({PlayerEventKind::Seeked, report.positionMs});
+        before_ = jump_;
+    } else if (foresaw(position_, report)) {
+        before_ = position_;
+    } else if (!foresaw(before_, report)) {
+        jump_ = report;
+        return;
+    }
+    position_ = report;
+    jump_.reset();
+}
+
+bool PlayerFollower::foresaw(const std::optional<Report>& from, const Report& report) const {
+    if (!from) return false;
+    const auto elapsed = state_ == TransportState::Playing ? uint64_t((report.at - from->at).count()) : uint64_t{0};
+    const uint64_t predicted = from->positionMs + elapsed;
+    return (report.positionMs > predicted ? report.positionMs - predicted : predicted - report.positionMs) <= kSeekMarginMs;
+}
+
+void PlayerFollower::forgetPosition() {
     position_.reset();
+    before_.reset();
+    jump_.reset();
 }
 
 std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observation, milliseconds now) {
@@ -110,19 +145,10 @@ std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observ
                                                                   : PlayerEventKind::Stopped});
     }
     if (observation.positionMs) {
-        const bool stopped = state_ == TransportState::Stopped;
-        if (stopped) position_.reset(); // a stopped Linkplay reports the track's length as its position
-        if (position_ && now >= settledAt_) {
-            const auto elapsed = state_ == TransportState::Playing ? uint64_t((now - positionAt_).count()) : uint64_t{0};
-            const uint64_t predicted = *position_ + elapsed;
-            const uint64_t reported = *observation.positionMs;
-            if ((reported > predicted ? reported - predicted : predicted - reported) > kSeekMarginMs)
-                events.push_back({PlayerEventKind::Seeked, reported});
-        }
-        if (!stopped) {
-            position_ = observation.positionMs;
-            positionAt_ = now;
-        }
+        if (state_ == TransportState::Stopped)
+            forgetPosition(); // a stopped Linkplay reports the track's length as its position
+        else
+            followPosition({*observation.positionMs, now}, events);
     }
     return events;
 }
