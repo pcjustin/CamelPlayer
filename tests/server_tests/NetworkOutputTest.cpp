@@ -1071,6 +1071,29 @@ TEST(NetworkOutputTest, AStopAfterThePlayerFetchedTheTrackAgainFromItsStartIsNoT
     EXPECT_NE(message.find("from its start"), std::string::npos) << message;
 }
 
+// A player that runs through its stream four times faster than it plays, as the DMP-A6 did until it was reset, is
+// reported with an error that says so and suggests restarting it, rather than followed.
+TEST(NetworkOutputTest, APlayerRunningThroughItsStreamFasterThanItPlaysIsReported) {
+    FakeRenderer renderer(RendererKind::UpnpAv);
+    renderer.limitFetch(k16.bytesPerFrame() * 44100ULL * 4);
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 600);
+    OutputRun output(renderer, source, k16);
+    std::atomic<int> raised = kNoError;
+    std::string message;
+    std::mutex mutex;
+    output->setErrorHandler([&](const audio::Error& e) {
+        std::scoped_lock lock(mutex);
+        message = e.what();
+        raised = int(e.code());
+    });
+    output->start();
+    ASSERT_TRUE(waitFor([&] { return raised != kNoError; }, 20s));
+    std::scoped_lock lock(mutex);
+    EXPECT_EQ(raised, int(audio::ErrorCode::DriverError)) << message;
+    EXPECT_NE(message.find("restart"), std::string::npos) << message;
+    EXPECT_TRUE(std::ranges::none_of(output.events(), [](const PlayerEvent& e) { return e.kind == PlayerEventKind::Seeked; }));
+}
+
 TEST(NetworkOutputTest, TheEndOfTheLastTrackIsNotAStopOfItsOwn) {
     FakeRenderer renderer(RendererKind::UpnpAv);
     renderer.limitFetch(k16.bytesPerFrame() * 44100ULL);

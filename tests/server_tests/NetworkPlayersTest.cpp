@@ -397,6 +397,44 @@ TEST(PlayerFollowerTest, ReportsASeekOnlyWhenThePositionJumps) {
     EXPECT_TRUE(follower.observe(seen, 10000ms).empty());
 }
 
+// The DMP-A6 once ran through every 24-bit stream several times faster than it played, until it was reset: a position
+// running well ahead of the clock is reported, once, and nothing is followed after it.
+TEST(PlayerFollowerTest, APositionRunningAheadOfTheClockIsReported) {
+    PlayerFollower follower;
+    follower.expect({"a", "", ""});
+    PlayerObservation seen;
+    seen.state = TransportState::Playing;
+    std::vector<PlayerEvent> events;
+    for (uint64_t at = 0; at <= 3000; at += 500) {
+        seen.positionMs = at * 4;
+        for (const auto& event : follower.observe(seen, std::chrono::milliseconds(at)))
+            if (event.kind != PlayerEventKind::Playing) events.push_back(event);
+    }
+    EXPECT_EQ(events, (std::vector<PlayerEvent>{{PlayerEventKind::RunsAhead}}));
+    seen.state = TransportState::Paused;
+    EXPECT_TRUE(follower.observe(seen, 3500ms).empty());
+}
+
+// Twice as fast is found too, given longer; the clock's own pace, a second late now and then, is not.
+TEST(PlayerFollowerTest, APositionAtTwiceTheClocksPaceIsReportedAndOneAtItsPaceIsNot) {
+    PlayerFollower fast;
+    PlayerFollower steady;
+    fast.expect({"a", "", ""});
+    steady.expect({"a", "", ""});
+    PlayerObservation seen;
+    seen.state = TransportState::Playing;
+    bool ran = false;
+    for (uint64_t at = 0; at <= 20000; at += 500) {
+        seen.positionMs = at * 2;
+        for (const auto& event : fast.observe(seen, std::chrono::milliseconds(at)))
+            ran = ran || event.kind == PlayerEventKind::RunsAhead;
+        seen.positionMs = (at % 4000 == 0 && at ? at - 1300 : at) / 1000 * 1000;
+        for (const auto& event : steady.observe(seen, std::chrono::milliseconds(at)))
+            EXPECT_EQ(event.kind, PlayerEventKind::Playing) << at;
+    }
+    EXPECT_TRUE(ran);
+}
+
 // One report off the course that the next one does not bear out is neither a seek nor what the next is measured from.
 TEST(PlayerFollowerTest, AStrayReportIsNoSeek) {
     PlayerFollower follower;

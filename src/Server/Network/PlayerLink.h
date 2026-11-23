@@ -21,7 +21,8 @@
 
 namespace camel::server {
 
-enum class PlayerEventKind : uint8_t { Playing, Paused, Stopped, Seeked, NextTrack, PreviousTrack, TakenOver, Lost };
+// RunsAhead: its position runs well ahead of the clock, as a player in a broken state plays its stream too fast.
+enum class PlayerEventKind : uint8_t { Playing, Paused, Stopped, Seeked, NextTrack, PreviousTrack, TakenOver, Lost, RunsAhead };
 
 struct PlayerEvent {
     PlayerEventKind kind = PlayerEventKind::Stopped;
@@ -64,6 +65,7 @@ private:
     void followTrack(const std::string& track, std::chrono::milliseconds now, std::vector<PlayerEvent>& events);
     void followPosition(const Report& report, std::vector<PlayerEvent>& events);
     bool foresaw(const std::optional<Report>& from, const Report& report) const;
+    bool ranAhead(const Report& report);
     void forgetPosition();
 
     ExpectedTracks expected_;
@@ -74,6 +76,7 @@ private:
     std::optional<Report> position_; // where the player is
     std::optional<Report> before_;   // the report before it, which is where the player is when that one came late
     std::optional<Report> jump_;     // off both, a seek once the next report bears it out
+    std::optional<Report> run_;      // where the position's course since the last seek or change of state began
     bool ended_ = false;
     std::chrono::milliseconds settledAt_{};
 };

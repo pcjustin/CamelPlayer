@@ -25,6 +25,8 @@ using Values = std::map<std::string, std::string>;
 constexpr uint64_t kSeekMarginMs = 2000; // polls and events lag, so a smaller jump is not a seek
 constexpr auto kTick = milliseconds(25);
 constexpr auto kSettling = milliseconds(3000); // a player can still report the old track this long after a new one
+// A course this long that moved half as fast again as the clock, and this much more, runs ahead of what is played.
+constexpr uint64_t kRunSpanMs = 1500, kRunMarginMs = 3000;
 
 std::optional<TransportState> stateFrom(const std::string& text) {
     if (text == "PLAYING" || text == "Playing") return TransportState::Playing;
@@ -96,19 +98,41 @@ void PlayerFollower::followPosition(const Report& report, std::vector<PlayerEven
         position_ = report;
         before_.reset();
         jump_.reset();
-        return;
-    }
-    if (foresaw(jump_, report)) {
+    } else if (foresaw(jump_, report)) {
         events.push_back({PlayerEventKind::Seeked, report.positionMs});
         before_ = jump_;
-    } else if (foresaw(position_, report)) {
-        before_ = position_;
-    } else if (!foresaw(before_, report)) {
-        jump_ = report;
+        position_ = run_ = report;
+        jump_.reset();
         return;
+    } else {
+        if (foresaw(position_, report))
+            before_ = position_;
+        else if (!foresaw(before_, report)) {
+            jump_ = report;
+            return;
+        }
+        position_ = report;
+        jump_.reset();
     }
-    position_ = report;
-    jump_.reset();
+    if (ranAhead(report)) {
+        ended_ = true;
+        events.push_back({PlayerEventKind::RunsAhead});
+    }
+}
+
+// A player in a broken state can play its stream several times too fast, its position moving with it (the DMP-A6 did
+// with 24-bit streams until it was reset).
+bool PlayerFollower::ranAhead(const Report& report) {
+    if (state_ != TransportState::Playing) {
+        run_.reset();
+        return false;
+    }
+    if (!run_ || report.positionMs < run_->positionMs) {
+        run_ = report;
+        return false;
+    }
+    const auto span = uint64_t((report.at - run_->at).count());
+    return span >= kRunSpanMs && report.positionMs - run_->positionMs > span * 3 / 2 + kRunMarginMs;
 }
 
 bool PlayerFollower::foresaw(const std::optional<Report>& from, const Report& report) const {
@@ -122,6 +146,7 @@ void PlayerFollower::forgetPosition() {
     position_.reset();
     before_.reset();
     jump_.reset();
+    run_.reset();
 }
 
 std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observation, milliseconds now) {
@@ -139,6 +164,7 @@ std::vector<PlayerEvent> PlayerFollower::observe(const PlayerObservation& observ
     if (observation.state && observation.state != state_) {
         const bool first = !state_;
         state_ = observation.state;
+        run_.reset();
         if (!first || *state_ != TransportState::Stopped)
             events.push_back({*state_ == TransportState::Playing  ? PlayerEventKind::Playing
                               : *state_ == TransportState::Paused ? PlayerEventKind::Paused

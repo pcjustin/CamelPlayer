@@ -403,6 +403,11 @@ private:
             release(Error(ErrorCode::DeviceInUse, player_->inUseByAnother()));
             return;
         }
+        if (event.kind == PlayerEventKind::RunsAhead) {
+            release(Error(ErrorCode::DriverError, "the player runs through the stream faster than it plays it: restart the "
+                                                  "player"));
+            return;
+        }
         {
             // A player still starting reports PLAYING after a stop, which is not a request to play.
             std::scoped_lock lock(mutex_);

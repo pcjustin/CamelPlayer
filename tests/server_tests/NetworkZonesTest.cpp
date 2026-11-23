@@ -79,8 +79,8 @@ bool playing(const ZoneSnapshot& z) {
 TEST(NetworkZonesTest, ThreePlayersPlayTheirOwnTracksAndFollowTheirOwnRemotesAndVolumes) {
     FakeRenderer one(RendererKind::UpnpAv, "uuid:fake-1", "Player 1"), two(RendererKind::UpnpAv, "uuid:fake-2", "Player 2"),
         three(RendererKind::OpenHome, "uuid:fake-3", "Player 3");
-    // At about the speed they play, so no track ends before the test does.
-    for (auto* renderer : {&one, &two, &three}) renderer->limitFetch(uint64_t{44100} * 4 * 2);
+    // At the speed they play: one that ran ahead of it would be reported, and no track ends before the test does.
+    for (auto* renderer : {&one, &two, &three}) renderer->limitFetch(uint64_t{44100} * 4);
     Settings settings;
     settings.autoplay = false;
     settings.backend = Backend::Network;
