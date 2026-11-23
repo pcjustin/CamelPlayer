@@ -10,11 +10,28 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "Server/Api/ServerApi.h"
 
 namespace camel::server {
+
+// The Server refused a connection because this device is not paired with it, or no longer is.
+class NotPaired : public std::runtime_error {
+public:
+    NotPaired() : std::runtime_error("Server API: this device is not paired with the Server") {}
+};
+
+// The Server refused to pair: "codeNeeded", "wrongCode", "stopped" (until `until`) or "nameTaken" (`suggestion` is free).
+class PairingRefused : public std::runtime_error {
+public:
+    PairingRefused(std::string why, std::string free, int64_t stoppedUntil)
+        : std::runtime_error("Server API: pairing refused: " + why), code(std::move(why)), suggestion(std::move(free)),
+          until(stoppedUntil) {}
+    std::string code, suggestion;
+    int64_t until = 0;
+};
 
 // Another computer's CamelPlayer through the Server API (docs/Plan.md §17.8, docs/Server-API.md), the same IServer
 // the window uses for its own: calls go out as JSON and wait for their answers, each on the caller's thread; the
@@ -26,8 +43,10 @@ public:
         uint16_t port = 9440;
         std::filesystem::path cache;             // where covers fetched are kept; a temporary folder when empty
         std::chrono::milliseconds timeout{5000}; // to connect and to get the first snapshot
+        std::string token;                       // this device's, from pair()
     };
-    // Connects and waits for the Server's first snapshot; throws std::runtime_error when it cannot.
+    // Connects and waits for the Server's first snapshot; throws NotPaired without a token the Server knows, and
+    // std::runtime_error when it cannot connect.
     explicit RemoteServer(Options options);
     ~RemoteServer() override;
     RemoteServer(const RemoteServer&) = delete;
@@ -35,6 +54,21 @@ public:
 
     bool connected() const;
     nlohmann::json hello() const; // what the Server said of itself as the connection opened
+
+    struct Paired {
+        std::string token, device;
+    };
+    // Asks the Server to pair this device as `name`, with a code a paired device shows unless it is ownerless; throws
+    // PairingRefused, or std::runtime_error when it cannot reach it.
+    static Paired pair(const std::string& host, uint16_t port, const std::string& name, const std::string& code,
+                       std::chrono::milliseconds timeout = std::chrono::seconds(5));
+    // Pairing as any paired device may do it (docs/Plan.md 17.8).
+    std::string pairingCode();
+    nlohmann::json pairedDevices();
+    bool revokeDevice(const std::string& device);
+    void resetOwner(); // cuts this device off too
+    // Notices the Server sends, such as pairing having stopped after wrong codes; on the connection's thread.
+    void setNoticeListener(std::function<void(const nlohmann::json&)> listener);
 
     CommandStamp submit(Command command) override;
     Snapshot snapshot() const override;

@@ -32,9 +32,10 @@ std::string text(const json& message) {
 } // namespace
 
 struct ApiSession::State {
-    State(IServer& s, Send sending) : server(s), send(std::move(sending)) {}
+    State(IServer& s, Send sending, Calls answers) : server(s), send(std::move(sending)), own(std::move(answers)) {}
     IServer& server;
     Send send;
+    Calls own; // the connection's own calls
     std::mutex mutex;
     std::condition_variable_any changed;
     std::map<uint64_t, CancellationToken> calls; // under way, by their ids
@@ -53,7 +54,8 @@ struct ApiSession::State {
     }
 };
 
-ApiSession::ApiSession(IServer& server, Send send, json hello) : state_(std::make_shared<State>(server, std::move(send))) {
+ApiSession::ApiSession(IServer& server, Send send, json hello, Calls calls)
+    : state_(std::make_shared<State>(server, std::move(send), std::move(calls))) {
     state_->sendQuietly({{"hello", std::move(hello)}});
     state_->pusher = std::jthread([s = state_.get()](const std::stop_token& stop) {
         for (;;) {
@@ -113,18 +115,30 @@ void ApiSession::receive(std::string_view message) {
     }
     std::thread([s = state_, id, call = std::move(call), args = std::move(args), token] {
         json reply = {{"id", id}};
+        std::function<void()> after;
         try {
-            reply["result"] = api::answer(s->server, call, args, token);
+            std::optional<Answer> own = s->own ? s->own(call, args) : std::nullopt;
+            if (own) {
+                reply["result"] = std::move(own->result);
+                after = std::move(own->after);
+            } else {
+                reply["result"] = api::answer(s->server, call, args, token);
+            }
         } catch (...) {
             reply["error"] = api::errorOf(std::current_exception());
         }
         if (token.cancelled()) reply = {{"id", id}, {"error", {{"code", "cancelled"}, {"message", "cancelled"}}}};
         s->sendQuietly(reply);
+        if (after) after();
         std::lock_guard lock(s->mutex);
         s->calls.erase(id);
         --s->running;
         s->changed.notify_all();
     }).detach();
+}
+
+void ApiSession::notify(const json& notice) {
+    state_->sendQuietly({{"notice", notice}});
 }
 
 void ApiSession::push(const Event& event) {

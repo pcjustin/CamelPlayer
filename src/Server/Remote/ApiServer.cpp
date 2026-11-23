@@ -20,6 +20,7 @@
 #include "Server/Network/SocketWait.h"
 #include "Server/Remote/ApiSession.h"
 #include "Server/Remote/Connection.h"
+#include "Server/Remote/Pairings.h"
 
 namespace camel::server {
 
@@ -59,6 +60,20 @@ int64_t number(const std::map<std::string, std::string>& query, const char* key)
     return value;
 }
 
+int64_t nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+// The token of `Authorization: Bearer <token>`.
+std::string bearer(const websocket::HttpHead& request) {
+    const auto value = request.header("authorization");
+    return value.starts_with("Bearer ") ? value.substr(7) : std::string();
+}
+
+json errorBody(const char* code, const std::string& message) {
+    return json{{"error", {{"code", code}, {"message", message}}}};
+}
+
 std::string textOf(const std::map<std::string, std::string>& query, const char* key) {
     const auto found = query.find(key);
     return found == query.end() ? std::string() : found->second;
@@ -70,14 +85,17 @@ struct ApiServer::Impl {
     struct Client {
         SOCKET socket = INVALID_SOCKET; // until its thread closes it
         std::shared_ptr<ApiSession> session;
+        std::shared_ptr<Connection> connection;
+        std::string device; // the paired device it belongs to
         std::thread thread;
         bool done = false;
     };
 
-    Impl(LocalServer& s, Options o) : server(s), options(std::move(o)) {}
+    Impl(LocalServer& s, Options o) : server(s), options(std::move(o)), pairings(options.pairings) {}
 
     LocalServer& server;
     Options options;
+    Pairings pairings;
     WinsockScope winsock;
     SOCKET listener = INVALID_SOCKET;
     uint16_t port = 0;
@@ -152,11 +170,18 @@ struct ApiServer::Impl {
             if (head) {
                 const auto request = websocket::parseHead(*head);
                 const std::string path = request.second.substr(0, request.second.find('?'));
-                if (path == "/api" && request.first == "GET") {
-                    serveApi(id, s, request, std::move(rest));
+                // Only pairing goes without a paired device's token.
+                if (path == "/pair" && request.first == "POST") {
+                    servePair(s, request, rest);
+                } else if (const auto device = pairings.deviceOf(bearer(request)); !device) {
+                    respond(s, 401, "Unauthorized", "application/json",
+                            errorBody("notPaired", "this device is not paired with the Server").dump());
+                } else if (path == "/api" && request.first == "GET") {
+                    serveApi(id, s, request, std::move(rest), device->id);
                     return;
+                } else {
+                    serveHttp(s, request, path, rest);
                 }
-                serveHttp(s, request, path, rest);
             }
         } catch (const std::invalid_argument&) {
             respondError(s, 400, "Bad Request", std::current_exception());
@@ -167,7 +192,74 @@ struct ApiServer::Impl {
         closesocket(s);
     }
 
-    void serveApi(uint64_t id, SOCKET s, const websocket::HttpHead& request, std::string rest) {
+    void servePair(SOCKET s, const websocket::HttpHead& request, std::string& rest) {
+        const auto lengthText = request.header("content-length");
+        const size_t length = lengthText.empty() ? 0 : size_t(std::stoull(lengthText));
+        if (length > kMaxHead) throw std::invalid_argument("API: a pairing request too long");
+        const auto body = readBody(s, rest, length, kHeadTimeout);
+        if (!body) return;
+        const auto asked = json::parse(*body);
+        const auto code = asked.contains("code") && asked["code"].is_string() ? asked["code"].get<std::string>() : std::string();
+        const auto answer = pairings.pair(asked.at("name").get<std::string>(), code, nowMs());
+        if (answer.stoppedNow) {
+            std::lock_guard lock(mutex);
+            for (auto& [client, c] : clients)
+                if (c.session) c.session->notify({{"kind", "pairingStopped"}, {"until", answer.stoppedUntil}});
+        }
+        if (!answer.token.empty()) {
+            respond(s, 200, "OK", "application/json", json{{"token", answer.token}, {"device", answer.device}}.dump());
+            return;
+        }
+        auto error = errorBody(answer.error.c_str(), "pairing refused: " + answer.error);
+        if (!answer.suggestion.empty()) error["error"]["suggestion"] = answer.suggestion;
+        if (answer.stoppedUntil) error["error"]["until"] = answer.stoppedUntil;
+        const bool stopped = answer.error == "stopped" || answer.stoppedNow;
+        const bool taken = answer.error == "nameTaken";
+        respond(s,
+                stopped ? 429
+                : taken ? 409
+                        : 403,
+                stopped ? "Too Many Requests"
+                : taken ? "Conflict"
+                        : "Forbidden",
+                "application/json", error.dump());
+    }
+
+    // The calls of pairing, which every paired device may make (docs/Plan.md 17.8).
+    std::optional<ApiSession::Answer> pairingCall(const std::string& call, const json& args) {
+        if (call == "pairingCode")
+            return ApiSession::Answer{json{{"code", pairings.newCode(nowMs())}, {"validMs", Pairings::kCodeLifetimeMs}}, {}};
+        if (call == "pairedDevices") return ApiSession::Answer{devicesJson(), {}};
+        if (call == "revokeDevice") {
+            const auto device = args.at(0).get<std::string>();
+            return ApiSession::Answer{pairings.revoke(device), [this, device] { close(device); }};
+        }
+        if (call == "resetOwner") {
+            pairings.resetOwner();
+            return ApiSession::Answer{nullptr, [this] { close({}); }};
+        }
+        return std::nullopt;
+    }
+
+    json devicesJson() const {
+        json out = json::array();
+        std::lock_guard lock(mutex);
+        for (const auto& device : pairings.devices()) {
+            const bool connected =
+                std::ranges::any_of(clients, [&](const auto& c) { return c.second.session && c.second.device == device.id; });
+            out.push_back({{"id", device.id}, {"name", device.name}, {"paired", device.paired}, {"connected", connected}});
+        }
+        return out;
+    }
+
+    // Closes the connections of `device`, or of every device when empty.
+    void close(const std::string& device) {
+        std::lock_guard lock(mutex);
+        for (auto& [id, client] : clients)
+            if (client.connection && (device.empty() || client.device == device)) client.connection->shut(1008);
+    }
+
+    void serveApi(uint64_t id, SOCKET s, const websocket::HttpHead& request, std::string rest, const std::string& device) {
         const auto key = request.header("sec-websocket-key");
         if (key.empty() || request.header("sec-websocket-version") != "13") {
             respond(s, 426, "Upgrade Required", "text/plain", "a WebSocket is needed here", "Sec-WebSocket-Version: 13\r\n");
@@ -180,10 +272,13 @@ struct ApiServer::Impl {
         auto connection = std::make_shared<Connection>(s, false, std::move(rest));
         auto session = std::make_shared<ApiSession>(
             server, [connection](const std::string& message) { connection->send(message); },
-            json{{"api", {{"min", 2}, {"max", 2}}}, {"server", {{"id", options.serverId}, {"name", options.serverName}}}});
+            json{{"api", {{"min", 2}, {"max", 2}}}, {"server", {{"id", options.serverId}, {"name", options.serverName}}}},
+            [this](const std::string& call, const json& args) { return pairingCall(call, args); });
         {
             std::lock_guard lock(mutex);
             clients[id].session = session;
+            clients[id].connection = connection;
+            clients[id].device = device;
         }
         ++sessions;
         try {
@@ -196,6 +291,7 @@ struct ApiServer::Impl {
         {
             std::lock_guard lock(mutex);
             clients[id].session.reset();
+            clients[id].connection.reset();
             clients[id].done = true;
             clients[id].socket = INVALID_SOCKET;
         }
@@ -301,6 +397,25 @@ uint16_t ApiServer::port() const {
 
 size_t ApiServer::connections() const {
     return impl_->sessions.load();
+}
+
+std::string ApiServer::pairingCode() {
+    return impl_->pairings.newCode(nowMs());
+}
+
+nlohmann::json ApiServer::pairedDevices() const {
+    return impl_->devicesJson();
+}
+
+bool ApiServer::revoke(const std::string& device) {
+    const bool done = impl_->pairings.revoke(device);
+    impl_->close(device);
+    return done;
+}
+
+void ApiServer::resetOwner() {
+    impl_->pairings.resetOwner();
+    impl_->close({});
 }
 
 } // namespace camel::server

@@ -18,6 +18,46 @@ A Server announces itself through mDNS/DNS-SD as `_camelplayer._tcp`.
 
 A Server listens on TCP port 9440. When another program holds that port, it uses the next free one, so read the port from the SRV record or from the Server's Settings. A Control point can also connect to an address typed by hand.
 
+## Pairing
+
+Every request carries the token of a paired device as `Authorization: Bearer <token>`: the WebSocket's opening request and every HTTP request, covers included. A request without a token the Server knows is answered with 401 and the error `notPaired`. Only finding the Server and asking to pair go without a token.
+
+To pair, send `POST /pair` with the device's name, and with a code unless the Server has no owner yet:
+
+```json
+{"name": "Laptop", "code": "123456"}
+```
+
+The answer is the device's token and ID:
+
+```json
+{"token": "…", "device": "…"}
+```
+
+The first device to ask claims a Server that has no owner, without a code. Every later device needs a code that a paired device was shown:
+
+- **A code** has six digits. It is valid for five minutes and for one pairing.
+- **After five wrong codes** in a row, pairing stops for five minutes, the right code included. The paired devices are sent the notice `pairingStopped`.
+- **Names are unique**: no two paired devices share one, so a device whose name is taken is asked for another.
+
+Pairing errors:
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| 403 | `codeNeeded` | The Server has an owner; ask a paired device for a code. |
+| 403 | `wrongCode` | The code is wrong, used or expired. |
+| 409 | `nameTaken` | A paired device has the name; `suggestion` is a free one, such as `Laptop (2)`. |
+| 429 | `stopped` | Pairing has stopped after wrong codes, until `until` (milliseconds since 1970). |
+
+A paired device may make these calls on the WebSocket:
+
+| Call | Arguments | Result |
+| --- | --- | --- |
+| `pairingCode` | | `{"code": "…", "validMs": 300000}`; a new code replaces the last |
+| `pairedDevices` | | each device's `id`, `name`, `paired` and whether it is `connected` now |
+| `revokeDevice` | device | `true` when it was paired; its connections close at once |
+| `resetOwner` | | `null`; every device is forgotten and cut off, the caller included, and the next to ask claims the Server |
+
 ## The WebSocket
 
 Open a WebSocket at `ws://<host>:<port>/api` (RFC 6455, version 13). Every message is one JSON text message.
@@ -67,6 +107,8 @@ The Server pushes an event whenever its state changes:
 ```json
 {"event": "stateChanged", "snapshot": { … }}
 ```
+
+A notice is pushed the same way, as `{"notice": {"kind": "pairingStopped", "until": …}}`.
 
 The event is `commandCompleted` when a command has finished. When several changes come while an event is still being sent, only the latest is sent, and it is marked `commandCompleted` if any of the ones it replaces was.
 

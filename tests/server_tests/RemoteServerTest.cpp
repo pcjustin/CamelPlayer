@@ -77,11 +77,18 @@ protected:
         local.reset();
     }
 
-    std::unique_ptr<RemoteServer> connect() {
+    std::string token; // this test's Control point's, which claimed the Server
+
+    std::unique_ptr<RemoteServer> connect(std::string with = {}) {
+        if (with.empty()) {
+            if (token.empty()) token = RemoteServer::pair("127.0.0.1", api->port(), "Test Control", "").token;
+            with = token;
+        }
         RemoteServer::Options options;
         options.host = "127.0.0.1";
         options.port = api->port();
         options.cache = dir / "cache";
+        options.token = with;
         return std::make_unique<RemoteServer>(options);
     }
 
@@ -97,7 +104,7 @@ protected:
 };
 
 // The client side of a WebSocket to `port`, past the handshake, to send what RemoteServer never would.
-std::unique_ptr<remote::Connection> rawConnection(uint16_t port) {
+std::unique_ptr<remote::Connection> rawConnection(uint16_t port, const std::string& token) {
     const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     sockaddr_in address{};
     address.sin_family = AF_INET;
@@ -107,8 +114,9 @@ std::unique_ptr<remote::Connection> rawConnection(uint16_t port) {
               Reach::Connected);
     u_long blocking = 0;
     ioctlsocket(s, FIONBIO, &blocking);
-    remote::sendAll(s, "GET /api HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                       "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    remote::sendAll(s, std::string("GET /api HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n") +
+                           "Authorization: Bearer " + token + "\r\n\r\n");
     std::string rest;
     const auto head = remote::readHead(s, rest, 16384, std::chrono::seconds(2));
     EXPECT_TRUE(head && head->starts_with("HTTP/1.1 101"));
@@ -312,7 +320,7 @@ TEST_F(RemoteServerTest, APortAnotherProgramHoldsMovesToTheNext) {
 // Messages that are not the API's close their own connection and harm nothing else.
 TEST_F(RemoteServerTest, MalformedMessagesAreRefusedWithoutHarm) {
     for (const auto* message : {"not json", "[]", R"({"id":"x","call":"playlists"})", R"({"cancel":"x"})", R"({"call":"x"})"}) {
-        const auto raw = rawConnection(api->port());
+        const auto raw = rawConnection(api->port(), token);
         while (const auto pushed = raw->read(1 << 26))
             if (pushed->find("\"event\"") != std::string::npos) break;
         raw->send(message);
@@ -323,7 +331,7 @@ TEST_F(RemoteServerTest, MalformedMessagesAreRefusedWithoutHarm) {
     }
     {
         // An unknown call and arguments that do not fit are answered as errors; the connection stays.
-        const auto raw = rawConnection(api->port());
+        const auto raw = rawConnection(api->port(), token);
         raw->send(R"({"id":1,"call":"noSuchCall","args":[]})");
         raw->send(R"({"id":2,"call":"browseTracks","args":["a"]})");
         int errors = 0;
@@ -342,4 +350,96 @@ TEST_F(RemoteServerTest, MalformedMessagesAreRefusedWithoutHarm) {
     // The other connection went on unharmed.
     EXPECT_EQ(remote->libraryRoots().size(), 1u);
     EXPECT_TRUE(remote->connected());
+}
+
+// TC-R02: without a paired device's token nothing is served, covers and uploads included; only pairing goes without.
+TEST_F(RemoteServerTest, NothingIsServedBeforePairing) {
+    EXPECT_THROW(connect("0123456789abcdef"), NotPaired);
+    const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(api->port());
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(connectWithin(s, reinterpret_cast<sockaddr*>(&address), sizeof(address), std::chrono::seconds(2)),
+              Reach::Connected);
+    u_long blocking = 0;
+    ioctlsocket(s, FIONBIO, &blocking);
+    remote::sendAll(s, "GET /artwork?kind=artist&name=Amy HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    std::string rest;
+    const auto head = remote::readHead(s, rest, 16384, std::chrono::seconds(2));
+    closesocket(s);
+    ASSERT_TRUE(head);
+    EXPECT_TRUE(head->starts_with("HTTP/1.1 401")) << *head;
+    // A later device needs a code, which the paired one is shown.
+    try {
+        RemoteServer::pair("127.0.0.1", api->port(), "Laptop", "");
+        FAIL() << "paired without a code";
+    } catch (const PairingRefused& e) {
+        EXPECT_EQ(e.code, "codeNeeded");
+    }
+    try {
+        RemoteServer::pair("127.0.0.1", api->port(), "Test Control", remote->pairingCode());
+        FAIL() << "paired under a name taken";
+    } catch (const PairingRefused& e) {
+        EXPECT_EQ(e.code, "nameTaken");
+        EXPECT_EQ(e.suggestion, "Test Control (2)");
+    }
+    const auto laptop = RemoteServer::pair("127.0.0.1", api->port(), "Laptop", remote->pairingCode());
+    EXPECT_TRUE(connect(laptop.token)->connected());
+    EXPECT_EQ(remote->pairedDevices().size(), 2u);
+}
+
+// A revoked device's live connection closes at once and its token stops working; the Server's own window and any
+// paired device may revoke.
+TEST_F(RemoteServerTest, ARevokedDeviceIsCutOffAtOnce) {
+    const auto laptop = RemoteServer::pair("127.0.0.1", api->port(), "Laptop", api->pairingCode());
+    const auto other = connect(laptop.token);
+    ASSERT_TRUE(other->connected());
+    EXPECT_TRUE(remote->revokeDevice(laptop.device));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (other->connected() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(other->connected());
+    EXPECT_THROW(connect(laptop.token), NotPaired);
+    EXPECT_TRUE(remote->connected());
+    // The Server's own window revokes too.
+    const auto tablet = RemoteServer::pair("127.0.0.1", api->port(), "Tablet", api->pairingCode());
+    EXPECT_TRUE(api->revoke(tablet.device));
+    EXPECT_THROW(connect(tablet.token), NotPaired);
+}
+
+// Reset owner from a Control point cuts every device off, itself among them, and the next to ask claims the Server.
+TEST_F(RemoteServerTest, ResetOwnerFromAControlPointCutsItOffToo) {
+    remote->resetOwner();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (remote->connected() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(remote->connected());
+    EXPECT_THROW(connect(token), NotPaired);
+    const auto claim = RemoteServer::pair("127.0.0.1", api->port(), "Laptop", "");
+    EXPECT_FALSE(claim.token.empty());
+}
+
+// Five wrong codes stop pairing for five minutes, and the paired devices are told.
+TEST_F(RemoteServerTest, FiveWrongCodesStopPairingAndThePairedDevicesAreTold) {
+    std::mutex mutex;
+    std::condition_variable told;
+    std::optional<json> notice;
+    remote->setNoticeListener([&](const json& n) {
+        std::lock_guard lock(mutex);
+        notice = n;
+        told.notify_all();
+    });
+    const auto code = remote->pairingCode();
+    for (int i = 0; i < 5; ++i) EXPECT_THROW(RemoteServer::pair("127.0.0.1", api->port(), "Laptop", "000000"), PairingRefused);
+    try {
+        RemoteServer::pair("127.0.0.1", api->port(), "Laptop", code);
+        FAIL() << "paired while pairing is stopped";
+    } catch (const PairingRefused& e) {
+        EXPECT_EQ(e.code, "stopped");
+        EXPECT_GT(e.until, 0);
+    }
+    std::unique_lock lock(mutex);
+    ASSERT_TRUE(told.wait_for(lock, std::chrono::seconds(5), [&] { return notice.has_value(); }));
+    EXPECT_EQ((*notice)["kind"], "pairingStopped");
 }

@@ -73,8 +73,13 @@ struct RemoteServer::Impl {
     bool connected = false;
     std::optional<Snapshot> current;
     std::function<void(const Event&)> listener;
+    std::function<void(const json&)> noticeListener;
     json hello;
     api::QueueDecoder decoder; // the reader's alone
+
+    std::string authorization() const {
+        return options.token.empty() ? std::string() : "Authorization: Bearer " + options.token + "\r\n";
+    }
 
     SOCKET connect() const {
         addrinfo hints{};
@@ -105,13 +110,17 @@ struct RemoteServer::Impl {
         std::string rest;
         const bool sent = sendAll(s, "GET /api HTTP/1.1\r\nHost: " + options.host + ":" + std::to_string(options.port) +
                                          "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " + key +
-                                         "\r\nSec-WebSocket-Version: 13\r\n\r\n");
+                                         "\r\nSec-WebSocket-Version: 13\r\n" + authorization() + "\r\n");
         const auto head = sent ? readHead(s, rest, kMaxHead, options.timeout) : std::nullopt;
         if (!head) {
             closesocket(s);
             throw std::runtime_error("Server API: the Server did not answer the connection");
         }
         const auto answer = websocket::parseHead(*head);
+        if (answer.second == "401") {
+            closesocket(s);
+            throw NotPaired();
+        }
         if (answer.second != "101" || answer.header("sec-websocket-accept") != websocket::acceptKey(key)) {
             closesocket(s);
             throw std::runtime_error("Server API: the Server refused the connection (" + answer.second + ")");
@@ -138,6 +147,15 @@ struct RemoteServer::Impl {
         if (j.contains("hello")) {
             std::lock_guard lock(mutex);
             hello = j["hello"];
+            return;
+        }
+        if (j.contains("notice")) {
+            std::function<void(const json&)> tell;
+            {
+                std::lock_guard lock(mutex);
+                tell = noticeListener;
+            }
+            if (tell) tell(j["notice"]);
             return;
         }
         if (j.contains("event")) {
@@ -217,8 +235,9 @@ struct RemoteServer::Impl {
         const SOCKET s = connect();
         HttpReply reply;
         std::string rest;
-        const bool sent = sendAll(s, method + " " + target + " HTTP/1.1\r\nHost: " + options.host + "\r\nContent-Length: " +
-                                         std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+        const bool sent = sendAll(s, method + " " + target + " HTTP/1.1\r\nHost: " + options.host +
+                                         "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n" + authorization() +
+                                         "Connection: close\r\n\r\n" + body);
         const auto head = sent ? readHead(s, rest, kMaxHead, kTransferTimeout) : std::nullopt;
         if (head) {
             reply.head = websocket::parseHead(*head);
@@ -232,6 +251,7 @@ struct RemoteServer::Impl {
         }
         closesocket(s);
         if (reply.status == 0) throw std::runtime_error("Server API: the Server did not answer " + target);
+        if (reply.status == 401) throw NotPaired();
         if (reply.status >= 400 && reply.status != 404) {
             json error;
             try {
@@ -269,6 +289,58 @@ bool RemoteServer::connected() const {
 json RemoteServer::hello() const {
     std::lock_guard lock(impl_->mutex);
     return impl_->hello;
+}
+
+RemoteServer::Paired RemoteServer::pair(const std::string& host, uint16_t port, const std::string& name, const std::string& code,
+                                        std::chrono::milliseconds timeout) {
+    Options options;
+    options.host = host;
+    options.port = port;
+    options.timeout = timeout;
+    const Impl impl(options);
+    json asked{{"name", name}};
+    if (!code.empty()) asked["code"] = code;
+    const SOCKET s = impl.connect();
+    const auto body = asked.dump();
+    std::string rest;
+    const bool sent = sendAll(s, "POST /pair HTTP/1.1\r\nHost: " + host + "\r\nContent-Length: " + std::to_string(body.size()) +
+                                     "\r\nConnection: close\r\n\r\n" + body);
+    const auto head = sent ? readHead(s, rest, kMaxHead, timeout) : std::nullopt;
+    std::optional<std::string> answer;
+    websocket::HttpHead parsed;
+    if (head) {
+        parsed = websocket::parseHead(*head);
+        const auto length = parsed.header("content-length");
+        answer = readBody(s, rest, length.empty() ? 0 : size_t(std::stoull(length)), timeout);
+    }
+    closesocket(s);
+    if (!answer) throw std::runtime_error("Server API: the Server did not answer the pairing");
+    const auto reply = json::parse(*answer);
+    if (parsed.second == "200") return {reply.at("token").get<std::string>(), reply.at("device").get<std::string>()};
+    const auto& error = reply.at("error");
+    throw PairingRefused(error.value("code", std::string("refused")), error.value("suggestion", std::string()),
+                         error.value("until", int64_t{0}));
+}
+
+std::string RemoteServer::pairingCode() {
+    return impl_->call("pairingCode", json::array(), {}).at("code").get<std::string>();
+}
+
+json RemoteServer::pairedDevices() {
+    return impl_->call("pairedDevices", json::array(), {});
+}
+
+bool RemoteServer::revokeDevice(const std::string& device) {
+    return as<bool>(impl_->call("revokeDevice", args(device), {}));
+}
+
+void RemoteServer::resetOwner() {
+    impl_->call("resetOwner", json::array(), {});
+}
+
+void RemoteServer::setNoticeListener(std::function<void(const json&)> listener) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->noticeListener = std::move(listener);
 }
 
 void RemoteServer::shutdown() {

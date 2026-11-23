@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include "Server/Playback/LocalServer.h"
 
 namespace camel::server {
@@ -24,7 +26,8 @@ public:
         int portsToTry = 10;   // the next ones when another program holds it
         bool loopbackOnly = false;
         std::string serverId, serverName;
-        std::filesystem::path uploads; // where uploaded playlists are kept
+        std::filesystem::path uploads;  // where uploaded playlists are kept
+        std::filesystem::path pairings; // the paired devices; in memory when empty
     };
 
     // Starts listening; throws std::runtime_error when none of the ports is free.
@@ -35,6 +38,12 @@ public:
 
     uint16_t port() const;
     size_t connections() const; // WebSocket connections open now
+
+    // Pairing as the Server's own window, always paired, does it (docs/Plan.md 17.8).
+    std::string pairingCode();
+    nlohmann::json pairedDevices() const;   // each with its ID, name, when it paired and whether it is connected now
+    bool revoke(const std::string& device); // its connections close at once
+    void resetOwner();                      // every device forgotten and cut off
 
 private:
     struct Impl;
