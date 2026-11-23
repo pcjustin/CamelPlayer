@@ -291,6 +291,31 @@ A Release run on a real SMB share on 2026-10-23 and 2026-10-24 passed:
 - recursive rename and delete detection;
 - a temporary folder becoming unavailable and reconnecting, without losing records.
 
+## Zones
+
+Checked on 2026-11-23 for 0.6.0 on the owner's devices, with the owner's word, from Release builds of the zone work, the hardware tests (`ZoneHardware.*`) committed as `1463e3c`. Every zone played a quiet tone at -50 dBFS, the DSD ones made by a sigma-delta modulator at -50 dB, and the network players' tracks were copies in the NAS's test folder, read over the wired link.
+
+- **Six zones at once for 30.1 minutes**:
+  - The zones: the Chord DAVE through ASIO (a DSD64 tone played natively, then a FLAC tone), the built-in Cirrus through WASAPI exclusive, the Eversolo DMP-A6, the KECES and the Chord Poly as UPnP AV players from the NAS, and the bedroom's HomePod pair over AirPlay, each queue repeating.
+  - Every zone played within 4.7 s. In turn each was paused, played again, sought to 60 s and moved on, while the others played on.
+  - CPU averaged 5.0% of one processor and peaked at 30%; private memory peaked at 177 MB.
+  - The DAVE, the Cirrus, the Poly and the HomePods played the whole run with no underrun, stall or error.
+  - **The KECES** stopped about 13 minutes in, 27 s into a track, saying "the player is in use by another source". Its turn played it on; 27 s into its next track it stopped the same way and stayed paused to the end. Alone, and in a 3-minute rerun of the six zones, it played on.
+  - **The DMP-A6** stood still 18 times, its position at 98.6 s for the last 80 s. A 3-minute rerun with the log on showed its zone's stream reopened every 3.2 s, 7 s further on each time, while it played the 96 kHz/24-bit tone beside the others. Alone, playing a 44.1/16 tone, it opened once.
+- **HQPlayer against the DAVE's own zone**: HQPlayer 6 Desktop, evaluation, set to the DAVE through its ASIO driver.
+  - HQPlayer first: the DAVE's zone was refused as in use ("the device took 17 formats and could start none: another program may be using it"), and HQPlayer played on.
+  - The other order could not run as meant: HQPlayer kept the driver for a while after it stopped. The DAVE's zone then failed with "96000 Hz / 24-bit / 2 ch has no bit-perfect format on this device", where it should have said the device is in use. A few minutes later the DAVE played again.
+- **The DAVE's ASIO driver beside FlexASIO on the Cirrus**: both played for 10 s with no underrun, each with callbacks of its own, and the DAVE's WASAPI and Kernel Streaming zones were refused as in use.
+- **Three DSD256 zones from the NAS**, 90-second tones started 20 s apart: the DAVE natively, the DMP-A6 and the KECES as PCM.
+  - The DAVE played 70 s with no break or underrun, and the KECES played on.
+  - The DMP-A6 stood still once, in a one-second check at 51 s.
+- **Two zones modulating PCM to DSD256 at once**:
+  - The DAVE modulated a 96 kHz tone to native DSD256 with the seventh-order modulator, with no underrun, at 114% of one processor on average and 176% at the peak.
+  - The DMP-A6 was sent DSD256 as DoP at 705.6 kHz. It fetched the stream four times and never played, and its zone ended stopped with no error.
+  - No other output here takes DSD256, so the pair could not run, and the notice for a computer that cannot keep up was not seen on hardware. A test that holds the DSP stage back checks it.
+
+The faults (the KECES taken for another source's, the DMP-A6's stream reopened, the message for a device another program holds, and a player that refuses DoP DSD256 without an error) are tasks of their own before the release.
+
 ## Known limits
 
 - An update from 0.4.1 runs 0.4.1's updater, which deletes every file and folder beside CamelPlayer; from 0.4.2 on, updates touch only the program's own files.
