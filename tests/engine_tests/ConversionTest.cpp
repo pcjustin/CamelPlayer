@@ -249,3 +249,37 @@ TEST(Conversion, ADeviceThatTakesSeveralFormatsAndStartsNoneIsInUse) {
     EXPECT_EQ(s.error, ErrorCode::DeviceInUse);
     EXPECT_NE(s.errorDetail.find("could start none"), std::string::npos) << s.errorDetail;
 }
+
+// Chord's ASIO driver refuses every rate while another program holds it without playing, as HQPlayer does once stopped:
+// an ASIO driver that takes no format at all is in use, which waits paused, not short of the track's format.
+TEST(Conversion, AnAsioDriverThatTakesNoFormatIsInUse) {
+    const auto file = wav("taken", tone(96000, 2, 24, 0.5), 96000, 24, 2);
+    Settings settings;
+    settings.backend = Backend::Asio;
+    settings.convertWhenUnsupported = true;
+    CaptureOptions options;
+    options.file = testutil::tempDir() / "conversion-taken.raw";
+    options.accepts = [](const DeviceFormat&) { return false; };
+    PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
+    engine.openAndPlay(file);
+    ASSERT_TRUE(engine.waitForState(PlayState::Paused, std::chrono::seconds(10))) << engine.snapshot().errorDetail;
+    const auto s = engine.snapshot();
+    EXPECT_EQ(s.error, ErrorCode::DeviceInUse);
+    EXPECT_NE(s.errorDetail.find("another program may be using it"), std::string::npos) << s.errorDetail;
+}
+
+// One that takes other formats only lacks the track's (one that takes DSD alone, DsdPlaybackTest).
+TEST(Conversion, AnAsioDriverThatTakesOtherFormatsLacksTheTracks) {
+    const auto file = wav("lacked", tone(96000, 2, 24, 0.5), 96000, 24, 2);
+    Settings settings;
+    settings.backend = Backend::Asio;
+    settings.convertWhenUnsupported = false;
+    CaptureOptions options;
+    options.file = testutil::tempDir() / "conversion-lacked.raw";
+    options.accepts = [](const DeviceFormat& f) { return f == DeviceFormat{44100, 2, SampleType::Int32}; };
+    PlaybackEngine engine(settings, [&](const Settings&) { return createCaptureOutput(options); });
+    engine.openAndPlay(file);
+    engine.waitIdle();
+    EXPECT_EQ(engine.snapshot().state, PlayState::Stopped);
+    EXPECT_EQ(engine.snapshot().error, ErrorCode::FormatNotSupported) << engine.snapshot().errorDetail;
+}

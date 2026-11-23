@@ -592,8 +592,8 @@ TEST(ZoneHardware, DISABLED_TwoZonesModulatePcmToDsd256AtOnce) {
     server.shutdown();
 }
 
-// One network player alone (CAMEL_MZ12_PLAYER, part of its name), playing the six-zone run's NAS tones, its state every
-// two seconds: for a fault MZ-R12 found.
+// One network player alone (CAMEL_MZ12_PLAYER, part of its name), playing the six-zone run's NAS tones over and over for
+// two minutes (CAMEL_MZ12_MINUTES), its state every ten seconds: for a fault MZ-R12 found.
 TEST(ZoneHardware, DISABLED_OneNetworkPlayerFromTheNas) {
     wchar_t part[64] = {};
     GetEnvironmentVariableW(L"CAMEL_MZ12_PLAYER", part, 64);
@@ -616,12 +616,18 @@ TEST(ZoneHardware, DISABLED_OneNetworkPlayerFromTheNas) {
     LocalServer server(settings);
     ASSERT_TRUE(findMz12Devices(server));
     const auto zone = zoneId(Backend::Network, udn);
+    wchar_t minutesText[16] = {};
+    const double minutes =
+        GetEnvironmentVariableW(L"CAMEL_MZ12_MINUTES", minutesText, 16) ? std::wcstod(minutesText, nullptr) : 2.0;
     server.submit(
         queueIn(zone, {onNas(quietTone("mz-r12-keces-a", 44100, 16, 180)), onNas(quietTone("mz-r12-dmp-a", 96000, 24, 180))}));
+    Command repeat = zoneCommand(CommandKind::SetRepeat, zone);
+    repeat.repeat = RepeatMode::All;
+    server.submit(repeat);
     server.waitIdle();
-    for (int second = 0; second < 120; second += 2) {
-        std::this_thread::sleep_for(2s);
-        std::cout << second + 2 << " s: " << stateText(in(server.snapshot(), zone)) << '\n' << std::flush;
+    for (int second = 0; second < int(minutes * 60); second += 10) {
+        std::this_thread::sleep_for(10s);
+        std::cout << second + 10 << " s: " << stateText(in(server.snapshot(), zone)) << '\n' << std::flush;
     }
     server.submit(zoneCommand(CommandKind::Stop, zone));
     server.waitIdle();

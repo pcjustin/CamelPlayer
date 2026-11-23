@@ -1035,6 +1035,16 @@ private:
                 plan_.dsd == DsdPath::Pcm || plan_.remodulate};
     }
 
+    bool takesNoFormat() {
+        for (const uint32_t rate : {44100U, 48000U, 88200U, 96000U, 176400U, 192000U})
+            for (const SampleType type :
+                 {SampleType::Int16, SampleType::Int24, SampleType::Int24In32, SampleType::Int32, SampleType::Float32})
+                if (output_->supports({rate, 2, type})) return false;
+        for (const uint32_t byteRate : {352800U, 705600U, 1411200U})
+            if (output_->supports({byteRate, 2, SampleType::Dsd8})) return false;
+        return true;
+    }
+
     void ensureOutput() {
         if (output_) return;
         output_ = std::make_unique<OutputBridge>(factory_(settings_));
@@ -1375,6 +1385,12 @@ private:
                 position_ = startFrame;
                 return fail(Error(ErrorCode::DeviceInUse, "the device took " + std::to_string(refusedAtStart_) +
                                                               " formats and could start none: another program may be using it"),
+                            PlayState::Paused);
+            }
+            // Chord's ASIO driver refuses every rate while another program holds it without playing (HQPlayer stopped).
+            if (settings_.backend == Backend::Asio && takesNoFormat()) {
+                position_ = startFrame;
+                return fail(Error(ErrorCode::DeviceInUse, "the ASIO driver takes no format: another program may be using it"),
                             PlayState::Paused);
             }
             position_ = deviceChange ? startFrame : 0;
