@@ -608,6 +608,35 @@ TEST(NetworkOutputTest, TheStandInClockStopsWhileThePlayerIsPaused) {
         << "the pause was counted as played: " << heldWhenPaused << " held when paused, " << heldWhenResumed << " after";
 }
 
+// A player whose RelTime now and then comes a second late, as the DMP-A6's did, still plays on: the position played is
+// not pulled back to the late report.
+TEST(NetworkOutputTest, APositionReportedLateIsNotPulledBack) {
+    auto script = std::make_shared<Script>();
+    auto output = createStreamOutput(std::make_unique<ScriptedPlayer>(script), sampleDetails, {});
+    CountingSource source(k16.bytesPerFrame(), 44100ULL * 120);
+    output->open(k16, &source);
+    output->start();
+    const auto started = std::chrono::steady_clock::now();
+    std::atomic<bool> done = false;
+    std::thread player([&] {
+        for (uint64_t second = 1; !done; ++second) {
+            std::this_thread::sleep_until(started + std::chrono::seconds(second) + (second % 4 == 0 ? 1300ms : 0ms));
+            script->positionMs = second * 1000;
+        }
+    });
+    double shown = 0, worst = 0; // seconds
+    for (int i = 0; i < 200; ++i) {
+        std::this_thread::sleep_for(50ms);
+        const double played = (double(source.rendered()) - double(output->status().heldFrames)) / 44100.0;
+        if (std::chrono::steady_clock::now() - started > 2s) worst = std::max(worst, shown - played);
+        shown = std::max(shown, played);
+    }
+    done = true;
+    player.join();
+    output->close();
+    EXPECT_LT(worst, 0.3) << "the position played stepped back " << worst << " s";
+}
+
 // The 32-bit sizes of a WAV header cannot hold a stream past 4 GB: both say 0xFFFFFFFF, which players take for a size
 // unknown, rather than a size near 4 GB at which a player trusting the header would stop.
 TEST(NetworkOutputTest, AWavStreamPastFourGigabytesSaysItsSizeIsUnknown) {

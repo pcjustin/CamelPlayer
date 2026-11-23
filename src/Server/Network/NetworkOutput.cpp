@@ -47,7 +47,7 @@ constexpr size_t kDsfMetadata = 128;
 constexpr uint8_t kDsfSilence = 0x96; // the DSD idle pattern 0x69, least significant bit first
 constexpr size_t kWavHeader = 44;
 constexpr auto kPatience = milliseconds(1500);
-constexpr uint64_t kNearStartMs = 2000, kNearEndMs = 3000, kClockSlackMs = 2000;
+constexpr uint64_t kNearStartMs = 2000, kNearEndMs = 3000, kClockSlackMs = 2000, kReportAgeMs = 1500;
 constexpr int64_t kSlowStartMs = 3000;
 constexpr auto kChangeSettles = milliseconds(3000);
 
@@ -471,11 +471,15 @@ private:
             lastReported_ = positionMs;
             lastAdvance_ = now;
         }
-        // Players report whole seconds, late by up to a poll, so a clock runs that only a report far from it corrects.
+        // Players report whole seconds, late by up to a poll, so a clock runs that only a report far from it corrects. A
+        // report stands for its whole second and a poll after it, as long as it has not changed (the DMP-A6's came a
+        // second late now and then).
         uint64_t smoothMs = positionMs;
         if (positionMs && link_ && link_->playing()) {
             const uint64_t flowing = clockMs_ + uint64_t(std::chrono::duration_cast<milliseconds>(now - clockAt_).count());
-            if (flowing >= positionMs && flowing <= positionMs + kClockSlackMs) {
+            const uint64_t unchangedMs =
+                std::min<uint64_t>(uint64_t(std::chrono::duration_cast<milliseconds>(now - lastAdvance_).count()), kReportAgeMs);
+            if (flowing >= positionMs && flowing <= positionMs + unchangedMs + kClockSlackMs) {
                 smoothMs = flowing;
             } else {
                 clockMs_ = positionMs;
