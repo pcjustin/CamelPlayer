@@ -306,7 +306,7 @@ Checked on 2026-11-23 for 0.6.0 on the owner's devices, with the owner's word, f
   - HQPlayer first: the DAVE's zone was refused as in use ("the device took 17 formats and could start none: another program may be using it"), and HQPlayer played on.
   - The other order could not run as meant: HQPlayer kept the driver for a while after it stopped. The DAVE's zone then failed with "96000 Hz / 24-bit / 2 ch has no bit-perfect format on this device", where it should have said the device is in use. A few minutes later the DAVE played again.
 - **The DAVE's ASIO driver beside FlexASIO on the Cirrus**: both played for 10 s with no underrun, each with callbacks of its own, and the DAVE's WASAPI and Kernel Streaming zones were refused as in use.
-- **Three DSD256 zones from the NAS**, 90-second tones started 20 s apart: the DAVE natively, the DMP-A6 and the KECES as PCM.
+- **Three DSD256 zones from the NAS**, 90-second tones started 20 s apart: the DAVE natively, the DMP-A6 and the KECES as DoP at 705.6 kHz (the test meant the KECES to take PCM but left its output on native DSD).
   - The DAVE played 70 s with no break or underrun, and the KECES played on.
   - The DMP-A6 stood still once, in a one-second check at 51 s.
 - **Two zones modulating PCM to DSD256 at once**:
@@ -314,7 +314,16 @@ Checked on 2026-11-23 for 0.6.0 on the owner's devices, with the owner's word, f
   - The DMP-A6 was sent DSD256 as DoP at 705.6 kHz. It fetched the stream four times and never played, and its zone ended stopped with no error.
   - No other output here takes DSD256, so the pair could not run, and the notice for a computer that cannot keep up was not seen on hardware. A test that holds the DSP stage back checks it.
 
-The faults (the KECES taken for another source's, the DMP-A6's stream reopened, the message for a device another program holds, and a player that refuses DoP DSD256 without an error) are tasks of their own before the release.
+Run again the same day once those faults were fixed, from the build of `f56ffd2`:
+
+- **Six zones at once for 30.1 minutes**: every zone, the KECES and the Poly included, played the whole run with no underrun, stall or error while each was paused, played again, sought to 60 s and moved on in turn. CPU averaged 7.4% of one processor and peaked at 45%; private memory peaked at 185 MB. No seek was taken from following a player.
+- **The KECES** had fetched each track a second time some 12 s in, now and then from its start, and then stopped once it had played what it held: the stream had stood still after the 30 s it took before it played. Kept that far ahead, it fetched nothing twice. After the owner power-cycled it, it started twelve times in a row within 2.6 to 2.8 s, where it had twice waited 20 s in TRANSITIONING without asking for the stream.
+- **The DMP-A6**'s reopened stream was its own fault. A Python script serving a WAV file, with no CamelPlayer in it, showed it running through every 24-bit or high-rate WAV at 2 to 10 times real time and stopping at the track's length, while 44.1/16 played in real time. Reset by the owner (it came back under a new UDN), it played 96 and 192 kHz/24 and DoP DSD256 in real time, as did the KECES and the Poly. A zone whose player runs ahead of the clock like that is now stopped with a message that says so.
+- **HQPlayer against the DAVE's own zone**: HQPlayer first, the DAVE's zone was refused as in use. The other way round, HQPlayer, stopped, kept the DAVE's ASIO driver for as long as it ran, over five minutes, and the DAVE's zone was refused as in use ("the ASIO driver takes no format: another program may be using it"); once HQPlayer quit, the DAVE's ASIO zone played at once.
+- **Three DSD256 zones from the NAS**, started 20 s apart: the DAVE natively, the DMP-A6 as DoP at 705.6 kHz and the KECES as 176.4 kHz PCM; none broke up and none stood still.
+- **Two zones modulating PCM to DSD256 at once**: the DAVE natively and the DMP-A6 as DoP, 60 s, with no underrun on either, at 83% of one processor on average and 155% at the peak; this computer kept up, so the notice was not needed.
+
+The KECES declares only WAV, with no rate, and its coaxial and optical outputs carry PCM to 192 kHz and DSD64 at most: in the first DSD256 run it was sent DoP at 705.6 kHz. As with a USB DAC, CamelPlayer sets no limit of its own for such a player: its highest PCM rate and its DSD output (DSF, DoP or Convert to PCM) are set in its gear from its specification, the KECES's to Convert to PCM.
 
 ## Known limits
 
