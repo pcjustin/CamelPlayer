@@ -418,6 +418,7 @@ public:
             std::lock_guard lock(mutex_);
             closing_ = true;
             listener_ = {};
+            observers_.clear();
         }
         cv_.notify_one();
         const bool working = worker_.joinable();
@@ -547,6 +548,25 @@ public:
     void setListener(std::function<void(const Event&)> listener) {
         std::lock_guard lock(mutex_);
         listener_ = std::move(listener);
+    }
+
+    uint64_t addObserver(std::function<void(const Event&)> observer) {
+        std::lock_guard lock(mutex_);
+        observers_[++lastObserver_] = std::move(observer);
+        return lastObserver_;
+    }
+    void removeObserver(uint64_t id) {
+        std::lock_guard lock(mutex_);
+        observers_.erase(id);
+    }
+
+    // The listener and the observers an event goes to, taken under mutex_ and told outside it.
+    std::vector<std::function<void(const Event&)>> audience() const _Requires_lock_held_(mutex_) {
+        std::vector<std::function<void(const Event&)>> out;
+        out.reserve(observers_.size() + 1);
+        if (listener_) out.push_back(listener_);
+        for (const auto& [id, observer] : observers_) out.push_back(observer);
+        return out;
     }
 
     void waitIdle() {
@@ -2344,7 +2364,7 @@ private:
         collectZones();
         state_.settings = settingsDto(settings_);
         Event event;
-        std::function<void(const Event&)> listener;
+        std::vector<std::function<void(const Event&)>> listeners;
         {
             std::lock_guard lock(mutex_);
             if (state_.command.generation != issued_.generation || state_.command.queueRevision != issued_.queueRevision) return;
@@ -2356,9 +2376,9 @@ private:
                 return !d.unsupported.empty() && d.unsupported != "password" && d.unsupported != "code";
             });
             event = {completed ? EventKind::CommandCompleted : EventKind::StateChanged, published_};
-            listener = listener_;
+            listeners = audience();
         }
-        tell(listener, event);
+        for (const auto& listener : listeners) tell(listener, event);
         if (discord_) discord_->observe(event.snapshot);
     }
 
@@ -2389,7 +2409,7 @@ private:
                 asking = askingName(*z.airplay);
             }
             Event event;
-            std::function<void(const Event&)> listener;
+            std::vector<std::function<void(const Event&)>> listeners;
             {
                 std::lock_guard lock(mutex_);
                 const auto shown = std::ranges::find(published_.zones, z.id, &ZoneSnapshot::id);
@@ -2398,9 +2418,9 @@ private:
                 if (published_.selectedZone == z.id) published_.playback.receiverAsking = asking;
                 ++published_.revision;
                 event = {EventKind::StateChanged, published_};
-                listener = listener_;
+                listeners = audience();
             }
-            tell(listener, event);
+            for (const auto& listener : listeners) tell(listener, event);
         });
     }
 
@@ -3354,6 +3374,8 @@ private:
     Zone* selected_ = nullptr;                 // the zone of the output in use at the last syncZones()
     bool sessionsRestored_ = false; // every zone's saved queue was read back at the start; a zone added later reads its own
     std::function<void(const Event&)> listener_;
+    std::map<uint64_t, std::function<void(const Event&)>> observers_;
+    uint64_t lastObserver_ = 0;
     std::unique_ptr<DiscordPresence> discord_;
     // Held shared by other threads while they use loudness_, libraryMonitor_ or discord_; shutdown takes them away.
     mutable std::shared_mutex partsMutex_;
@@ -3407,6 +3429,12 @@ CommandStamp LocalServer::submit(Command command) {
 }
 Snapshot LocalServer::snapshot() const {
     return impl_->snapshot();
+}
+uint64_t LocalServer::addObserver(std::function<void(const Event&)> observer) {
+    return impl_->addObserver(std::move(observer));
+}
+void LocalServer::removeObserver(uint64_t id) {
+    impl_->removeObserver(id);
 }
 void LocalServer::setListener(std::function<void(const Event&)> listener) {
     impl_->setListener(std::move(listener));

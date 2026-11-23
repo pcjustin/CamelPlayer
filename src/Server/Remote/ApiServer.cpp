@@ -1,0 +1,306 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#include "Server/Remote/ApiServer.h"
+
+#include <ws2tcpip.h>
+
+#include <atomic>
+#include <fstream>
+#include <map>
+#include <mutex>
+#include <stdexcept>
+#include <thread>
+
+#include "Common/util/Log.h"
+#include "Common/util/Text.h"
+#include "Server/Api/ApiCalls.h"
+#include "Server/Api/ApiTypesJson.h"
+#include "Server/Network/SocketWait.h"
+#include "Server/Remote/ApiSession.h"
+#include "Server/Remote/Connection.h"
+
+namespace camel::server {
+
+using nlohmann::json;
+using namespace remote;
+
+namespace {
+
+constexpr SOCKET kNoSocket = INVALID_SOCKET;
+constexpr size_t kMaxHead = size_t{16} * 1024;
+constexpr size_t kMaxMessage = size_t{4} * 1024 * 1024;
+constexpr size_t kMaxUpload = size_t{64} * 1024 * 1024;
+constexpr auto kHeadTimeout = std::chrono::seconds(10);
+constexpr auto kBodyTimeout = std::chrono::seconds(60);
+
+void respond(SOCKET s, int status, const char* reason, const std::string& type, const std::string& body,
+             const std::string& extra = {}) {
+    sendAll(s, "HTTP/1.1 " + std::to_string(status) + " " + reason + "\r\nContent-Type: " + type +
+                   "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n" + extra + "Connection: close\r\n\r\n" + body);
+}
+
+void respondError(SOCKET s, int status, const char* reason, const std::exception_ptr& error) {
+    respond(s, status, reason, "application/json", json{{"error", api::errorOf(error)}}.dump());
+}
+
+std::string readFile(const std::filesystem::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+int64_t number(const std::map<std::string, std::string>& query, const char* key) {
+    const auto found = query.find(key);
+    if (found == query.end()) throw std::invalid_argument(std::string("API: no ") + key);
+    size_t used = 0;
+    const auto value = std::stoll(found->second, &used);
+    if (used != found->second.size()) throw std::invalid_argument(std::string("API: ") + key + " is not a number");
+    return value;
+}
+
+std::string textOf(const std::map<std::string, std::string>& query, const char* key) {
+    const auto found = query.find(key);
+    return found == query.end() ? std::string() : found->second;
+}
+
+} // namespace
+
+struct ApiServer::Impl {
+    struct Client {
+        SOCKET socket = INVALID_SOCKET; // until its thread closes it
+        std::shared_ptr<ApiSession> session;
+        std::thread thread;
+        bool done = false;
+    };
+
+    Impl(LocalServer& s, Options o) : server(s), options(std::move(o)) {}
+
+    LocalServer& server;
+    Options options;
+    WinsockScope winsock;
+    SOCKET listener = INVALID_SOCKET;
+    uint16_t port = 0;
+    mutable std::mutex mutex;
+    std::map<uint64_t, Client> clients;
+    uint64_t lastClient = 0;
+    bool stopping = false;
+    std::atomic<size_t> sessions{0};
+    uint64_t observer = 0;
+    std::thread acceptor;
+
+    void listen() {
+        for (int i = 0; i < std::max(1, options.portsToTry); ++i) {
+            const auto wanted = uint16_t(options.port == 0 ? 0 : options.port + i);
+            const SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (s == kNoSocket) break;
+            BOOL exclusive = TRUE; // another program on the port is seen, not shared
+            setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+            sockaddr_in address{};
+            address.sin_family = AF_INET;
+            address.sin_port = htons(wanted);
+            address.sin_addr.s_addr = htonl(options.loopbackOnly ? INADDR_LOOPBACK : INADDR_ANY);
+            if (bind(s, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0 && ::listen(s, SOMAXCONN) == 0) {
+                int length = sizeof(address);
+                getsockname(s, reinterpret_cast<sockaddr*>(&address), &length);
+                listener = s;
+                port = ntohs(address.sin_port);
+                return;
+            }
+            closesocket(s);
+            if (options.port == 0) break;
+        }
+        throw std::runtime_error("Server API: no free port from " + std::to_string(options.port));
+    }
+
+    void accept() {
+        for (;;) {
+            const SOCKET s = ::accept(listener, nullptr, nullptr);
+            std::lock_guard lock(mutex);
+            if (stopping) {
+                if (s != kNoSocket) closesocket(s);
+                return;
+            }
+            if (s == kNoSocket) continue;
+            for (auto it = clients.begin(); it != clients.end();) {
+                if (!it->second.done) {
+                    ++it;
+                    continue;
+                }
+                it->second.thread.join();
+                it = clients.erase(it);
+            }
+            const auto id = ++lastClient;
+            auto& client = clients[id];
+            client.socket = s;
+            client.thread = std::thread([this, id, s] { serve(id, s); });
+        }
+    }
+
+    // The client's socket is closed only after it is marked done, so the destructor never shuts another's.
+    void finished(uint64_t id) {
+        std::lock_guard lock(mutex);
+        clients[id].done = true;
+        clients[id].socket = INVALID_SOCKET;
+        clients[id].session.reset();
+    }
+
+    void serve(uint64_t id, SOCKET s) {
+        std::string rest;
+        try {
+            const auto head = readHead(s, rest, kMaxHead, kHeadTimeout);
+            if (head) {
+                const auto request = websocket::parseHead(*head);
+                const std::string path = request.second.substr(0, request.second.find('?'));
+                if (path == "/api" && request.first == "GET") {
+                    serveApi(id, s, request, std::move(rest));
+                    return;
+                }
+                serveHttp(s, request, path, rest);
+            }
+        } catch (const std::invalid_argument&) {
+            respondError(s, 400, "Bad Request", std::current_exception());
+        } catch (const std::exception& e) {
+            log::warn("Server API: %s", e.what());
+        }
+        finished(id);
+        closesocket(s);
+    }
+
+    void serveApi(uint64_t id, SOCKET s, const websocket::HttpHead& request, std::string rest) {
+        const auto key = request.header("sec-websocket-key");
+        if (key.empty() || request.header("sec-websocket-version") != "13") {
+            respond(s, 426, "Upgrade Required", "text/plain", "a WebSocket is needed here", "Sec-WebSocket-Version: 13\r\n");
+            finished(id);
+            closesocket(s);
+            return;
+        }
+        sendAll(s, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " +
+                       websocket::acceptKey(key) + "\r\n\r\n");
+        auto connection = std::make_shared<Connection>(s, false, std::move(rest));
+        auto session = std::make_shared<ApiSession>(
+            server, [connection](const std::string& message) { connection->send(message); },
+            json{{"api", {{"min", 2}, {"max", 2}}}, {"server", {{"id", options.serverId}, {"name", options.serverName}}}});
+        {
+            std::lock_guard lock(mutex);
+            clients[id].session = session;
+        }
+        ++sessions;
+        try {
+            while (const auto message = connection->read(kMaxMessage)) session->receive(*message);
+        } catch (const std::invalid_argument& e) {
+            log::warn("Server API: a connection closed for %s", e.what());
+            connection->shut(1008);
+        }
+        --sessions;
+        {
+            std::lock_guard lock(mutex);
+            clients[id].session.reset();
+            clients[id].done = true;
+            clients[id].socket = INVALID_SOCKET;
+        }
+        session.reset(); // waits for its calls, which send through the connection
+        connection.reset();
+    }
+
+    void serveHttp(SOCKET s, const websocket::HttpHead& request, const std::string& path, std::string& rest) {
+        try {
+            const auto query = websocket::queryOf(request.second);
+            const auto lengthText = request.header("content-length");
+            const size_t length = lengthText.empty() ? 0 : size_t(std::stoull(lengthText));
+            if (length > kMaxUpload) {
+                respond(s, 413, "Content Too Large", "text/plain", "the upload is too large");
+                return;
+            }
+            const auto body = readBody(s, rest, length, kBodyTimeout);
+            if (!body) return;
+            const auto bytes = [&] { return std::vector<uint8_t>(body->begin(), body->end()); };
+            if (request.first == "GET" && path == "/artwork") {
+                ArtworkRequest r;
+                from_json(json(textOf(query, "kind")), r.kind);
+                r.id = query.contains("id") ? number(query, "id") : 0;
+                r.path = textOf(query, "path");
+                r.name = textOf(query, "name");
+                if (query.contains("pixels")) r.pixels = unsigned(number(query, "pixels"));
+                const auto found = server.artwork(r);
+                if (!found) {
+                    respond(s, 404, "Not Found", "text/plain", "no artwork");
+                    return;
+                }
+                respond(s, 200, "OK", "image/jpeg", readFile(found->path), "X-Artwork-Key: " + found->key + "\r\n");
+            } else if (request.first == "POST" && path == "/artist-picture") {
+                respond(s, 200, "OK", "application/json", json(server.setArtistPicture(textOf(query, "name"), bytes())).dump());
+            } else if (request.first == "POST" && path == "/playlist") {
+                const auto file = uploadPath(std::filesystem::path(toWide(textOf(query, "name"))).filename());
+                std::ofstream(file, std::ios::binary).write(body->data(), std::streamsize(body->size()));
+                respond(s, 200, "OK", "application/json", json(server.importPlaylist(file)).dump());
+            } else if (request.first == "GET" && path == "/playlist") {
+                const auto file = uploadPath(L"export.m3u8");
+                server.exportPlaylist(number(query, "id"), file);
+                const auto text = readFile(file);
+                std::filesystem::remove(file);
+                respond(s, 200, "OK", "audio/x-mpegurl", text);
+            } else if (request.first == "GET" && path == "/diagnostic") {
+                const auto file = uploadPath(L"diagnostic.zip");
+                server.writeDiagnosticBundle(file, textOf(query, "paths") == "1", textOf(query, "version"));
+                const auto zip = readFile(file);
+                std::filesystem::remove(file);
+                respond(s, 200, "OK", "application/zip", zip);
+            } else {
+                respond(s, 404, "Not Found", "text/plain", "no such resource");
+            }
+        } catch (const std::invalid_argument&) {
+            respondError(s, 400, "Bad Request", std::current_exception());
+        } catch (const json::exception&) {
+            respondError(s, 400, "Bad Request", std::current_exception());
+        } catch (const std::exception&) {
+            respondError(s, 500, "Internal Server Error", std::current_exception());
+        }
+    }
+
+    // A file of its own in the uploads folder for `name`.
+    std::filesystem::path uploadPath(const std::filesystem::path& name) {
+        auto folder = options.uploads.empty() ? std::filesystem::temp_directory_path() / L"camelplayer-api" : options.uploads;
+        std::filesystem::create_directories(folder);
+        static std::atomic<uint64_t> next{0};
+        const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+        return folder / (std::to_wstring(stamp) + L"-" + std::to_wstring(++next) + L"-" +
+                         (name.empty() ? std::wstring(L"upload") : name.wstring()));
+    }
+};
+
+ApiServer::ApiServer(LocalServer& server, Options options) : impl_(std::make_shared<Impl>(server, std::move(options))) {
+    impl_->listen();
+    // An event already on its way when the server goes still finds what it needs.
+    impl_->observer = server.addObserver([weak = std::weak_ptr<Impl>(impl_)](const Event& event) {
+        const auto impl = weak.lock();
+        if (!impl) return;
+        std::lock_guard lock(impl->mutex);
+        for (auto& [id, client] : impl->clients)
+            if (client.session) client.session->push(event);
+    });
+    impl_->acceptor = std::thread([impl = impl_.get()] { impl->accept(); });
+}
+
+ApiServer::~ApiServer() {
+    impl_->server.removeObserver(impl_->observer);
+    {
+        std::lock_guard lock(impl_->mutex);
+        impl_->stopping = true;
+        closesocket(impl_->listener);
+        for (auto& [id, client] : impl_->clients)
+            if (client.socket != kNoSocket) shutdown(client.socket, SD_BOTH);
+    }
+    impl_->acceptor.join();
+    for (auto& [id, client] : impl_->clients) client.thread.join();
+}
+
+uint16_t ApiServer::port() const {
+    return impl_->port;
+}
+
+size_t ApiServer::connections() const {
+    return impl_->sessions.load();
+}
+
+} // namespace camel::server

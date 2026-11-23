@@ -28,6 +28,10 @@ public:
     CommandStamp submit(Command command) override;
     Snapshot snapshot() const override;
     void setListener(std::function<void(const Event&)> listener) override;
+    // Every event also goes to each observer, as to the listener, until it is removed: the Server API's connections
+    // (docs/Plan.md §17.8). An observer runs on the Server worker and must not block.
+    uint64_t addObserver(std::function<void(const Event&)> observer);
+    void removeObserver(uint64_t id);
     void waitIdle() override;
     void shutdown() override;
     LibraryTrackPage browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
