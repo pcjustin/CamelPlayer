@@ -510,12 +510,15 @@ TEST_F(ArtistPicturesTest, TheBackgroundStartsNoNameWhileAPageLooksUp) {
     std::thread run([&] { findArtistPictures(*store, waiting, {}); });
     std::this_thread::sleep_for(std::chrono::milliseconds(400));
     EXPECT_TRUE(web.requests().empty());
+    // A name a scan adds meanwhile is among those looked up: the names are read once the wait ends.
+    addTrack("Bea");
+    scanMusic();
     page = false;
     run.join();
-    EXPECT_EQ(searched(), std::vector<std::string>{"Amy"});
+    EXPECT_EQ(searched(), (std::vector<std::string>{"Amy", "Bea"}));
 
     // Stopped while it waits, it ends at once.
-    addTrack("Bea");
+    addTrack("Cid");
     scanMusic();
     page = true;
     CancellationToken token;
@@ -523,7 +526,7 @@ TEST_F(ArtistPicturesTest, TheBackgroundStartsNoNameWhileAPageLooksUp) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     token.cancel();
     stopped.join();
-    EXPECT_EQ(searched(), std::vector<std::string>{"Amy"});
+    EXPECT_EQ(searched(), (std::vector<std::string>{"Amy", "Bea"}));
 }
 
 // The yield rule (docs/Plan.md §7.7): a name waits while a zone plays from its storage without enough ahead, and goes

@@ -317,6 +317,9 @@ ArtistPicture chooseArtistCandidate(LibraryStore& store, const std::string& name
 
 ArtistPictureCounts findArtistPictures(LibraryStore& store, const ArtistPictureJob& job, const CancellationToken& token) {
     ArtistPictureCounts counts;
+    // The names are read once a scan under way has written its tracks.
+    while (!token.cancelled() && job.waiting && job.waiting()) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    if (token.cancelled()) return counts;
     for (const auto& [name, track] : artistPictureNames(store)) {
         while (!token.cancelled() && ((job.waiting && job.waiting()) || (job.pace && job.pace(track) == BackgroundPace::Wait)))
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
