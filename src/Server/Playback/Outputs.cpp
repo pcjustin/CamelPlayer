@@ -466,6 +466,98 @@ std::string passAirPlayGroup(Settings& s, const std::string& owner) {
     return rest.front();
 }
 
+bool splitZoneId(const std::string& zone, Backend& backend, std::string& id) {
+    const auto colon = zone.find(':');
+    if (colon == std::string::npos || !backendFromId(std::string_view(zone).substr(0, colon), backend)) return false;
+    id = zone.substr(colon + 1);
+    return true;
+}
+
+std::vector<std::string> localGroupOf(const Settings& s, const std::string& owner) {
+    Backend backend{};
+    std::string id;
+    if (!splitZoneId(owner, backend, id)) return {owner};
+    const SavedOutput* saved = findOutput(s, backend, id);
+    return saved && saved->localGroup.size() > 1 ? saved->localGroup : std::vector{owner};
+}
+
+std::string localGroupClock(const Settings& s, const std::string& owner) {
+    const auto group = localGroupOf(s, owner);
+    Backend backend{};
+    std::string id;
+    const SavedOutput* saved = splitZoneId(owner, backend, id) ? findOutput(s, backend, id) : nullptr;
+    return saved && holds(group, saved->groupClock) ? saved->groupClock : group.front();
+}
+
+std::vector<std::pair<std::string, std::string>>
+groupLocal(Settings& s, const std::string& owner, const std::vector<std::string>& members, const DeviceCatalog& devices) {
+    std::vector<std::pair<std::string, std::string>> moves;
+    Backend ownerBackend{};
+    std::string ownerId;
+    if (!splitZoneId(owner, ownerBackend, ownerId)) return moves;
+    const auto entry = [&](const std::string& zone) -> SavedOutput& {
+        Backend backend{};
+        std::string id;
+        splitZoneId(zone, backend, id);
+        return savedOutput(s, backend, id);
+    };
+    std::vector<std::string> group{owner};
+    for (const auto& zone : members) {
+        Backend backend{};
+        std::string id;
+        if (splitZoneId(zone, backend, id) && isLocalOutput(backend) && !holds(group, zone)) group.push_back(zone);
+    }
+    const auto before = localGroupOf(s, owner);
+    for (size_t i = 1; i < group.size(); ++i) {
+        const std::string& zone = group[i];
+        if (holds(before, zone)) continue;
+        for (const auto& saved : std::vector(s.outputs)) {
+            const std::string key = zoneId(saved.backend, saved.id);
+            if (key == owner || !holds(saved.localGroup, zone)) continue;
+            if (key == zone) {
+                auto rest = saved.localGroup;
+                std::erase(rest, zone);
+                if (!rest.empty()) {
+                    SavedOutput& next = entry(rest.front());
+                    next.groupClock = holds(rest, saved.groupClock) && rest.size() > 1 ? saved.groupClock : std::string();
+                    next.localGroup = rest.size() > 1 ? rest : std::vector<std::string>();
+                    moves.emplace_back(zone, rest.front());
+                }
+            } else {
+                SavedOutput& from = entry(key);
+                std::erase(from.localGroup, zone);
+                if (from.groupClock == zone || from.localGroup.size() < 2) from.groupClock.clear();
+                if (from.localGroup.size() < 2) from.localGroup.clear();
+            }
+        }
+        SavedOutput& joined = entry(zone);
+        joined.localGroup.clear();
+        joined.groupClock.clear();
+    }
+    for (const auto& zone : group) entry(zone).enabled = true;
+    SavedOutput& own = entry(owner);
+    own.localGroup = group.size() > 1 ? group : std::vector<std::string>();
+    if (!holds(own.localGroup, own.groupClock)) own.groupClock.clear();
+    const std::string inUse = zoneId(s.backend, selectedId(s));
+    if (std::find(group.begin() + 1, group.end(), inUse) != group.end())
+        selectOutput(s, ownerBackend, ownerId, devices);
+    else
+        syncOutputs(s, devices);
+    return moves;
+}
+
+void setLocalGroupClock(Settings& s, const std::string& owner, const std::string& clock) {
+    Backend backend{};
+    std::string id;
+    if (!splitZoneId(owner, backend, id)) return;
+    SavedOutput& own = savedOutput(s, backend, id);
+    if (holds(own.localGroup, clock)) own.groupClock = clock == own.localGroup.front() ? std::string() : clock;
+}
+
+void setGroupDelay(Settings& s, Backend backend, const std::string& id, int32_t ms) {
+    savedOutput(s, backend, id).groupDelayMs = std::clamp(ms, -SavedOutput::kMaxGroupDelayMs, SavedOutput::kMaxGroupDelayMs);
+}
+
 std::vector<OutputMove> groupAirPlay(Settings& s, const std::string& first, const std::vector<std::string>& members,
                                      const DeviceCatalog& devices) {
     std::vector<OutputMove> moves;

@@ -135,6 +135,11 @@ bool OutputBridge::renderEnded() const noexcept {
     return source && source->renderEnded();
 }
 
+bool OutputBridge::renderedPoint(RenderedPoint& point) const noexcept {
+    const auto* source = source_.load(std::memory_order_acquire);
+    return source && source->renderedPoint(point);
+}
+
 StreamTrack OutputBridge::streamTrack() const {
     const auto* source = source_.load(std::memory_order_acquire);
     return source ? source->streamTrack() : StreamTrack{};

@@ -19,6 +19,7 @@
 #include <thread>
 
 #include "Common/util/Text.h"
+#include "DsdFixture.h"
 #include "Engine/SamplePacker.h"
 #include "Engine/SlowSource.h"
 #include "OutputBridge/CaptureOutput.h"
@@ -1309,4 +1310,142 @@ TEST_F(ZonesTest, WindowsIsKeptFromSleepingWhileAnyZonePlays) {
     all.kind = CommandKind::PauseAll;
     send(all);
     if (!before) EXPECT_TRUE(waitFor([](const Snapshot&) { return !systemKeptAwake(); }));
+}
+
+namespace {
+
+Command groupOf(size_t number, const std::vector<size_t>& members) {
+    Command c;
+    c.kind = CommandKind::GroupZones;
+    c.zone = zone(number);
+    for (const size_t m : members) c.zones.push_back(zone(m));
+    return c;
+}
+
+} // namespace
+
+// A group of this computer's outputs (MZ-R25) is one zone named after its first, its queue playing on each member's
+// device; the clock member's samples are the track's own, and ungrouped the queue stays with the first.
+TEST_F(ZonesTest, AGroupOfThisComputersOutputsPlaysOneQueueOnEachDevice) {
+    start(3);
+    auto s = send(groupOf(1, {2}));
+    EXPECT_FALSE(s.commandError);
+    ASSERT_EQ(s.zones.size(), 2U);
+    EXPECT_EQ(of(s, 1).name, "Zone 1 + 1");
+    const auto file = track(1, 3.0);
+    send(play(1, {file}));
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) { return playing(of(now, 1), 0.5); }));
+    s = server->snapshot();
+    ASSERT_EQ(of(s, 1).playback.members.size(), 2U);
+    EXPECT_EQ(of(s, 1).playback.members[0].id, zone(1));
+    EXPECT_TRUE(of(s, 1).playback.members[0].clock);
+    EXPECT_FALSE(of(s, 1).playback.members[1].clock);
+    EXPECT_GE(opened(2), 1) << "the member's device plays too";
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) { return ended(of(now, 1)); }));
+    const auto expected = reference({file});
+    const auto clock = captured(1);
+    ASSERT_GE(clock.size(), expected.size());
+    EXPECT_TRUE(std::search(clock.begin(), clock.end(), expected.begin(), expected.end()) != clock.end())
+        << "the clock plays the track bit for bit";
+    EXPECT_GT(captured(2).size(), expected.size() / 2);
+
+    s = send(groupOf(1, {}));
+    ASSERT_EQ(s.zones.size(), 3U);
+    EXPECT_EQ(of(s, 1).name, "Zone 1");
+    EXPECT_FALSE(of(s, 1).queue.entries.empty());
+    EXPECT_TRUE(of(s, 2).queue.entries.empty());
+    EXPECT_TRUE(of(s, 1).playback.members.empty());
+}
+
+// One device through two backends, or two endpoints of one DAC, is one zone and does not group with itself; zones of
+// another kind do not group with this computer's outputs.
+TEST_F(ZonesTest, OneDeviceIsNotGroupedWithItself) {
+    localDevices = LocalDevices{
+        {{device(1), "DAC speakers", "dac"}, {device(2), "DAC line", "dac"}, {device(3), "Other", "other"}}, {}, {}, device(1)};
+    start(3);
+    send(Command{.kind = CommandKind::RefreshDevices});
+    auto s = send(groupOf(1, {2}));
+    ASSERT_TRUE(s.commandError);
+    EXPECT_NE(s.commandError->detail.find("one device"), std::string::npos) << s.commandError->detail;
+    EXPECT_EQ(s.zones.size(), 3U);
+    Command airplay = groupOf(1, {});
+    airplay.zones = {zoneId(Backend::AirPlay, "A10000000001")};
+    s = send(airplay);
+    ASSERT_TRUE(s.commandError);
+    EXPECT_NE(s.commandError->detail.find("kinds"), std::string::npos) << s.commandError->detail;
+    s = send(groupOf(1, {3}));
+    EXPECT_FALSE(s.commandError);
+    EXPECT_EQ(s.zones.size(), 2U);
+}
+
+// A member unplugged while the group plays leaves the others playing, its row marked; the clock lost passes to the next
+// member, which plays on.
+TEST_F(ZonesTest, AMemberLostLeavesTheOthersPlayingAndTheClockPassesOn) {
+    start(3);
+    send(groupOf(1, {2, 3}));
+    send(play(1, {track(1, 20.0)}));
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) { return playing(of(now, 1), 0.5); }));
+    fail(3);
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) {
+        const auto& members = of(now, 1).playback.members;
+        return members.size() == 3 && members[2].lost;
+    }));
+    EXPECT_EQ(of(server->snapshot(), 1).playback.state, PlaybackState::Playing);
+    fail(1);
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) {
+        const auto& members = of(now, 1).playback.members;
+        return members.size() == 3 && members[0].lost && members[1].clock;
+    }));
+    const uint64_t at = of(server->snapshot(), 1).playback.position;
+    EXPECT_TRUE(waitFor([&](const Snapshot& now) {
+        return of(now, 1).playback.state == PlaybackState::Playing && of(now, 1).playback.position > at + 22050;
+    })) << "the next member plays on as the clock";
+}
+
+// The clock chosen in the group's menu, which the settings keep.
+TEST_F(ZonesTest, AGroupsClockIsChosen) {
+    start(2);
+    send(groupOf(1, {2}));
+    auto settings = nativeSettings(server->snapshot().settings);
+    setLocalGroupClock(settings, zone(1), zone(2));
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = settingsDto(settings);
+    send(apply);
+    send(play(1, {track(1, 5.0)}));
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) { return playing(of(now, 1), 0.3); }));
+    const auto members = of(server->snapshot(), 1).playback.members;
+    ASSERT_EQ(members.size(), 2U);
+    EXPECT_FALSE(members[0].clock);
+    EXPECT_TRUE(members[1].clock);
+    EXPECT_EQ(localGroupClock(nativeSettings(server->snapshot().settings), zone(1)), zone(2));
+}
+
+// DSD plays on the clock as it would alone, DoP on this device, and reaches the other member as PCM, which its drift
+// correction can resample.
+TEST_F(ZonesTest, AGroupPlaysDsdOnTheClockAndPcmOnTheOthers) {
+    start(2);
+    send(groupOf(1, {2}));
+    const auto file = dir / "group-dsd64.dsf";
+    dsdfixture::writeFile(
+        file, dsdfixture::dsf(dsdfixture::dsdSine(dsdfixture::kDsd64, 1000.0, 0.5, size_t{dsdfixture::kDsd64} / 8 * 2),
+                              {.channels = 2, .rate = dsdfixture::kDsd64}));
+    send(play(1, {file}));
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) { return playing(of(now, 1), 0.5); }));
+    const auto s = server->snapshot();
+    ASSERT_TRUE(of(s, 1).playback.plan);
+    EXPECT_EQ(of(s, 1).playback.plan->dsd, DsdPath::Dop);
+    ASSERT_TRUE(waitFor([&](const Snapshot& now) { return ended(of(now, 1)); }));
+    // A DoP sample carries 0x05 or 0xFA above its 16 DSD bits.
+    const auto dop = [](const std::vector<int32_t>& samples) {
+        size_t marked = 0;
+        for (const int32_t sample : samples) {
+            const auto marker = uint8_t(uint32_t(sample) >> 16);
+            marked += marker == 0x05 || marker == 0xFA;
+        }
+        return samples.empty() ? 0.0 : double(marked) / double(samples.size());
+    };
+    EXPECT_GT(dop(captured(1)), 0.9);
+    EXPECT_LT(dop(captured(2)), 0.1);
+    EXPECT_GT(captured(2).size(), 88200U);
 }

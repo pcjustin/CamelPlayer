@@ -1076,6 +1076,12 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         } else {
             add(tr(s.backend == Backend::Network ? L"SignalPath_Renderer" : L"SignalPath_Device"),
                 ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
+            // A group of this computer's outputs: the device above is its clock; every other member keeps to it through
+            // drift correction, so none of them is bit-perfect (MZ-R25).
+            for (const auto& member : s.members)
+                if (!member.clock)
+                    add(memberLabel(server_->snapshot(), member.id),
+                        member.lost ? ui::errorTitle(*member.lost) : tr(L"SignalPath_DriftCorrection"), PathState::Processed);
         }
         if (s.backend == Backend::Network && !settings_.network.gapless)
             add(tr(L"SignalPath_GaplessOff"), {}, PathState::AtTrackChanges);

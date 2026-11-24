@@ -72,6 +72,20 @@ std::string passAirPlayGroup(Settings& s, const std::string& owner);
 // alone, joining makes `first` the one in use.
 std::vector<OutputMove> groupAirPlay(Settings& s, const std::string& first, const std::vector<std::string>& members,
                                      const DeviceCatalog& devices);
+// A zone's backend and output ID from its key ("asio:<id>"); false for a key that names none.
+bool splitZoneId(const std::string& zone, Backend& backend, std::string& id);
+// The group of this computer's outputs the zone `owner` plays as, itself first; alone, itself (MZ-R25).
+std::vector<std::string> localGroupOf(const Settings& s, const std::string& owner);
+// The member of `owner`'s group the others keep to: the one saved as its clock while it is a member, else the first.
+std::string localGroupClock(const Settings& s, const std::string& owner);
+// The zone `owner`, of this computer's outputs, plays with `members` from now on, each taken out of the group it was
+// in; none ungroups it. A group a member was formed with goes on under its next member, which the moves name, as zone
+// keys, for its zone to follow. A member in use makes `owner` the output in use.
+std::vector<std::pair<std::string, std::string>>
+groupLocal(Settings& s, const std::string& owner, const std::vector<std::string>& members, const DeviceCatalog& devices);
+void setLocalGroupClock(Settings& s, const std::string& owner, const std::string& clock);
+// Milliseconds the output plays after its group's clock.
+void setGroupDelay(Settings& s, Backend backend, const std::string& id, int32_t ms);
 // A group receiver's channels: the one in use from Settings' fields, the others from their saved outputs.
 AirPlayChannels airplayChannels(const Settings& s, const std::string& id);
 // `s` as it would be with this output in use, for showing its parameters without leaving the one in use.

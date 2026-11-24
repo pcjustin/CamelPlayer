@@ -792,6 +792,13 @@ Details: {0}</value></data>
   <data name="Zone_GroupText" xml:space="preserve"><value>Choose the AirPlay receivers that play with {0}. They play its queue in step, as one zone; each keeps its own level and its Stereo, Left or Right.</value></data>
   <data name="Zone_GroupSave" xml:space="preserve"><value>Group</value></data>
   <data name="Zone_Ungroup" xml:space="preserve"><value>Ungroup</value></data>
+  <data name="Zone_GroupLocalText" xml:space="preserve"><value>Choose this computer's outputs that play with {0}. They play its queue together, each with its own settings: the clock plays as it would alone, and the others keep to it through drift correction, which is not bit-perfect.</value></data>
+  <data name="Zone_SameDevice" xml:space="preserve"><value>{0}, the same device</value></data>
+  <data name="Zone_Clock" xml:space="preserve"><value>Clock</value></data>
+  <data name="Zone_MemberLost" xml:space="preserve"><value>{0} stopped: {1}</value></data>
+  <data name="Output_GroupDelay" xml:space="preserve"><value>Delay in a group (ms)</value></data>
+  <data name="Output_GroupDelayNote" xml:space="preserve"><value>In a group of this computer's outputs, this one plays this many milliseconds after the group's clock, to line the rooms up by ear.</value></data>
+  <data name="SignalPath_DriftCorrection" xml:space="preserve"><value>Drift correction</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>Pause all</value></data>
   <data name="Zone_Offline" xml:space="preserve"><value>Not connected</value></data>
   <data name="Zone_InUseBy" xml:space="preserve"><value>In use by {0}</value></data>

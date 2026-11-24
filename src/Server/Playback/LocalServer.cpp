@@ -18,6 +18,7 @@
 #include "Server/Network/PlayerFinder.h"
 #include "Server/Network/HQPlayerVolume.h"
 #include "Server/Network/PlayerVolume.h"
+#include "Engine/EngineGroup.h"
 #include "Server/Playback/Outputs.h"
 
 #include <windows.h>
@@ -882,20 +883,38 @@ private:
     // The hardware a zone plays to (docs/Plan.md §5.12): a local device by Windows' container ID, which one DAC has
     // through WASAPI and Kernel Streaming alike; an ASIO driver by the device its name names, as no container is known
     // for it; "Windows default device" by the device it follows. Any other output is a device of its own.
-    std::string deviceKey(const Zone& z) const {
+    std::string deviceKey(Backend backend, const std::string& output) const {
         const auto& d = state_.devices;
         const auto containerOf = [](const std::vector<DeviceInfo>& list, const std::string& id) {
             const auto found = std::ranges::find(list, id, &DeviceInfo::id);
             return found == list.end() ? std::string() : found->container;
         };
         std::string container;
-        if (z.backend == Backend::Wasapi)
-            container = containerOf(d.wasapi, z.output.empty() ? d.defaultWasapi : z.output);
-        else if (z.backend == Backend::Ks)
-            container = containerOf(d.ks, z.output);
-        else if (z.backend == Backend::Asio)
-            container = asioContainer(z.output);
-        return container.empty() ? z.id : "container:" + container;
+        if (backend == Backend::Wasapi)
+            container = containerOf(d.wasapi, output.empty() ? d.defaultWasapi : output);
+        else if (backend == Backend::Ks)
+            container = containerOf(d.ks, output);
+        else if (backend == Backend::Asio)
+            container = asioContainer(output);
+        return container.empty() ? zoneId(backend, output) : "container:" + container;
+    }
+
+    // The devices a zone plays on: its own, and every member's while it is a group of this computer's outputs.
+    std::vector<std::string> deviceKeys(const Zone& z) const {
+        if (z.groupKeys.size() < 2) return {deviceKey(z.backend, z.output)};
+        std::vector<std::string> keys;
+        for (const auto& member : z.groupKeys) {
+            Backend backend{};
+            std::string id;
+            if (splitZoneId(member, backend, id)) keys.push_back(deviceKey(backend, id));
+        }
+        return keys;
+    }
+
+    bool sharesDevice(const Zone& a, const Zone& b) const {
+        const auto mine = deviceKeys(a);
+        return std::ranges::any_of(deviceKeys(b),
+                                   [&](const std::string& key) { return std::ranges::find(mine, key) != mine.end(); });
     }
 
     // The container of the one local device whose name holds a word of the ASIO driver's own, such as Chord in
@@ -938,16 +957,15 @@ private:
     // The zone holding z's device: the first to have opened it, which keeps it until it stops or lets it go after a
     // pause (docs/Plan.md §6).
     const Zone* holderFor(const Zone& z) const {
-        const auto key = deviceKey(z);
         const Zone* holder = nullptr;
         for (const auto& zone : zones_) {
-            if (zone.get() == &z || !zone->holdingSince || deviceKey(*zone) != key) continue;
+            if (zone.get() == &z || !zone->holdingSince || !sharesDevice(z, *zone)) continue;
             if (!holder || *zone->holdingSince < *holder->holdingSince) holder = zone.get();
         }
         if (holder && z.holdingSince && *z.holdingSince <= *holder->holdingSince) return nullptr;
         if (!holder)
             for (const auto& zone : zones_)
-                if (zone.get() != &z && deviceKey(*zone) == key && holdsDevice(*zone)) return zone.get();
+                if (zone.get() != &z && sharesDevice(z, *zone) && holdsDevice(*zone)) return zone.get();
         return holder;
     }
 
@@ -988,9 +1006,18 @@ private:
         for (const auto& row : rows)
             if (row.backend == Backend::AirPlay && row.enabled && !row.selected && !grouped.contains(row.id))
                 take(withOutputParameters(settings_, Backend::AirPlay, row.id, state_.devices).airplayGroup);
+        // A group of this computer's outputs is one zone, under the output it was formed with (MZ-R25).
+        std::unordered_set<std::string> localGrouped;
+        for (const auto& row : rows) {
+            const std::string key = zoneId(row.backend, row.id);
+            if (!isLocalOutput(row.backend) || !(row.enabled || row.selected) || localGrouped.contains(key)) continue;
+            const auto group = localGroupOf(settings_, key);
+            for (size_t i = 1; i < group.size(); ++i) localGrouped.insert(group[i]);
+        }
         std::vector<OutputRow> wanted;
         for (auto& row : rows)
-            if (row.selected || (row.enabled && (row.backend != Backend::AirPlay || !grouped.contains(row.id))))
+            if (!localGrouped.contains(zoneId(row.backend, row.id)) &&
+                (row.selected || (row.enabled && (row.backend != Backend::AirPlay || !grouped.contains(row.id)))))
                 wanted.push_back(std::move(row));
         if (std::ranges::none_of(wanted, &OutputRow::selected)) {
             OutputRow inUse;
@@ -1100,8 +1127,8 @@ private:
                 auto zone = std::make_unique<Zone>();
                 setKey(*zone, row.backend, row.id);
                 zone->settings = settings;
-                zone->engine = std::make_unique<audio::PlaybackEngine>(
-                    zone->settings, [this, group = zone->airplay](const Settings& output) {
+                zone->engine =
+                    std::make_unique<audio::EngineGroup>(zone->settings, [this, group = zone->airplay](const Settings& output) {
                         return output.backend == Backend::AirPlay ? airplayOutput(output, group) : factory_(output);
                     });
                 zone->state.playback = playback(zone->engine->snapshot());
@@ -1114,9 +1141,22 @@ private:
                 (*found)->engine->applySettings((*found)->settings);
                 ordered.push_back(std::move(*found));
             }
-            if (row.backend != Backend::AirPlay && ordered.back()->state.name != row.name) {
-                ordered.back()->state.name = row.name;
-                zonesChanged_ = true;
+            groupSessions(*ordered.back());
+            if (row.backend != Backend::AirPlay) {
+                // A group of this computer's outputs, as an AirPlay group, is named after its first and the count of
+                // the others.
+                const size_t members = ordered.back()->groupKeys.size();
+                std::string first = row.name;
+                if (first.empty() && row.backend == Backend::Wasapi && row.id.empty())
+                    if (const auto device =
+                            std::ranges::find(state_.devices.wasapi, state_.devices.defaultWasapi, &DeviceInfo::id);
+                        device != state_.devices.wasapi.end())
+                        first = device->name; // "Windows default device" is the window's to name, in its language
+                const std::string name = members > 1 ? first + " + " + std::to_string(members - 1) : row.name;
+                if (ordered.back()->state.name != name) {
+                    ordered.back()->state.name = name;
+                    zonesChanged_ = true;
+                }
             }
             if (row.selected && selected_ != ordered.back().get()) {
                 selected_ = ordered.back().get();
@@ -1133,6 +1173,32 @@ private:
         if (sessionsRestored_ && library_)
             for (Zone* zone : created) restoreQueueSession(*zone);
         if (moved) rememberQueueChoices(*moved);
+    }
+
+    // A zone of this computer's outputs plays with the other members of its group, each with its own output's settings
+    // and delay, the clock's session leading (MZ-R25).
+    void groupSessions(Zone& z) {
+        if (!isLocalOutput(z.backend)) return;
+        const auto keys = localGroupOf(settings_, z.id);
+        if (keys.size() < 2 && z.groupKeys.size() < 2) {
+            z.groupKeys = keys;
+            return;
+        }
+        const std::string clock = localGroupClock(settings_, z.id);
+        std::vector<audio::EngineGroup::Member> members;
+        size_t clockAt = 0;
+        for (const auto& key : keys) {
+            Backend backend{};
+            std::string id;
+            if (!splitZoneId(key, backend, id)) continue;
+            if (key == clock) clockAt = members.size();
+            const auto saved =
+                std::ranges::find_if(settings_.outputs, [&](const SavedOutput& o) { return o.backend == backend && o.id == id; });
+            members.push_back({key, withOutputParameters(settings_, backend, id, state_.devices),
+                               saved == settings_.outputs.end() ? 0 : saved->groupDelayMs});
+        }
+        z.groupKeys = keys;
+        z.engine->setMembers(std::move(members), clockAt);
     }
 
     // An AirPlay group is named after the receiver it was formed with and the count of the others, "Living room + 2"
@@ -1166,35 +1232,57 @@ private:
         if (library_) library_->write([zone](sqlite::Database& db) { deleteSession(db, zone); });
     }
 
-    // The AirPlay zone `id` plays with `members` from now on, none ungrouping it (MZ-R24). Zones group only with zones of
-    // their kind, AirPlay receivers alone for now, and one playing apart is not taken.
+    // The zone `id` plays with `members` from now on, none ungrouping it. Zones group only with zones of their kind:
+    // AirPlay receivers (MZ-R24) and this computer's outputs (MZ-R25), one device through two backends not with itself;
+    // one playing apart is not taken.
     void groupZones(const std::string& id, const std::vector<std::string>& members) {
         Zone& z = zoneNamed(id);
-        if (z.backend != Backend::AirPlay) throw std::invalid_argument("zones of this kind are not grouped");
+        const bool local = isLocalOutput(z.backend);
+        if (z.backend != Backend::AirPlay && !local) throw std::invalid_argument("zones of this kind are not grouped");
         const auto rows = outputRows(settings_, state_.devices);
-        std::vector<std::string> receivers;
+        std::vector<std::string> outputs;
+        std::vector<std::string> devices{deviceKey(z.backend, z.output)};
         for (const auto& member : members) {
-            const auto colon = member.find(':');
             Backend backend{};
-            if (colon == std::string::npos || !backendFromId(std::string_view(member).substr(0, colon), backend))
-                throw std::invalid_argument("no such zone: " + member);
-            if (backend != z.backend) throw std::invalid_argument("zones of different kinds are not grouped");
-            const std::string receiver = member.substr(colon + 1);
+            std::string output;
+            if (!splitZoneId(member, backend, output)) throw std::invalid_argument("no such zone: " + member);
+            if (local ? !isLocalOutput(backend) : backend != z.backend)
+                throw std::invalid_argument("zones of different kinds are not grouped");
             if (std::ranges::none_of(rows,
-                                     [&](const OutputRow& r) { return r.backend == backend && r.id == receiver && r.enabled; }))
+                                     [&](const OutputRow& r) { return r.backend == backend && r.id == output && r.enabled; }))
                 throw std::invalid_argument("no such zone: " + member);
-            receivers.push_back(receiver);
+            if (local) {
+                const auto device = deviceKey(backend, output);
+                if (std::ranges::find(devices, device) != devices.end())
+                    throw std::invalid_argument("one device is one zone, not grouped with itself: " + member);
+                devices.push_back(device);
+            }
+            outputs.push_back(local ? member : output);
         }
         for (const auto& other : zones_) {
             if (other.get() == &z || other->engine->snapshot().state != audio::PlayState::Playing) continue;
-            const auto held = airplayGroup(*other);
-            if (std::ranges::any_of(receivers, [&](const std::string& r) { return std::ranges::find(held, r) != held.end(); })) {
+            const auto held =
+                local ? (other->groupKeys.size() > 1 ? other->groupKeys : std::vector{other->id}) : airplayGroup(*other);
+            if (std::ranges::any_of(outputs, [&](const std::string& o) { return std::ranges::find(held, o) != held.end(); })) {
                 state_.commandError = Failure{audio::ErrorCode::DeviceInUse,
                                               "in use by " + (other->state.name.empty() ? other->id : other->state.name)};
                 return;
             }
         }
-        followMoves(groupAirPlay(settings_, z.output, receivers, state_.devices));
+        if (local) {
+            const auto moves = groupLocal(settings_, z.id, outputs, state_.devices);
+            std::unique_lock zones(zonesMutex_);
+            for (const auto& [from, to] : moves) {
+                Backend backend{};
+                std::string output;
+                const auto zone = std::ranges::find(zones_, from, &Zone::id);
+                if (zone != zones_.end() && std::ranges::find(zones_, to, &Zone::id) == zones_.end() &&
+                    splitZoneId(to, backend, output))
+                    rekey(**zone, backend, output);
+            }
+        } else {
+            followMoves(groupAirPlay(settings_, z.output, outputs, state_.devices));
+        }
         syncZones();
         persist();
     }
@@ -2387,6 +2475,15 @@ private:
             p.receiverAsking = askingName(*z.airplay);
         }
         p.receiverLeft = z.receiverLeft;
+        if (z.groupKeys.size() > 1) {
+            const auto rows = outputRows(settings_, state_.devices);
+            for (const auto& member : z.engine->members()) {
+                const auto row =
+                    std::ranges::find_if(rows, [&](const OutputRow& r) { return zoneId(r.backend, r.id) == member.key; });
+                p.members.push_back(
+                    {member.key, row == rows.end() ? member.key : row->name, member.clock, member.lost, member.detail});
+            }
+        }
         if (receiverVolumeWanted(z)) {
             const auto level = receiverLevel(z);
             p.playerVolume = level.level;
@@ -3246,6 +3343,7 @@ private:
             }
             for (auto& zone : zones_) {
                 try {
+                    zone->engine->tend();
                     commitTransition(*zone);
                     refreshLibraryAvailability(*zone, true);
                     advanceAfterTrackEnd(*zone);
@@ -3390,10 +3488,11 @@ private:
     // (docs/Plan.md §5.12).
     struct Zone {
         Backend backend = Backend::Wasapi;
-        std::string output; // empty on WASAPI is "Windows default device"
-        std::string id;     // zoneId(backend, output)
-        Settings settings;  // the Server's with this output in use, as its engine has them
-        std::unique_ptr<audio::PlaybackEngine> engine;
+        std::string output;                         // empty on WASAPI is "Windows default device"
+        std::string id;                             // zoneId(backend, output)
+        Settings settings;                          // the Server's with this output in use, as its engine has them
+        std::unique_ptr<audio::EngineGroup> engine; // its own session, and its group's other members' (MZ-R25)
+        std::vector<std::string> groupKeys;         // the members its engine was last given
         ZoneQueue q;
         uint64_t seenTrackEnds = 0, seenTransitions = 0;
         std::deque<uint64_t> chain; // entries queued in the engine, in playback order

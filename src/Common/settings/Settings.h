@@ -23,6 +23,11 @@ namespace camel {
 enum class Backend : uint8_t { Wasapi, Asio, Ks, Network, AirPlay, HQPlayer };
 const char* backendId(Backend b); // "wasapi" / "asio" / "ks" / "network" / "airplay" / "hqplayer"
 const char* backendName(Backend b);
+// This computer's outputs, which group with each other (docs/Plan.md §5.12).
+inline bool isLocalOutput(Backend b) {
+    return b == Backend::Wasapi || b == Backend::Asio || b == Backend::Ks;
+}
+
 inline bool isNetworkPlayer(Backend b) {
     return b == Backend::Network || b == Backend::AirPlay;
 }
@@ -454,6 +459,14 @@ struct SavedOutput {
     std::vector<std::string> speakers;
     // An AirPlay receiver's group, itself first, as Settings::airplayGroup holds the one in use's; empty while alone.
     std::vector<std::string> airplayGroup;
+    // A group of this computer's outputs formed with this one (MZ-R25): its members as zones ("asio:<id>"), itself first,
+    // whatever output is in use; empty while alone. `groupClock` is the member whose clock the others keep to, empty for
+    // the first.
+    std::vector<std::string> localGroup;
+    std::string groupClock;
+    // Milliseconds this output plays after its group's clock, to align it by ear.
+    static constexpr int32_t kMaxGroupDelayMs = 2000;
+    int32_t groupDelayMs = 0;
     bool operator==(const SavedOutput&) const = default;
 };
 

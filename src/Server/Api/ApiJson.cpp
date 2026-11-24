@@ -310,6 +310,13 @@ json toJson(const PlaybackSnapshot& p) {
                              {"level", r.level},
                              {"muted", r.muted},
                              {"channels", nameOf(r.channels, kAirPlayChannels)}});
+    json members = json::array();
+    for (const auto& m : p.members)
+        members.push_back({{"id", m.id},
+                           {"name", m.name},
+                           {"clock", m.clock},
+                           {"lost", m.lost ? json(nameOf(*m.lost, kErrorCodes)) : json(nullptr)},
+                           {"detail", m.detail}});
     const json left = p.receiverLeft ? json{{"serial", p.receiverLeft->serial},
                                             {"name", p.receiverLeft->name},
                                             {"code", nameOf(p.receiverLeft->code, kErrorCodes)},
@@ -339,6 +346,7 @@ json toJson(const PlaybackSnapshot& p) {
             {"playerVolumeDb", p.playerVolumeDb ? json(*p.playerVolumeDb) : json(nullptr)},
             {"playerMuted", p.playerMuted},
             {"receivers", receivers},
+            {"members", members},
             {"receiverLeft", left},
             {"receiverAsking", p.receiverAsking},
             {"error", p.error ? json(nameOf(*p.error, kErrorCodes)) : json(nullptr)},
@@ -380,6 +388,12 @@ PlaybackSnapshot playbackFrom(const json& j) {
         for (const auto& r : array(j, "receivers"))
             p.receivers.push_back({value<std::string>(r, "id"), value<std::string>(r, "name"), value<uint32_t>(r, "level"),
                                    value<bool>(r, "muted"), enumFrom(field(r, "channels"), kAirPlayChannels, "channels")});
+    if (j.contains("members"))
+        for (const auto& m : array(j, "members"))
+            p.members.push_back(
+                {value<std::string>(m, "id"), value<std::string>(m, "name"), value<bool>(m, "clock"),
+                 optional<ErrorCode>(m, "lost", [](const json& v) { return enumFrom(v, kErrorCodes, "error code"); }),
+                 value<std::string>(m, "detail")});
     p.receiverLeft = optional<ReceiverLeft>(j, "receiverLeft", [](const json& v) {
         return ReceiverLeft{value<uint64_t>(v, "serial"), value<std::string>(v, "name"),
                             enumFrom(field(v, "code"), kErrorCodes, "error code"), value<std::string>(v, "detail")};

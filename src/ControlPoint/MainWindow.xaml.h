@@ -446,6 +446,8 @@ private:
     void fillTransferMenu(Microsoft::UI::Xaml::Controls::MenuFlyoutSubItem const& menu, const std::string& from);
     winrt::fire_and_forget transferZone(std::string from, std::string to);
     winrt::hstring zoneLabel(const camel::server::Snapshot& snapshot, const camel::server::ZoneSnapshot& zone) const;
+    // A member of a group of this computer's outputs, by its output's name as the window shows it.
+    winrt::hstring memberLabel(const camel::server::Snapshot& snapshot, const std::string& member) const;
     void nameZoneButton(const camel::server::Snapshot& snapshot);
     bool zonePlays(const camel::server::OutputRow& row) const;
     winrt::fire_and_forget askTurnOffOutput(camel::server::OutputRow row, winrt::hstring label);

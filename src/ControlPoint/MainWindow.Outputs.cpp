@@ -154,8 +154,10 @@ void MainWindow::nameZoneButton(const Snapshot& snapshot) {
     const auto inUse = std::ranges::find_if(rows, &camel::server::OutputRow::selected);
     if (inUse == rows.end()) return;
     const auto zone = std::ranges::find(snapshot.zones, snapshot.selectedZone, &ZoneSnapshot::id);
-    const hstring label = zone != snapshot.zones.end() && zone->playback.receivers.size() > 1
-                              ? ui::utf8(zone->name) + L" (AirPlay)"
+    const hstring label = zone == snapshot.zones.end()          ? outputMenuLabel(*inUse)
+                          : zone->playback.receivers.size() > 1 ? ui::utf8(zone->name) + L" (AirPlay)"
+                          : zone->playback.members.size() > 1
+                              ? outputLabel(*inUse) + L" + " + to_hstring(zone->playback.members.size() - 1)
                               : outputMenuLabel(*inUse);
     ToolTipService::SetToolTip(OutputButton(), box_value(label));
     OutputIcon().Glyph(zoneGlyph(inUse->backend));
@@ -570,6 +572,33 @@ StackPanel MainWindow::outputZoneSection(const OutputEdit& editing) {
     });
     section.Children().Append(crossfade);
     section.Children().Append(seconds);
+    // How long after its group's clock this output plays, aligned by ear (MZ-R25).
+    if (camel::isLocalOutput(editing.backend)) {
+        const auto& outputs = settings_.outputs;
+        const auto saved = std::ranges::find_if(
+            outputs, [&](const camel::SavedOutput& o) { return o.backend == editing.backend && o.id == editing.id; });
+        NumberBox delay;
+        delay.Header(box_value(tr(L"Output_GroupDelay")));
+        delay.Minimum(-camel::SavedOutput::kMaxGroupDelayMs);
+        delay.Maximum(camel::SavedOutput::kMaxGroupDelayMs);
+        delay.SmallChange(1);
+        delay.SpinButtonPlacementMode(NumberBoxSpinButtonPlacementMode::Inline);
+        delay.Width(170);
+        delay.HorizontalAlignment(HorizontalAlignment::Left);
+        delay.Value(saved == outputs.end() ? 0 : saved->groupDelayMs);
+        delay.ValueChanged([this, backend = editing.backend, output = editing.id](NumberBox const& box, auto&&) {
+            if (std::isnan(box.Value())) return;
+            const auto ms = int32_t(std::lround(box.Value()));
+            changeOutputs(
+                [&](camel::Settings& s, const DeviceCatalog&) { camel::server::setGroupDelay(s, backend, output, ms); });
+        });
+        TextBlock note;
+        note.Text(tr(L"Output_GroupDelayNote"));
+        note.TextWrapping(TextWrapping::Wrap);
+        note.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
+        section.Children().Append(delay);
+        section.Children().Append(note);
+    }
     return section;
 }
 
@@ -1227,19 +1256,39 @@ void MainWindow::fillZoneActions(MenuFlyout const& menu, const std::string& id) 
         menu.Items().Append(here);
     }
     const auto& output = row->output;
-    if (output.backend == Backend::AirPlay) {
+    if (output.backend == Backend::AirPlay || camel::isLocalOutput(output.backend)) {
         const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
+        const auto kind = [](Backend b) { return camel::isLocalOutput(b) ? Backend::Wasapi : b; };
         MenuFlyoutItem group;
         group.Text(tr(L"Zone_Group"));
         group.Icon(glyph(L"\xE902"));
         group.IsEnabled(std::ranges::any_of(rows, [&](const camel::server::OutputRow& r) {
-            return r.backend == Backend::AirPlay && r.enabled && r.id != output.id;
+            return kind(r.backend) == kind(output.backend) && r.enabled && (r.backend != output.backend || r.id != output.id);
         }));
         group.Click([this, id](auto&&, auto&&) {
             if (zonePicker_) zonePicker_.Hide();
             askGroupZones(id);
         });
         menu.Items().Append(group);
+        // The member whose clock the others keep to (MZ-R25).
+        if (zone->playback.members.size() > 1) {
+            MenuFlyoutSubItem clock;
+            clock.Text(tr(L"Zone_Clock"));
+            clock.Icon(glyph(L"\xE916"));
+            for (const auto& member : zone->playback.members) {
+                RadioMenuFlyoutItem item;
+                item.Text(memberLabel(snapshot, member.id));
+                item.GroupName(L"GroupClock");
+                item.IsChecked(member.clock);
+                item.Click([this, id, clockOf = member.id](auto&&, auto&&) {
+                    if (zonePicker_) zonePicker_.Hide();
+                    changeOutputs(
+                        [&](camel::Settings& s, const DeviceCatalog&) { camel::server::setLocalGroupClock(s, id, clockOf); });
+                });
+                clock.Items().Append(item);
+            }
+            menu.Items().Append(clock);
+        }
     }
     if (output.backend == Backend::AirPlay && output.pair) return; // a stereo pair has nothing to set
     MenuFlyoutItem settings;
@@ -1253,9 +1302,10 @@ void MainWindow::fillZoneActions(MenuFlyout const& menu, const std::string& id) 
     menu.Items().Append(settings);
 }
 
-// Zones grouped as in Roon (MZ-R24): the other AirPlay receivers, each a zone of its own or in a group, are ticked to
-// play with this zone's receiver, which keeps the queue. One a zone playing apart holds is greyed and says which; one of
-// a group that does not play moves from it.
+// Zones grouped as in Roon: the other outputs of its kind, AirPlay receivers (MZ-R24) or this computer's (MZ-R25), each a
+// zone of its own or in a group, are ticked to play with this zone's output, which keeps the queue. One a zone playing
+// apart holds is greyed and says which, as is another way to this zone's own device; one of a group that does not play
+// moves from it.
 winrt::fire_and_forget MainWindow::askGroupZones(std::string id) {
     auto strong = get_strong();
     const auto snapshot = server_->snapshot();
@@ -1263,44 +1313,60 @@ winrt::fire_and_forget MainWindow::askGroupZones(std::string id) {
     if (zone == snapshot.zones.end()) co_return;
     const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
     const auto first = std::ranges::find_if(
-        rows, [&](const camel::server::OutputRow& r) { return r.backend == Backend::AirPlay && r.id == zone->output; });
+        rows, [&](const camel::server::OutputRow& r) { return r.backend == zone->backend && r.id == zone->output; });
     if (first == rows.end()) co_return;
+    const bool local = camel::isLocalOutput(zone->backend);
     const std::wstring name(outputMenuLabel(*first));
-    const auto member = [](const ZoneSnapshot& z, const std::string& receiver) {
-        return z.output == receiver ||
-               std::ranges::find(z.playback.receivers, receiver, &ReceiverState::id) != z.playback.receivers.end();
+    const auto member = [local](const ZoneSnapshot& z, const camel::server::OutputRow& r) {
+        if (local)
+            return z.id == zoneId(r.backend, r.id) || std::ranges::find(z.playback.members, zoneId(r.backend, r.id),
+                                                                        &GroupMemberState::id) != z.playback.members.end();
+        return z.output == r.id ||
+               std::ranges::find(z.playback.receivers, r.id, &ReceiverState::id) != z.playback.receivers.end();
     };
+    // Windows' container of a device, the physical one; empty when unknown, as for an ASIO driver.
+    const auto container = [&](Backend backend, const std::string& output) {
+        const auto& list = backend == Backend::Ks ? snapshot.devices.ks : snapshot.devices.wasapi;
+        const std::string& device = backend == Backend::Wasapi && output.empty() ? snapshot.devices.defaultWasapi : output;
+        const auto found = std::ranges::find(list, device, &DeviceInfo::id);
+        return backend == Backend::Asio || found == list.end() ? std::string() : found->container;
+    };
+    const std::string own = container(zone->backend, zone->output);
     ContentDialog dialog;
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.Title(box_value(ui::format(L"Zone_GroupTitle", {name})));
     StackPanel content;
     content.Spacing(8);
     TextBlock explanation;
-    explanation.Text(ui::format(L"Zone_GroupText", {name}));
+    explanation.Text(ui::format(local ? L"Zone_GroupLocalText" : L"Zone_GroupText", {name}));
     explanation.TextWrapping(TextWrapping::Wrap);
     content.Children().Append(explanation);
     std::vector<std::pair<std::string, CheckBox>> boxes;
     for (const auto& row : rows) {
-        if (row.backend != Backend::AirPlay || !row.enabled || row.id == zone->output) continue;
+        if ((local ? !camel::isLocalOutput(row.backend) : row.backend != Backend::AirPlay) || !row.enabled ||
+            (row.backend == zone->backend && row.id == zone->output))
+            continue;
         const auto holder = std::ranges::find_if(snapshot.zones, [&](const ZoneSnapshot& z) {
-            return z.id != id && z.backend == Backend::AirPlay && z.playback.state == PlaybackState::Playing && member(z, row.id);
+            return z.id != id && z.playback.state == PlaybackState::Playing && member(z, row);
         });
         const bool held = holder != snapshot.zones.end();
+        const bool same = local && !own.empty() && container(row.backend, row.id) == own;
         CheckBox box;
         box.Content(box_value(
-            held ? ui::format(L"Zone_ReceiverInUse", {std::wstring(outputMenuText(row)), std::wstring(ui::utf8(holder->name))})
-                 : outputMenuText(row)));
-        box.IsChecked(member(*zone, row.id));
-        box.IsEnabled(row.connected && row.unsupported.empty() && !held);
+            held   ? ui::format(L"Zone_ReceiverInUse", {std::wstring(outputMenuText(row)), std::wstring(ui::utf8(holder->name))})
+            : same ? ui::format(L"Zone_SameDevice", {std::wstring(outputMenuText(row))})
+                   : outputMenuText(row)));
+        box.IsChecked(member(*zone, row));
+        box.IsEnabled(row.connected && (local || row.unsupported.empty()) && !held && !same);
         content.Children().Append(box);
-        boxes.emplace_back(row.id, box);
+        boxes.emplace_back(zoneId(row.backend, row.id), box);
     }
     ScrollViewer scroll;
     scroll.MaxHeight(420);
     scroll.Content(content);
     dialog.Content(scroll);
     dialog.PrimaryButtonText(tr(L"Zone_GroupSave"));
-    if (zone->playback.receivers.size() > 1) dialog.SecondaryButtonText(tr(L"Zone_Ungroup"));
+    if (zone->playback.receivers.size() > 1 || zone->playback.members.size() > 1) dialog.SecondaryButtonText(tr(L"Zone_Ungroup"));
     dialog.CloseButtonText(tr(L"Reset_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Primary);
     const auto result = co_await ui::showDialog(dialog);
@@ -1309,8 +1375,8 @@ winrt::fire_and_forget MainWindow::askGroupZones(std::string id) {
     command.kind = CommandKind::GroupZones;
     command.zone = id;
     if (result == ContentDialogResult::Primary)
-        for (const auto& [receiver, box] : boxes)
-            if (box.IsChecked().Value()) command.zones.push_back(zoneId(Backend::AirPlay, receiver));
+        for (const auto& [memberZone, box] : boxes)
+            if (box.IsChecked().Value()) command.zones.push_back(memberZone);
     submitCommand(std::move(command));
 }
 
@@ -1328,8 +1394,10 @@ void MainWindow::showZoneRows(const Snapshot& snapshot) {
         const bool playing = p.state == PlaybackState::Playing;
         anyPlaying = anyPlaying || playing;
         // An AirPlay group is named by its receivers.
-        const hstring name =
-            zone.playback.receivers.size() > 1 ? ui::utf8(zone.name) + L" (AirPlay)" : outputMenuLabel(row.output);
+        const hstring name = zone.playback.receivers.size() > 1 ? ui::utf8(zone.name) + L" (AirPlay)"
+                             : zone.playback.members.size() > 1
+                                 ? outputLabel(row.output) + L" + " + to_hstring(zone.playback.members.size() - 1)
+                                 : outputMenuLabel(row.output);
         const bool unavailable = !row.output.connected || !zone.inUseBy.empty();
         const hstring state = !row.output.connected ? tr(L"Zone_Offline")
                               : !zone.inUseBy.empty()
@@ -1341,6 +1409,11 @@ void MainWindow::showZoneRows(const Snapshot& snapshot) {
                               : p.state == PlaybackState::Paused ? tr(L"State_Paused")
                                                                  : hstring();
         hstring detail = state;
+        for (const auto& member : zone.playback.members)
+            if (member.lost)
+                detail = ui::format(L"Zone_MemberLost", {std::wstring(memberLabel(snapshot, member.id)),
+                                                         std::wstring(ui::errorTitle(*member.lost))}) +
+                         (detail.empty() ? hstring() : L" · " + detail);
         if (const auto entry = std::ranges::find(zone.queue.entries, zone.queueEntryId, &QueueEntry::id);
             !unavailable && p.state != PlaybackState::Stopped && entry != zone.queue.entries.end()) {
             hstring track = ui::utf8(
@@ -1376,7 +1449,17 @@ hstring MainWindow::zoneLabel(const Snapshot& snapshot, const ZoneSnapshot& zone
     const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
     const auto row = std::ranges::find_if(
         rows, [&](const camel::server::OutputRow& r) { return r.backend == zone.backend && r.id == zone.output; });
-    return row == rows.end() ? ui::utf8(zone.name) : outputMenuLabel(*row);
+    if (row == rows.end()) return ui::utf8(zone.name);
+    // A group of this computer's outputs is named after its first and the count of the others.
+    if (zone.playback.members.size() > 1) return outputLabel(*row) + L" + " + to_hstring(zone.playback.members.size() - 1);
+    return outputMenuLabel(*row);
+}
+
+hstring MainWindow::memberLabel(const Snapshot& snapshot, const std::string& member) const {
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
+    const auto row =
+        std::ranges::find_if(rows, [&](const camel::server::OutputRow& r) { return zoneId(r.backend, r.id) == member; });
+    return row == rows.end() ? ui::utf8(member) : outputMenuLabel(*row);
 }
 
 void MainWindow::OnQueueMenuOpening(Windows::Foundation::IInspectable const&, Windows::Foundation::IInspectable const&) {

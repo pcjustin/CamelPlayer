@@ -792,6 +792,13 @@
   <data name="Zone_GroupText" xml:space="preserve"><value>選擇要和 {0} 一起播放的 AirPlay 接收器。它們會像一個區域一樣同步播放 {0} 的佇列，各自保留自己的音量與立體聲、左聲道或右聲道。</value></data>
   <data name="Zone_GroupSave" xml:space="preserve"><value>組成群組</value></data>
   <data name="Zone_Ungroup" xml:space="preserve"><value>解散群組</value></data>
+  <data name="Zone_GroupLocalText" xml:space="preserve"><value>選擇要和 {0} 一起播放的本機輸出。它們一起播放 {0} 的佇列，各自保留自己的設定：時脈那台照單獨播放時一樣播放，其他台以漂移修正跟隨它，不是 bit-perfect。</value></data>
+  <data name="Zone_SameDevice" xml:space="preserve"><value>{0}，同一台裝置</value></data>
+  <data name="Zone_Clock" xml:space="preserve"><value>時脈</value></data>
+  <data name="Zone_MemberLost" xml:space="preserve"><value>{0} 已停止：{1}</value></data>
+  <data name="Output_GroupDelay" xml:space="preserve"><value>群組中的延遲（毫秒）</value></data>
+  <data name="Output_GroupDelayNote" xml:space="preserve"><value>在本機輸出的群組裡，這台比群組的時脈晚這麼多毫秒播放，用耳朵把各個房間對齊。</value></data>
+  <data name="SignalPath_DriftCorrection" xml:space="preserve"><value>漂移修正</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>全部暫停</value></data>
   <data name="Zone_Offline" xml:space="preserve"><value>未連線</value></data>
   <data name="Zone_InUseBy" xml:space="preserve"><value>{0} 正在使用</value></data>

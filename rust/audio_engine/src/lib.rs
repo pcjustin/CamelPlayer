@@ -13,6 +13,7 @@ mod convert;
 mod convolver;
 mod crossfeed;
 mod decoder_host;
+mod drift_abi;
 mod dsd;
 mod dsd2pcm;
 mod dsd_pcm_abi;

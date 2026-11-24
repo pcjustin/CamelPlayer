@@ -370,6 +370,16 @@ uint32_t camel_dsd_to_pcm_rate_v1(void);
 CamelEngineStatus camel_dsd_to_pcm_process_v1(CamelDsdToPcm* converter, const uint8_t* input, size_t frames, float* output,
                                               size_t capacity, size_t* produced);
 void camel_dsd_to_pcm_destroy_v1(CamelDsdToPcm* converter);
+// A group follower's resampler (docs/Plan.md §5.12): interleaved doubles at a ratio of input to output frames that may
+// change while it plays, reached over `slew_frames` output frames. Null when it cannot be made.
+typedef struct CamelDriftResampler CamelDriftResampler;
+CamelDriftResampler* camel_drift_resampler_create_v1(uint32_t channels);
+CamelEngineStatus camel_drift_resampler_set_ratio_v1(CamelDriftResampler* resampler, double ratio, size_t slew_frames);
+CamelEngineStatus camel_drift_resampler_process_v1(CamelDriftResampler* resampler, const double* input, size_t frames,
+                                                   size_t* used, double* output, size_t capacity, size_t* produced);
+// Output frames it holds that its input has given and it has not written yet.
+double camel_drift_resampler_delay_v1(CamelDriftResampler* resampler);
+void camel_drift_resampler_destroy_v1(CamelDriftResampler* resampler);
 CamelEngineStatus camel_engine_read_decoded_v1(CamelEngine* engine, int32_t* output, uint64_t frame_capacity,
                                                uint64_t* frames_read);
 CamelEngineStatus camel_engine_set_output_format_v1(CamelEngine* engine, const CamelCommandStampV1* command,

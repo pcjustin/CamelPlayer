@@ -719,6 +719,9 @@ static json outputJson(const SavedOutput& o) {
     j["zone"] = zoneJson(o.zone);
     if (!o.speakers.empty()) j["speakers"] = o.speakers;
     if (!o.airplayGroup.empty()) j["group"] = o.airplayGroup;
+    if (!o.localGroup.empty()) j["localGroup"] = o.localGroup;
+    if (!o.groupClock.empty()) j["groupClock"] = o.groupClock;
+    if (o.groupDelayMs) j["groupDelayMs"] = o.groupDelayMs;
     if (!o.model.empty()) j["model"] = o.model;
     if (!o.mac.empty()) j["mac"] = o.mac;
     return j;
@@ -749,6 +752,12 @@ static std::optional<SavedOutput> outputFrom(const json& o, const OutputDsp& sha
             if (member.is_string() &&
                 std::ranges::find(saved.airplayGroup, member.get<std::string>()) == saved.airplayGroup.end())
                 saved.airplayGroup.push_back(member.get<std::string>());
+    if (o.contains("localGroup") && o["localGroup"].is_array())
+        for (const auto& member : o["localGroup"])
+            if (member.is_string() && std::ranges::find(saved.localGroup, member.get<std::string>()) == saved.localGroup.end())
+                saved.localGroup.push_back(member.get<std::string>());
+    saved.groupClock = str(o, "groupClock", "");
+    saved.groupDelayMs = int32_t(num(o, "groupDelayMs", 0.0, -SavedOutput::kMaxGroupDelayMs, SavedOutput::kMaxGroupDelayMs));
     const json& parameters = o.contains("parameters") && o["parameters"].is_object() ? o["parameters"] : json::object();
     if (saved.backend == Backend::Network)
         readNetwork(parameters, saved.network, quality);

@@ -38,6 +38,7 @@ public:
     size_t render(uint8_t* destination, size_t frames) noexcept override;
     size_t boundaryInLastRender() const noexcept override;
     bool renderEnded() const noexcept override;
+    bool renderedPoint(RenderedPoint& point) const noexcept override;
     StreamTrack streamTrack() const override;
     std::optional<StreamTrack> nextStreamTrack() const override;
     bool gapless() const;

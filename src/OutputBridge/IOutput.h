@@ -30,6 +30,13 @@ struct StreamTrack {
     bool operator==(const StreamTrack&) const = default;
 };
 
+// Where the frames a render handed out end: the track, by a key every member of a zone group gives the same file, and
+// the seconds into it (docs/Plan.md §5.12).
+struct RenderedPoint {
+    uint64_t track = 0;
+    double seconds = 0;
+};
+
 // Supplies packed device bytes. Called on the output's real-time thread: must not block or allocate.
 class IRenderSource {
 public:
@@ -45,6 +52,8 @@ public:
     virtual size_t boundaryInLastRender() const noexcept { return kNoBoundary; }
     // True once render() has handed out the last frame of the last track.
     virtual bool renderEnded() const noexcept { return false; }
+    // Where the last render() ended; false when the source cannot say. For the real-time thread, after render().
+    virtual bool renderedPoint(RenderedPoint& /*point*/) const noexcept { return false; }
     // The track the stream starts with, and the queued one after it. Not for the real-time thread.
     virtual StreamTrack streamTrack() const { return {}; }
     virtual std::optional<StreamTrack> nextStreamTrack() const { return std::nullopt; }
@@ -84,6 +93,8 @@ public:
     virtual OutputStatus status() const = 0;
     // False when the device cannot follow one track with the next without a gap, so nothing is queued on it.
     virtual bool gapless() const { return true; }
+    // The backend itself, under an output that wraps it.
+    virtual IOutput* device() { return this; }
 
     // Called from any thread when the stream fails after open() (device unplugged, taken over, ...).
     void setErrorHandler(std::function<void(const Error&)> h) { onError_ = std::move(h); }

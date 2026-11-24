@@ -354,6 +354,23 @@ public:
     size_t boundaryInLastRender() const noexcept override { return boundary_.load(std::memory_order_relaxed); }
     bool renderEnded() const noexcept override { return ended_.load(); }
 
+    // The track by its file's key, which every member of a zone group gives it, and how far into it render has got: the
+    // source frames it started at, then the output frames since (docs/Plan.md §5.12).
+    bool renderedPoint(RenderedPoint& point) const noexcept override {
+        const uint32_t in = sourceRate_.load(std::memory_order_relaxed), out = outputRate_.load(std::memory_order_relaxed);
+        if (!in || !out) return false;
+        point.track =
+            trackKeys_[renderTransitions_.load(std::memory_order_acquire) % trackKeys_.size()].load(std::memory_order_acquire);
+        point.seconds =
+            double(base_.load(std::memory_order_relaxed)) / in + double(consumed_.load(std::memory_order_relaxed)) / out;
+        return point.track != 0;
+    }
+
+    static uint64_t trackKey(const std::wstring& file) { return std::hash<std::wstring>{}(file) | 1; }
+    void keyTrack(uint64_t transition, const std::wstring& file) {
+        trackKeys_[transition % trackKeys_.size()].store(trackKey(file), std::memory_order_release);
+    }
+
     StreamTrack streamTrack() const override {
         std::lock_guard lock(streamMutex_);
         return streamTrack_;
@@ -401,6 +418,7 @@ public:
         }
         // Not the next transition: a queued track whose start is already on its way to the device is heard before it.
         manualTransition_ = rust_->decodingTrack();
+        keyTrack(manualTransition_, file.wstring());
         heldUntil_.store(manualTransition_, std::memory_order_release);
         fadeSkip_ = FadeSkip::None;
         adopt(
@@ -637,6 +655,7 @@ public:
         if (!next || !rust_->queueNext(file, next->decoder, gainDb, {fadeMs, next->convert})) return false;
         queued_.push_back(
             {file.wstring(), next->source, next->shown, next->format, requested, next->decoder, next->plan, next->lossy, gainDb});
+        keyTrack(handledTransitions_ + queued_.size(), file.wstring());
         {
             std::lock_guard lock(streamMutex_);
             nextStream_.push_back(streamTrackOf(file, *next));
@@ -1448,6 +1467,7 @@ private:
         renderTransitions_ = 0;
         handledTransitions_ = 0;
         manualTransition_ = 0;
+        keyTrack(0, file_);
         heldUntil_ = 0;
         transitionPending_ = false;
         {
@@ -1936,10 +1956,11 @@ private:
     _Guarded_by_(streamMutex_) uint64_t streamSequence_ = 0;
     std::atomic<int64_t> fullAt_{0}; // steady_clock ticks when the decoder last found its ring full
     std::atomic<bool> decodeDone_{false}, ended_{false}, stopDecode_{false}, playing_{false}, transitionPending_{false};
-    std::atomic<bool> rawDsd_{false};            // the open stream is DoP or native DSD
-    std::atomic<uint64_t> leadSilence_{0};       // frames of format-change silence still to play
-    std::atomic<bool> leadDone_{false};          // the silence is over; the control thread starts the Engine
-    std::atomic<uint64_t> renderTransitions_{0}; // written by the output callback
+    std::atomic<bool> rawDsd_{false};                   // the open stream is DoP or native DSD
+    std::atomic<uint64_t> leadSilence_{0};              // frames of format-change silence still to play
+    std::atomic<bool> leadDone_{false};                 // the silence is over; the control thread starts the Engine
+    std::atomic<uint64_t> renderTransitions_{0};        // written by the output callback
+    std::array<std::atomic<uint64_t>, 16> trackKeys_{}; // by transition, the key of the file audible from it
     uint64_t handledTransitions_ = 0;
     uint64_t manualTransition_ = 0;      // the transition that makes a manual crossfade's file audible
     std::atomic<uint64_t> heldUntil_{0}; // its position stays 0 until that transition

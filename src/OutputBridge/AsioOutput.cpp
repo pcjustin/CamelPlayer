@@ -487,7 +487,7 @@ std::unique_ptr<IOutput> createAsioOutput(const AsioSettings& s) {
 }
 
 bool showAsioControlPanel(IOutput* out) {
-    auto a = dynamic_cast<AsioOutput*>(out);
+    auto a = out ? dynamic_cast<AsioOutput*>(out->device()) : nullptr;
     return a && a->controlPanel();
 }
 

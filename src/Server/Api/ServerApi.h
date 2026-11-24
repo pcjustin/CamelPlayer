@@ -243,6 +243,17 @@ struct ReceiverState {
     bool operator==(const ReceiverState&) const = default;
 };
 
+// A member of a group of this computer's outputs (docs/Plan.md §5.12): its zone, whether the others keep to its clock,
+// and why it stopped while they play on.
+struct GroupMemberState {
+    std::string id; // as ZoneSnapshot::id
+    std::string name;
+    bool clock = false;
+    std::optional<audio::ErrorCode> lost;
+    std::string detail;
+    bool operator==(const GroupMemberState&) const = default;
+};
+
 // The last receiver to leave the group while the others played on.
 struct ReceiverLeft {
     uint64_t serial = 0; // counts every departure, so the same receiver leaving again is told again
@@ -282,6 +293,7 @@ struct PlaybackSnapshot {
     std::optional<double> playerVolumeDb;     // what `playerVolume` stands for on a player whose volume is in dB (HQPlayer)
     bool playerMuted = false;
     std::vector<ReceiverState> receivers;     // the AirPlay group in use, the one in use first; empty otherwise
+    std::vector<GroupMemberState> members;    // a group of this computer's outputs, its first first; empty otherwise
     std::optional<ReceiverLeft> receiverLeft; // the last receiver that left the group
     std::string receiverAsking; // an AirPlay receiver's name while it has waited a second for its user to allow CamelPlayer
     std::optional<audio::ErrorCode> error;
