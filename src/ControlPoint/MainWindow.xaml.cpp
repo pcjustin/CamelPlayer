@@ -641,6 +641,18 @@ void MainWindow::showFromTray() {
     Activate();
     SetForegroundWindow(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()));
     if (wasInTray) setRefreshing(true);
+    showIconAgain();
+}
+
+// The taskbar draws a button's icon when the window answers its question for it; a window too busy to answer as it is
+// shown is left without one on Windows 11, which asks again only for a new handle.
+void MainWindow::showIconAgain() {
+    DispatcherQueue().TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [weak = get_weak()] {
+        if (const auto self = weak.get()) {
+            self->iconCopy_ ^= 1;
+            ui::setAppIcon(self->AppWindow(), self->iconCopy_);
+        }
+    });
 }
 
 void MainWindow::setRefreshing(bool refreshing) {

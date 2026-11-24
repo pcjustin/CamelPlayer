@@ -38,8 +38,10 @@ void App::OnLaunched(LaunchActivatedEventArgs const&) {
     openWindow(std::move(server_));
     if (startHidden_)
         get_self<MainWindow>(window_.as<CamelPlayer::MainWindow>())->startInTray();
-    else
+    else {
         window_.Activate();
+        get_self<MainWindow>(window_.as<CamelPlayer::MainWindow>())->showIconAgain();
+    }
     hangWatch_.emplace([queue = window_.DispatcherQueue()](
                            std::function<void()> ping) { return queue.TryEnqueue([ping = std::move(ping)] { ping(); }); },
                        std::chrono::seconds(10));
@@ -58,6 +60,7 @@ void App::replaceWindow(std::shared_ptr<camel::server::IServer> server) {
     get_self<MainWindow>(window_.as<CamelPlayer::MainWindow>())
         ->takeOverFrom(*get_self<MainWindow>(old.as<CamelPlayer::MainWindow>()));
     window_.Activate();
+    get_self<MainWindow>(window_.as<CamelPlayer::MainWindow>())->showIconAgain();
     old.Close();
 }
 

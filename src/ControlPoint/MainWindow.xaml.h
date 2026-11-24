@@ -488,10 +488,14 @@ private:
     // Notification-area residency (docs/Plan.md §8.4).
     void hideToTray();
     void showFromTray();
+    int iconCopy_ = 0; // which of the icons' two copies the window holds
 
 public:
     // Started with Windows: the window is not shown until the tray opens it.
     void startInTray();
+    // The icons again with new handles once the UI thread is idle after the window was shown, for the taskbar to ask for
+    // them again (OP-R60).
+    void showIconAgain();
 
 private:
     // Hidden or minimized, the window stops refreshing what it shows.
