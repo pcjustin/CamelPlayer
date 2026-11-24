@@ -62,7 +62,8 @@ Pairings::Pairings(std::filesystem::path file) : file_(std::move(file)) {
         std::ifstream in(file_, std::ios::binary);
         const auto saved = json::parse(in);
         for (const auto& d : saved.at("devices"))
-            stored_.push_back({{d.at("id").get<std::string>(), d.at("name").get<std::string>(), d.at("paired").get<int64_t>()},
+            stored_.push_back({{d.at("id").get<std::string>(), d.at("name").get<std::string>(), d.value("server", std::string()),
+                                d.at("paired").get<int64_t>()},
                                d.at("token").get<std::string>()});
     } catch (const std::exception& e) {
         // A file it cannot read leaves the Server owned, pairing by a code its own window shows, never open to a claim.
@@ -75,8 +76,11 @@ Pairings::Pairings(std::filesystem::path file) : file_(std::move(file)) {
 void Pairings::save() const {
     if (file_.empty()) return;
     json devices = json::array();
-    for (const auto& s : stored_)
-        devices.push_back({{"id", s.device.id}, {"name", s.device.name}, {"paired", s.device.paired}, {"token", s.tokenHash}});
+    for (const auto& s : stored_) {
+        json device{{"id", s.device.id}, {"name", s.device.name}, {"paired", s.device.paired}, {"token", s.tokenHash}};
+        if (!s.device.server.empty()) device["server"] = s.device.server;
+        devices.push_back(std::move(device));
+    }
     const auto partial = std::filesystem::path(file_).concat(L".tmp");
     {
         std::ofstream out(partial, std::ios::binary | std::ios::trunc);
@@ -116,7 +120,8 @@ Pairings::Answer Pairings::rename(const std::string& device, const std::string& 
     return answer;
 }
 
-Pairings::Answer Pairings::pair(const std::string& name, const std::string& code, int64_t now) {
+Pairings::Answer Pairings::pair(const std::string& name, const std::string& code, int64_t now, const std::string& server,
+                                bool trusted) {
     std::lock_guard lock(mutex_);
     Answer answer;
     if (now < stoppedUntil_) {
@@ -134,7 +139,7 @@ Pairings::Answer Pairings::pair(const std::string& name, const std::string& code
         for (int n = 2; taken(answer.suggestion); ++n) answer.suggestion = base + " (" + std::to_string(n) + ")";
         return answer;
     }
-    if (damaged_ || !stored_.empty()) {
+    if ((damaged_ || !stored_.empty()) && !trusted) {
         if (code.empty()) {
             answer.error = "codeNeeded";
             return answer;
@@ -157,7 +162,7 @@ Pairings::Answer Pairings::pair(const std::string& name, const std::string& code
     const auto token = randomBytes<32>();
     answer.device = hex(id.data(), id.size());
     answer.token = hex(token.data(), token.size());
-    stored_.push_back({{answer.device, name, now}, sha256(answer.token)});
+    stored_.push_back({{answer.device, name, server, now}, sha256(answer.token)});
     damaged_ = false;
     save();
     return answer;
@@ -195,6 +200,22 @@ bool Pairings::revoke(const std::string& device) {
     const auto erased = std::erase_if(stored_, [&](const Stored& s) { return s.device.id == device; });
     if (erased) save();
     return erased > 0;
+}
+
+std::optional<std::string> Pairings::proofFor(const std::string& server) const {
+    if (server.empty()) return std::nullopt;
+    std::lock_guard lock(mutex_);
+    const auto found = std::ranges::find(stored_, server, [](const Stored& s) { return s.device.server; });
+    if (found == stored_.end()) return std::nullopt;
+    return found->tokenHash;
+}
+
+std::string Pairings::proofOf(const std::string& token) {
+    return sha256(token);
+}
+
+std::filesystem::path Pairings::fileIn(const std::filesystem::path& data) {
+    return data / L"pairings.json";
 }
 
 void Pairings::resetOwner() {

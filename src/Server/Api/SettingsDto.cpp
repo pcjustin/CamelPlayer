@@ -50,6 +50,7 @@ SettingsDto settingsDto(const Settings& s) {
             .controlled = s.controlled,
             .followedZone = s.followedZone,
             .allowControl = s.allowControl,
+            .ownName = s.ownName,
             .startWithWindowsAsked = s.startWithWindowsAsked};
 }
 
@@ -97,6 +98,7 @@ Settings nativeSettings(const SettingsDto& s) {
             .controlled = s.controlled,
             .followedZone = s.followedZone,
             .allowControl = s.allowControl,
+            .ownName = s.ownName,
             .startWithWindowsAsked = s.startWithWindowsAsked};
 }
 

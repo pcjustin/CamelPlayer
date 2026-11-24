@@ -13,6 +13,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <future>
 #include <iterator>
 
@@ -117,27 +118,41 @@ std::wstring instanceName() {
     return name + suffix;
 }
 
-enum class Unreached : uint8_t { Retry, PlayHere, Close };
+enum class Unreached : uint8_t { Retry, PlayHere, Control, Close };
 
 // Why a Control point's Server could not be used at the start.
-enum class Failed : uint8_t { Unreached, NotPaired, ServerTooOld, ThisTooOld };
+enum class Failed : uint8_t { Unreached, NotPaired, ServerTooOld, ThisTooOld, NeedsCode };
+
+constexpr int kFirstFound = 1000; // the buttons of the other CamelPlayers found
+
+struct Answer {
+    Unreached what = Unreached::Close;
+    size_t found = 0; // with Control, which of the others
+};
 
 // A Server that cannot be reached, no longer knows this computer or shares no API version with it, at the start of a
-// Control point; only one that cannot be reached is worth trying again.
-Unreached askUnreached(Failed why, const std::string& server, const std::string& version) {
+// Control point; only one that cannot be reached is worth trying again. The other CamelPlayers found may be controlled
+// instead (docs/Plan.md §17.8).
+Answer askUnreached(Failed why, const std::string& server, const std::string& version,
+                    const std::vector<camel::server::FoundServer>& others) {
     const wchar_t* titles[] = {L"Control_UnreachedTitle", L"Control_NotPairedTitle", L"Control_ServerTooOldTitle",
-                               L"Control_ThisTooOldTitle"};
+                               L"Control_ThisTooOldTitle", L"Control_NeedsCodeTitle"};
     const wchar_t* texts[] = {L"Control_UnreachedText", L"Control_NotPairedText", L"Control_ServerTooOldText",
-                              L"Control_ThisTooOldText"};
+                              L"Control_ThisTooOldText", L"Control_NeedsCodeText"};
     const auto title = ui::format(titles[size_t(why)], {camel::toWide(server)});
     const auto text = ui::format(texts[size_t(why)], {camel::toWide(version), L"" CAMEL_VERSION_STRING});
     const bool notPaired = why != Failed::Unreached;
     const auto retry = ui::tr(L"Error_LibraryRetry");
     const auto play = ui::tr(L"Control_PlayHere");
     const auto close = ui::tr(L"Error_LibraryClose");
+    std::vector<std::wstring> control;
+    control.reserve(others.size());
+    for (const auto& other : others)
+        control.emplace_back(ui::format(L"Control_ControlFound", {camel::toWide(other.announced.name)}));
     std::vector<TASKDIALOG_BUTTON> buttons;
     if (!notPaired) buttons.push_back({IDRETRY, retry.c_str()});
     buttons.push_back({IDYES, play.c_str()});
+    for (size_t i = 0; i < control.size(); ++i) buttons.push_back({kFirstFound + int(i), control[i].c_str()});
     buttons.push_back({IDCLOSE, close.c_str()});
     TASKDIALOGCONFIG config{.cbSize = sizeof(TASKDIALOGCONFIG)};
     config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
@@ -149,8 +164,23 @@ Unreached askUnreached(Failed why, const std::string& server, const std::string&
     config.pButtons = buttons.data();
     config.nDefaultButton = notPaired ? IDYES : IDRETRY;
     int chosen = IDCLOSE;
-    if (FAILED(TaskDialogIndirect(&config, &chosen, nullptr, nullptr))) return Unreached::Close;
-    return chosen == IDRETRY ? Unreached::Retry : chosen == IDYES ? Unreached::PlayHere : Unreached::Close;
+    if (FAILED(TaskDialogIndirect(&config, &chosen, nullptr, nullptr))) return {};
+    if (chosen >= kFirstFound && size_t(chosen - kFirstFound) < others.size())
+        return {Unreached::Control, size_t(chosen - kFirstFound)};
+    return {chosen == IDRETRY ? Unreached::Retry : chosen == IDYES ? Unreached::PlayHere : Unreached::Close};
+}
+
+// The CamelPlayers on the LAN other than the one this Control point controls, by name.
+std::vector<camel::server::FoundServer> otherServers(const std::string& controlled) {
+    std::vector<camel::server::FoundServer> found;
+    try {
+        found = camel::server::findServers(std::chrono::milliseconds(1500));
+    } catch (const std::exception& e) {
+        camel::log::warn("control: finding other CamelPlayers: %s", e.what());
+    }
+    std::erase_if(found, [&](const camel::server::FoundServer& s) { return s.announced.id == controlled; });
+    std::ranges::sort(found, {}, [](const camel::server::FoundServer& s) { return s.announced.name; });
+    return found;
 }
 
 // The CamelPlayer this Control point controls, looked for by its ID when it no longer answers at its address.
@@ -183,31 +213,68 @@ std::shared_ptr<camel::server::IServer> reachControlled(camel::Settings& own, co
     }
 }
 
-// Nothing when the user chose to play here instead, `closing` when they chose to close.
+// Nothing when the user chose to play here instead, `closing` when they chose to close. Another CamelPlayer chosen is
+// paired with when it needs no code, a computer this one paired with or one still ownerless, and controlled instead.
 std::shared_ptr<camel::server::IServer> openControlled(camel::Settings& own, bool& closing) {
-    const camel::server::ServerTokens tokens(camel::dataDirectory() / L"server-tokens");
+    camel::server::ServerTokens tokens(camel::dataDirectory() / L"server-tokens");
+    Failed why = Failed::Unreached;
+    std::string name, version;
+    bool reach = true;
     for (;;) {
-        Failed why = Failed::Unreached;
-        std::string version;
-        try {
-            return reachControlled(own, tokens.token(own.controlled.id).value_or(""));
-        } catch (const camel::server::NotPaired&) {
-            camel::log::warn("control: no longer paired with %s", own.controlled.name.c_str());
-            why = Failed::NotPaired;
-        } catch (const camel::server::VersionMismatch& e) {
-            camel::log::warn("control: %s (it runs %s)", e.what(), e.serverVersion.c_str());
-            why = e.serverOlder ? Failed::ServerTooOld : Failed::ThisTooOld;
-            version = e.serverVersion;
-        } catch (const std::exception& e) {
-            camel::log::warn("control: %s", e.what());
+        if (reach) {
+            why = Failed::Unreached;
+            name = own.controlled.name;
+            version.clear();
+            try {
+                return reachControlled(own, tokens.token(own.controlled.id).value_or(""));
+            } catch (const camel::server::NotPaired&) {
+                camel::log::warn("control: no longer paired with %s", own.controlled.name.c_str());
+                why = Failed::NotPaired;
+            } catch (const camel::server::VersionMismatch& e) {
+                camel::log::warn("control: %s (it runs %s)", e.what(), e.serverVersion.c_str());
+                why = e.serverOlder ? Failed::ServerTooOld : Failed::ThisTooOld;
+                version = e.serverVersion;
+            } catch (const std::exception& e) {
+                camel::log::warn("control: %s", e.what());
+            }
         }
-        switch (askUnreached(why, own.controlled.name, version)) {
+        reach = true;
+        const auto others = otherServers(own.controlled.id);
+        const auto answer = askUnreached(why, name, version, others);
+        switch (answer.what) {
         case Unreached::Retry:
             continue;
         case Unreached::PlayHere:
             own.role = camel::Role::Play;
             camel::saveSettings(own);
             return nullptr;
+        case Unreached::Control: {
+            const auto& found = others[answer.found];
+            const camel::ControlledServer target{found.announced.id, found.announced.name, found.address, found.announced.port};
+            if (!tokens.token(target.id)) {
+                try {
+                    const auto paired = camel::server::RemoteServer::pair(
+                        target.host, target.port, own.ownName.empty() ? camel::server::computerName() : own.ownName, "",
+                        camel::server::RemoteServer::introduction(camel::dataDirectory(), target.id));
+                    tokens.set(target.id, paired.token);
+                } catch (const camel::server::PairingRefused& e) {
+                    camel::log::warn("control: %s asks for a code (%s)", target.name.c_str(), e.code.c_str());
+                    why = Failed::NeedsCode;
+                    name = target.name;
+                    reach = false;
+                    continue;
+                } catch (const std::exception& e) {
+                    camel::log::warn("control: pairing with %s: %s", target.name.c_str(), e.what());
+                    why = Failed::Unreached;
+                    name = target.name;
+                    reach = false;
+                    continue;
+                }
+            }
+            own.controlled = target;
+            camel::saveSettings(own);
+            continue;
+        }
         case Unreached::Close:
             closing = true;
             return nullptr;

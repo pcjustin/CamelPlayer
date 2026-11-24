@@ -73,6 +73,7 @@ public:
     nlohmann::json hello() const;      // what the Server said of itself as the connection opened
     std::string device() const;        // this device's ID, as the Server knows it
     std::string serverVersion() const; // the Server's CamelPlayer version, as it said
+    std::string serverName() const;    // what the Server is called, as it said when this connection began
     // Update Server (docs/Plan.md §17.8): what an update of the Server would be, {"version", "release" (null or
     // {"version", "notes"}), "administrator", "playing", "connected"}, and having it install the release, after which
     // it restarts and this connection is made again.
@@ -82,10 +83,17 @@ public:
     struct Paired {
         std::string token, device;
     };
-    // Asks the Server to pair this device as `name`, with a code a paired device shows unless it is ownerless; throws
-    // PairingRefused, or std::runtime_error when it cannot reach it.
+    // Who asks to pair: this computer's own Server ID, which the Server keeps with the device, and, when the Server
+    // paired with this computer before, the proof that lets it pair without a code (docs/Plan.md §17.8).
+    struct Introduction {
+        std::string server, proof;
+    };
+    // This computer's introduction to the Server whose ID is `server`, from its data folder.
+    static Introduction introduction(const std::filesystem::path& data, const std::string& server);
+    // Asks the Server to pair this device as `name`, with a code a paired device shows unless it is ownerless or trusts
+    // this computer; throws PairingRefused, or std::runtime_error when it cannot reach it.
     static Paired pair(const std::string& host, uint16_t port, const std::string& name, const std::string& code,
-                       std::chrono::milliseconds timeout = std::chrono::seconds(5));
+                       const Introduction& from = {}, std::chrono::milliseconds timeout = std::chrono::seconds(5));
     // Pairing as any paired device may do it (docs/Plan.md 17.8).
     std::string pairingCode() override;
     nlohmann::json pairedDevices() override;

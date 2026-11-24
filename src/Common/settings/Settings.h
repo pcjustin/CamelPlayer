@@ -513,6 +513,7 @@ struct Settings {
     ControlledServer controlled;
     std::string followedZone;           // the zone this computer follows while it controls another
     bool allowControl = false;          // other computers may control this one, its Server API served on the LAN
+    std::string ownName;                // what other CamelPlayers call this computer; empty is its Windows name
     bool startWithWindowsAsked = false; // allowing control has asked once whether to start with Windows
     bool adoptOutputSets = false;       // from an earlier version: each backend's set still has to reach its device
     // Read from a version before zones: the saved queue's shuffle and repeat still have to become every zone's. Never

@@ -129,6 +129,7 @@ struct PairForm {
     std::shared_ptr<bool> working;
     std::string ownId;                    // this computer's own Server, not offered
     std::shared_ptr<RemoteAccess> access; // to undo a pairing with it through a typed address
+    std::string preferred;                // chosen at first, as from the zone picker
 };
 
 void say(const PairForm& form, hstring const& text, bool problem = true) {
@@ -138,20 +139,29 @@ void say(const PairForm& form, hstring const& text, bool problem = true) {
     form.problem.Visibility(Visibility::Visible);
 }
 
+// The CamelPlayers found, the one chosen staying chosen.
+void showFound(const PairForm& form, std::vector<FoundServer> found) {
+    std::string chosen = form.preferred;
+    if (const auto index = form.servers.SelectedIndex(); index >= 0 && size_t(index) < form.found->size())
+        chosen = (*form.found)[size_t(index)].announced.id;
+    std::erase_if(found, [&](const FoundServer& s) { return s.announced.id == form.ownId; });
+    *form.found = std::move(found);
+    form.servers.Items().Clear();
+    for (const auto& s : *form.found)
+        form.servers.Items().Append(
+            box_value(toWide(s.announced.name + " · " + s.address + ":" + std::to_string(s.announced.port))));
+    const auto at = std::ranges::find(*form.found, chosen, [](const FoundServer& s) { return s.announced.id; });
+    if (!form.found->empty()) form.servers.SelectedIndex(at == form.found->end() ? 0 : int32_t(at - form.found->begin()));
+}
+
 winrt::fire_and_forget lookForServers(PairForm form) {
     winrt::apartment_context foreground;
     form.looking.Text(tr(L"Pair_Looking"));
     form.looking.Visibility(Visibility::Visible);
     co_await winrt::resume_background();
     auto answered = findServers(std::chrono::milliseconds(1500));
-    std::erase_if(answered, [&](const FoundServer& s) { return s.announced.id == form.ownId; });
     co_await foreground;
-    *form.found = std::move(answered);
-    form.servers.Items().Clear();
-    for (const auto& s : *form.found)
-        form.servers.Items().Append(
-            box_value(toWide(s.announced.name + " · " + s.address + ":" + std::to_string(s.announced.port))));
-    if (!form.found->empty()) form.servers.SelectedIndex(0);
+    showFound(form, std::move(answered));
     form.looking.Text(tr(L"Pair_NoneFound"));
     form.looking.Visibility(form.found->empty() ? Visibility::Visible : Visibility::Collapsed);
 }
@@ -206,7 +216,8 @@ winrt::fire_and_forget tryPairing(PairForm form, ContentDialog shown) {
         options.port = server.port;
         options.cache = dataDirectory() / L"remote-cache";
         if (server.id.empty() || !stillPaired(options, tokens, server.id)) {
-            const auto paired = RemoteServer::pair(server.host, server.port, deviceName, codeText);
+            const auto paired = RemoteServer::pair(server.host, server.port, deviceName, codeText,
+                                                   RemoteServer::introduction(dataDirectory(), server.id));
             options.token = paired.token;
             RemoteServer probe(options);
             const auto hello = probe.hello();
@@ -310,6 +321,13 @@ std::string MainWindow::ownDevice() const {
 // Another computer's Server that does not answer is shown as such until it is back, which RemoteServer waits for.
 void MainWindow::showLink() {
     const auto link = server_->link();
+    if (const auto remote = std::dynamic_pointer_cast<RemoteServer>(server_)) {
+        if (const auto name = remote->serverName(); !name.empty() && name != settings_.controlled.name) {
+            settings_.controlled.name = name;
+            applySettingsNow();
+            showComputerName();
+        }
+    }
     if (shownLink_ == link) return;
     shownLink_ = link;
     const auto name = toWide(settings_.controlled.name);
@@ -399,9 +417,22 @@ void MainWindow::useRemoteAccess(std::shared_ptr<RemoteAccess> access) {
     populateComputers();
 }
 
+void MainWindow::showComputerName() {
+    const hstring title = std::dynamic_pointer_cast<RemoteServer>(server_)
+                              ? ui::format(L"Title_On", {toWide(settings_.controlled.name)})
+                              : hstring(L"CamelPlayer");
+    AppTitleBar().Title(title);
+    Title(title);
+}
+
 void MainWindow::populateComputers() {
     const auto remote = std::dynamic_pointer_cast<RemoteServer>(server_);
     const bool wasPopulating = std::exchange(populating_, true);
+    showComputerName();
+    OwnNamePanel().Visibility(remote ? Visibility::Collapsed : Visibility::Visible);
+    OwnNameBox().PlaceholderText(toWide(computerName()));
+    if (const auto root = Content().XamlRoot(); !root || Input::FocusManager::GetFocusedElement(root) != OwnNameBox())
+        OwnNameBox().Text(toWide(settings_.ownName));
     const auto& controlled = settings_.controlled;
     if (remote) {
         RoleText().Text(ui::format(L"Role_Control",
@@ -799,13 +830,21 @@ void MainWindow::OnControlAnotherClick(Windows::Foundation::IInspectable const&,
     chooseServerToControl();
 }
 
+// The name other computers find this one by; empty, the Windows computer name.
+void MainWindow::OnOwnNameClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    const auto name = toUtf8(trimmed(OwnNameBox().Text()));
+    if (name == settings_.ownName) return;
+    settings_.ownName = name;
+    applySettingsNow();
+}
+
 void MainWindow::OnPlayHereClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     playHere();
 }
 
 // The CamelPlayers mDNS finds, or a typed address; pairing asks for a code only once the Server has an owner, and for
 // another name when a paired device has this one.
-winrt::fire_and_forget MainWindow::chooseServerToControl() {
+winrt::fire_and_forget MainWindow::chooseServerToControl(std::string preferred) {
     auto strong = get_strong();
     const auto ownId = access_ ? access_->serverId() : std::string();
     const auto controlledId = std::dynamic_pointer_cast<RemoteServer>(server_) ? settings_.controlled.id : std::string();
@@ -836,7 +875,7 @@ winrt::fire_and_forget MainWindow::chooseServerToControl() {
     content.Children().Append(address);
     TextBox name;
     name.Header(box_value(tr(L"Pair_Name")));
-    name.Text(toWide(computerName()));
+    name.Text(toWide(settings_.ownName.empty() ? computerName() : settings_.ownName));
     content.Children().Append(name);
     TextBox code;
     code.Header(box_value(tr(L"Pair_Code")));
@@ -862,8 +901,15 @@ winrt::fire_and_forget MainWindow::chooseServerToControl() {
                   std::make_shared<std::optional<ControlledServer>>(),
                   std::make_shared<bool>(false),
                   ownId,
-                  access_};
+                  access_,
+                  preferred};
     again.Click([form](auto&&, auto&&) { lookForServers(form); });
+    // One chosen in the zone picker is tried at once: a code is asked for only when it needs one.
+    if (std::ranges::find(otherComputers_, preferred, [](const FoundServer& s) { return s.announced.id; }) !=
+        otherComputers_.end()) {
+        showFound(form, otherComputers_);
+        dialog.Opened([form](ContentDialog const& shown, auto&&) { tryPairing(form, shown); });
+    }
     lookForServers(form);
     dialog.PrimaryButtonClick([form](ContentDialog const& shown, ContentDialogButtonClickEventArgs const& e) {
         e.Cancel(true);
@@ -954,8 +1000,7 @@ winrt::fire_and_forget MainWindow::switchToControl(ControlledServer target) {
     std::vector<std::wstring> connected;
     try {
         if (access && access->port())
-            for (const auto& device : access->pairedDevices())
-                if (device.value("connected", false)) connected.push_back(toWide(device.value("name", std::string())));
+            for (const auto& name : connectedNames(access->pairedDevices())) connected.push_back(toWide(name));
     } catch (const std::exception& e) {
         log::warn("paired devices: %s", e.what());
     }

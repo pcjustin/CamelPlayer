@@ -19,6 +19,7 @@
 #include "Server/Network/Firewall.h"
 #include "Server/Network/HQPlayer.h"
 #include "Server/Playback/Outputs.h"
+#include "Server/Remote/RemoteServer.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -964,6 +965,13 @@ void MainWindow::openZonePicker() {
                             L"ButtonBorderBrushPointerOver", L"ButtonBorderBrushPressed", L"ButtonBorderBrushDisabled"})
         content.Resources().Insert(box_value(key), clear);
     Automation::AutomationProperties::SetName(content, tr(L"Zone_PickerName"));
+    if (std::dynamic_pointer_cast<RemoteServer>(server_)) {
+        TextBlock computer;
+        computer.Text(ui::format(L"Title_On", {toWide(settings_.controlled.name)}));
+        computer.Style(Application::Current().Resources().Lookup(box_value(L"BodyStrongTextBlockStyle")).as<Style>());
+        computer.Margin(ThicknessHelper::FromLengths(11, 4, 11, 0));
+        content.Children().Append(computer);
+    }
     const auto snapshot = server_->snapshot();
     const auto outputs = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
     const auto heading = [&](const wchar_t* key) {
@@ -1104,6 +1112,10 @@ void MainWindow::openZonePicker() {
     Grid::SetColumn(open, 1);
     foot.Children().Append(open);
     content.Children().Append(foot);
+    otherComputerRows_ = StackPanel();
+    content.Children().Append(otherComputerRows_);
+    showOtherComputers();
+    findOtherComputers();
     picker.Content(content);
     // One closing as the next opens leaves the next one's rows.
     picker.Closed([this, weak = winrt::make_weak(picker)](auto&&, auto&&) {
@@ -1111,9 +1123,80 @@ void MainWindow::openZonePicker() {
         zonePicker_ = nullptr;
         zoneRows_.clear();
         pauseAllButton_ = nullptr;
+        otherComputerRows_ = nullptr;
     });
     showZoneRows(snapshot);
     picker.ShowAt(OutputButton());
+}
+
+// The zone picker's foot: the other CamelPlayers found to control and, on a Control point, playing here again
+// (docs/Plan.md §17.8).
+void MainWindow::showOtherComputers() {
+    if (!otherComputerRows_) return;
+    const bool remote = std::dynamic_pointer_cast<RemoteServer>(server_) != nullptr;
+    auto rows = otherComputerRows_.Children();
+    rows.Clear();
+    if (otherComputers_.empty() && !remote) return;
+    Border divider;
+    divider.Height(1);
+    divider.Margin(ThicknessHelper::FromLengths(-4, 4, -4, 4));
+    divider.Background(themeBrush(L"DividerStrokeColorDefaultBrush"));
+    rows.Append(divider);
+    if (!otherComputers_.empty()) {
+        TextBlock heading;
+        heading.Text(tr(L"Zone_OtherComputers"));
+        heading.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        heading.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
+        heading.Margin(ThicknessHelper::FromLengths(11, 4, 11, 4));
+        rows.Append(heading);
+    }
+    for (const auto& found : otherComputers_) {
+        TextBlock name;
+        name.Text(toWide(found.announced.name));
+        auto row = pickerRow(glyph(L"\xE977"), name, nullptr);
+        Automation::AutomationProperties::SetName(row, ui::format(L"Zone_ControlComputer", {toWide(found.announced.name)}));
+        row.Click([this, id = found.announced.id](auto&&, auto&&) {
+            if (zonePicker_) zonePicker_.Hide();
+            chooseServerToControl(id);
+        });
+        rows.Append(row);
+    }
+    if (remote) {
+        TextBlock here;
+        here.Text(tr(L"Control_PlayHere"));
+        auto row = pickerRow(glyph(L"\xE80F"), here, nullptr);
+        Automation::AutomationProperties::SetName(row, here.Text());
+        row.Click([this](auto&&, auto&&) {
+            if (zonePicker_) zonePicker_.Hide();
+            playHere();
+        });
+        rows.Append(row);
+    }
+}
+
+// Looked for each time the zone picker opens, the ones found last shown meanwhile; neither this computer's own Server
+// nor the one it controls is offered.
+winrt::fire_and_forget MainWindow::findOtherComputers() {
+    auto strong = get_strong();
+    if (findingComputers_) co_return;
+    findingComputers_ = true;
+    std::vector<std::string> skipped;
+    if (access_) skipped.push_back(access_->serverId());
+    if (std::dynamic_pointer_cast<RemoteServer>(server_)) skipped.push_back(settings_.controlled.id);
+    winrt::apartment_context foreground;
+    co_await winrt::resume_background();
+    std::vector<FoundServer> found;
+    try {
+        found = findServers(std::chrono::milliseconds(1500));
+    } catch (const std::exception& e) {
+        log::warn("finding other CamelPlayers: %s", e.what());
+    }
+    co_await foreground;
+    findingComputers_ = false;
+    std::erase_if(found, [&](const FoundServer& s) { return std::ranges::find(skipped, s.announced.id) != skipped.end(); });
+    std::ranges::sort(found, {}, [](const FoundServer& s) { return s.announced.name; });
+    otherComputers_ = std::move(found);
+    showOtherComputers();
 }
 
 // The selected AirPlay group's receivers, in a submenu under its row, which join and leave it; the last one stays. One

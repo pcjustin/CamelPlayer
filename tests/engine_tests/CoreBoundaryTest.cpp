@@ -491,9 +491,10 @@ TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
                                               "scanSpeed",
                                               "followedDefault",
                                               "adoptOutputSets"};
-    // A computer's role, the CamelPlayer it controls and whether others may control it stay through both resets.
-    const std::set<std::string> kept{"schema",     "skippedVersion", "lastFile",    "role",
-                                     "controlled", "followedZone",   "allowControl"};
+    // A computer's role, the CamelPlayer it controls, whether others may control it and its name stay through both
+    // resets.
+    const std::set<std::string> kept{"schema",     "skippedVersion", "lastFile",     "role",
+                                     "controlled", "followedZone",   "allowControl", "ownName"};
     std::vector<std::string> unlisted;
     const auto file = nlohmann::json::parse(toJson(Settings{}));
     for (const auto& item : file.items())
@@ -522,15 +523,18 @@ TEST(SettingsBoundary, TheRoleAndControlByOtherComputersAreReadBackAndKeptThroug
     const Settings defaults;
     EXPECT_EQ(defaults.role, Role::Play);
     EXPECT_FALSE(defaults.allowControl);
+    EXPECT_TRUE(defaults.ownName.empty());
     Settings settings;
     settings.role = Role::Control;
     settings.controlled = {"a1b2", "Study PC", "192.168.0.20", 9441};
     settings.allowControl = true;
+    settings.ownName = "Living room";
     settings.startWithWindowsAsked = true;
     const auto read = fromJson(toJson(settings));
     EXPECT_EQ(read.role, Role::Control);
     EXPECT_EQ(read.controlled, settings.controlled);
     EXPECT_TRUE(read.allowControl);
+    EXPECT_EQ(read.ownName, "Living room");
     EXPECT_TRUE(read.startWithWindowsAsked);
     EXPECT_EQ(fromJson(R"({"controlled":{"port":70000}})").controlled.port, 9440);
     EXPECT_EQ(fromJson(R"({"role":"remote"})").role, Role::Play);
@@ -539,6 +543,7 @@ TEST(SettingsBoundary, TheRoleAndControlByOtherComputersAreReadBackAndKeptThroug
         EXPECT_EQ(reset.role, Role::Control);
         EXPECT_EQ(reset.controlled, settings.controlled);
         EXPECT_TRUE(reset.allowControl);
+        EXPECT_EQ(reset.ownName, "Living room");
     }
     EXPECT_FALSE(resetInterface(settings).startWithWindowsAsked);
 }
@@ -552,6 +557,7 @@ TEST(SettingsBoundary, ComputerSettingsAreCopiedAndTheServersAreLeft) {
     own.discord.enabled = true;
     own.role = Role::Control;
     own.controlled.id = "server";
+    own.ownName = "Study PC";
     own.autoplay = false;
     Settings server;
     server.allowControl = true;
@@ -563,6 +569,7 @@ TEST(SettingsBoundary, ComputerSettingsAreCopiedAndTheServersAreLeft) {
     EXPECT_TRUE(server.discord.enabled);
     EXPECT_EQ(server.role, Role::Control);
     EXPECT_EQ(server.controlled.id, "server");
+    EXPECT_EQ(server.ownName, "Study PC");
     EXPECT_TRUE(server.autoplay);
     EXPECT_TRUE(server.allowControl);
     EXPECT_EQ(server.backend, Backend::Asio);

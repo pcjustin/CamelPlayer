@@ -839,6 +839,7 @@ std::string toJson(const Settings& s) {
         {"id", s.controlled.id}, {"name", s.controlled.name}, {"host", s.controlled.host}, {"port", s.controlled.port}};
     j["followedZone"] = s.followedZone;
     j["allowControl"] = s.allowControl;
+    j["ownName"] = s.ownName;
     j["startWithWindowsAsked"] = s.startWithWindowsAsked;
     if (s.adoptOutputSets) j["adoptOutputSets"] = true;
     // Any text that is not UTF-8 is replaced rather than stopping every later save.
@@ -897,6 +898,7 @@ Settings fromJson(const std::string& text) {
     }
     s.followedZone = str(j, "followedZone", "");
     s.allowControl = boolean(j, "allowControl", false);
+    s.ownName = str(j, "ownName", "");
     s.startWithWindowsAsked = boolean(j, "startWithWindowsAsked", false);
     const auto speed = std::ranges::find(kScanSpeedIds, str(j, "scanSpeed", "low"));
     s.scanSpeed = speed == std::end(kScanSpeedIds) ? ScanSpeed::Low : ScanSpeed(speed - std::begin(kScanSpeedIds));
@@ -1044,6 +1046,7 @@ Settings resetPlayback(const Settings& s) {
     reset.controlled = s.controlled;
     reset.followedZone = s.followedZone;
     reset.allowControl = s.allowControl;
+    reset.ownName = s.ownName;
     reset.startWithWindowsAsked = s.startWithWindowsAsked;
     return reset;
 }
@@ -1083,6 +1086,7 @@ void copyComputerSettings(const Settings& from, Settings& to) {
     to.role = from.role;
     to.controlled = from.controlled;
     to.followedZone = from.followedZone;
+    to.ownName = from.ownName;
 }
 
 bool inAnalysisWindow(const WaveformSettings& settings, int minute) {

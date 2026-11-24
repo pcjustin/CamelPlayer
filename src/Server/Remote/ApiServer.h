@@ -36,6 +36,9 @@ public:
         // Calls of the Server's computer rather than of its IServer, such as updating it; nothing for one it does not
         // know. They run as the caller (Caller.h).
         std::function<std::optional<ApiSession::Answer>(const std::string& call, const nlohmann::json& args)> calls;
+        // Whether `proof` shows that the computer whose Server ID is `server` gave this one a token: two computers
+        // that paired pair the other way without a code (docs/Plan.md §17.8).
+        std::function<bool(const std::string& server, const std::string& proof)> trusts;
     };
 
     // Starts listening; throws std::runtime_error when none of the ports is free.

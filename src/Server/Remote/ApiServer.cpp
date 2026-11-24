@@ -205,8 +205,13 @@ struct ApiServer::Impl {
         const auto body = readBody(s, rest, length, kHeadTimeout);
         if (!body) return;
         const auto asked = json::parse(*body);
-        const auto code = asked.contains("code") && asked["code"].is_string() ? asked["code"].get<std::string>() : std::string();
-        const auto answer = pairings.pair(asked.at("name").get<std::string>(), code, nowMs());
+        const auto text = [&](const char* key) {
+            return asked.contains(key) && asked[key].is_string() ? asked[key].get<std::string>() : std::string();
+        };
+        const auto computer = text("server");
+        const auto proof = text("proof");
+        const bool trusted = !computer.empty() && !proof.empty() && options.trusts && options.trusts(computer, proof);
+        const auto answer = pairings.pair(asked.at("name").get<std::string>(), text("code"), nowMs(), computer, trusted);
         if (answer.stoppedNow) {
             std::lock_guard lock(mutex);
             for (auto& [client, c] : clients)

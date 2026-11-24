@@ -91,6 +91,7 @@ struct SettingsDto {
     ControlledServer controlled;
     std::string followedZone;
     bool allowControl = false;
+    std::string ownName;
     bool startWithWindowsAsked = false;
     bool operator==(const SettingsDto&) const = default;
 };

@@ -1153,4 +1153,12 @@
   <data name="UpdateServer_Started" xml:space="preserve"><value>{0} 上的 CamelPlayer 正在安裝 {1}，並會重新啟動。</value></data>
   <data name="UpdateServer_FailedTitle" xml:space="preserve"><value>更新 {0} 上的 CamelPlayer</value></data>
   <data name="UpdateServer_Failed" xml:space="preserve"><value>無法更新 {0} 上的 CamelPlayer：{1}</value></data>
+  <data name="Title_On" xml:space="preserve"><value>{0} 上的 CamelPlayer</value></data>
+  <data name="Zone_OtherComputers" xml:space="preserve"><value>其他 CamelPlayer</value></data>
+  <data name="Zone_ControlComputer" xml:space="preserve"><value>控制 {0} 上的 CamelPlayer</value></data>
+  <data name="Settings_OwnName.Header" xml:space="preserve"><value>這台電腦的名稱（其他電腦會這樣找到它）</value></data>
+  <data name="Settings_OwnNameText.Text" xml:space="preserve"><value>留空就是 Windows 的電腦名稱。現在連著的 Control point 會以新名稱重新連線。</value></data>
+  <data name="Control_ControlFound" xml:space="preserve"><value>控制 {0} 上的 CamelPlayer</value></data>
+  <data name="Control_NeedsCodeTitle" xml:space="preserve"><value>{0} 上的 CamelPlayer 要求配對碼</value></data>
+  <data name="Control_NeedsCodeText" xml:space="preserve"><value>請先在這台電腦播放，再到「設定 › 這台電腦與其他電腦」與它配對，輸入已和它配對的裝置所顯示的配對碼。</value></data>
 </root>

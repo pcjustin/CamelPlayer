@@ -22,10 +22,10 @@ A Server listens on TCP port 9440. When another program holds that port, it uses
 
 Every request carries the token of a paired device as `Authorization: Bearer <token>`: the WebSocket's opening request and every HTTP request, covers included. A request without a token the Server knows is answered with 401 and the error `notPaired`. Only finding the Server and asking to pair go without a token.
 
-To pair, send `POST /pair` with the device's name, and with a code unless the Server has no owner yet:
+To pair, send `POST /pair` with the device's name, and with a code unless the Server has no owner yet. A CamelPlayer also sends its own Server ID as `server`, which the Server keeps with the device, and, when this Server paired with it before, the `proof` below:
 
 ```json
-{"name": "Laptop", "code": "123456"}
+{"name": "Laptop", "code": "123456", "server": "…", "proof": "…"}
 ```
 
 The answer is the device's token and ID:
@@ -39,6 +39,7 @@ The first device to ask claims a Server that has no owner, without a code. Every
 - **A code** has six digits. It is valid for five minutes and for one pairing.
 - **After five wrong codes** in a row, pairing stops for five minutes, the right code included. The paired devices are sent the notice `pairingStopped`.
 - **Names are unique**: no two paired devices share one, so a device whose name is taken is asked for another.
+- **Two computers that paired trust each other both ways**: when computer A paired with Server B, B kept A's Server ID with the device, and A kept B's token. Once B asks to pair with A, it sends its own ID as `server` and, as `proof`, the SHA-256 of the token it gave A, in lowercase hex; A works it out from the token it keeps for B, and pairs B without a code. The trust ends when B revokes A or A forgets B's token.
 
 Pairing errors:
 

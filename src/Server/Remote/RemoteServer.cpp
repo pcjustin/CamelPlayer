@@ -24,6 +24,8 @@
 #include "Server/Playback/Outputs.h"
 #include "Server/Remote/Connection.h"
 #include "Server/Remote/Discovery.h"
+#include "Server/Remote/Pairings.h"
+#include "Server/Remote/RemoteAccess.h"
 
 namespace camel::server {
 
@@ -518,6 +520,11 @@ std::string RemoteServer::serverVersion() const {
     return impl_->hello.contains("server") ? impl_->hello["server"].value("version", std::string()) : std::string();
 }
 
+std::string RemoteServer::serverName() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->hello.contains("server") ? impl_->hello["server"].value("name", std::string()) : std::string();
+}
+
 json RemoteServer::serverUpdate() {
     return impl_->call("serverUpdate", json::array(), {});
 }
@@ -536,8 +543,13 @@ std::string RemoteServer::device() const {
     return impl_->hello.value("device", std::string());
 }
 
+RemoteServer::Introduction RemoteServer::introduction(const std::filesystem::path& data, const std::string& server) {
+    if (data.empty()) return {};
+    return {serverIdIn(data), Pairings(Pairings::fileIn(data)).proofFor(server).value_or(std::string())};
+}
+
 RemoteServer::Paired RemoteServer::pair(const std::string& host, uint16_t port, const std::string& name, const std::string& code,
-                                        std::chrono::milliseconds timeout) {
+                                        const Introduction& from, std::chrono::milliseconds timeout) {
     Options options;
     options.host = host;
     options.port = port;
@@ -545,6 +557,8 @@ RemoteServer::Paired RemoteServer::pair(const std::string& host, uint16_t port, 
     const Impl impl(options);
     json asked{{"name", name}};
     if (!code.empty()) asked["code"] = code;
+    if (!from.server.empty()) asked["server"] = from.server;
+    if (!from.proof.empty()) asked["proof"] = from.proof;
     const SOCKET s = impl.connect();
     const auto body = asked.dump();
     std::string rest;

@@ -1153,4 +1153,12 @@ The next computer to connect claims this CamelPlayer without a code.</value></da
   <data name="UpdateServer_Started" xml:space="preserve"><value>CamelPlayer on {0} is installing {1} and restarts.</value></data>
   <data name="UpdateServer_FailedTitle" xml:space="preserve"><value>Update CamelPlayer on {0}</value></data>
   <data name="UpdateServer_Failed" xml:space="preserve"><value>CamelPlayer on {0} could not be updated: {1}</value></data>
+  <data name="Title_On" xml:space="preserve"><value>CamelPlayer on {0}</value></data>
+  <data name="Zone_OtherComputers" xml:space="preserve"><value>Other CamelPlayers</value></data>
+  <data name="Zone_ControlComputer" xml:space="preserve"><value>Control CamelPlayer on {0}</value></data>
+  <data name="Settings_OwnName.Header" xml:space="preserve"><value>This computer’s name, as other computers find it</value></data>
+  <data name="Settings_OwnNameText.Text" xml:space="preserve"><value>Empty, it is the Windows computer name. Control points connected now reconnect under the new name.</value></data>
+  <data name="Control_ControlFound" xml:space="preserve"><value>Control CamelPlayer on {0}</value></data>
+  <data name="Control_NeedsCodeTitle" xml:space="preserve"><value>CamelPlayer on {0} asks for a pairing code</value></data>
+  <data name="Control_NeedsCodeText" xml:space="preserve"><value>Play music here, then pair with it in Settings › This computer and others, with the code a device paired with it shows.</value></data>
 </root>

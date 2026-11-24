@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <string>
+#include <vector>
 
 namespace camel::server {
 
@@ -20,5 +21,14 @@ public:
     virtual bool revokeDevice(const std::string& device) = 0;
     virtual void resetOwner() = 0;
 };
+
+// The names of the paired devices connected now, but `except`: those an exit or a change of role cuts off.
+inline std::vector<std::string> connectedNames(const nlohmann::json& devices, const std::string& except = {}) {
+    std::vector<std::string> names;
+    for (const auto& device : devices)
+        if (device.value("connected", false) && (except.empty() || device.value("id", std::string()) != except))
+            names.push_back(device.value("name", std::string()));
+    return names;
+}
 
 } // namespace camel::server

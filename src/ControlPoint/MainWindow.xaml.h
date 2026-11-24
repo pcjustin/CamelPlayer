@@ -12,6 +12,7 @@
 #include "QueueCollection.h"
 #include "Server/Api/ServerApi.h"
 #include "Server/Playback/Outputs.h"
+#include "Server/Remote/Discovery.h"
 #include "Server/Remote/RemoteAccess.h"
 #include "Server/Support/Updates.h"
 #include "TrayIcon.h"
@@ -141,6 +142,7 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnPlayHereClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnRenameDeviceClick(Windows::Foundation::IInspectable const&,
                                                Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnOwnNameClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnUpdateServerClick(Windows::Foundation::IInspectable const&,
                                                Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
@@ -299,7 +301,8 @@ private:
     winrt::fire_and_forget stopControl();
     Windows::Foundation::IAsyncAction addControlFirewallRule();
     winrt::fire_and_forget revokeDevice(std::string id, std::wstring name, bool mine);
-    winrt::fire_and_forget chooseServerToControl();
+    // The CamelPlayers found to control, `preferred` chosen and tried at once when it is among them.
+    winrt::fire_and_forget chooseServerToControl(std::string preferred = {});
     winrt::fire_and_forget switchToControl(camel::ControlledServer target);
     winrt::fire_and_forget playHere();
     winrt::fire_and_forget restartInRole();
@@ -308,6 +311,8 @@ private:
     // Several Control points at once (docs/Plan.md §17.8): the link to another computer's Server, and what another
     // device did to the zone this window follows or to them all.
     void showLink();
+    // "CamelPlayer on <name>" in the title bar while this computer controls another (docs/Plan.md §17.8).
+    void showComputerName();
     void showChanges(const camel::server::Snapshot& snapshot);
     std::string ownDevice() const;
     std::optional<camel::server::IServer::Link> shownLink_;
@@ -428,6 +433,12 @@ private:
     Microsoft::UI::Xaml::Controls::Flyout zonePicker_{nullptr};
     std::vector<ZoneRow> zoneRows_;
     Microsoft::UI::Xaml::Controls::Button pauseAllButton_{nullptr};
+    // The other CamelPlayers on the LAN at the zone picker's foot, the last ones found shown while it looks again.
+    std::vector<camel::server::FoundServer> otherComputers_;
+    Microsoft::UI::Xaml::Controls::StackPanel otherComputerRows_{nullptr};
+    bool findingComputers_ = false;
+    winrt::fire_and_forget findOtherComputers();
+    void showOtherComputers();
     void showZoneRows(const camel::server::Snapshot& snapshot);
     void addReceiversRow(Microsoft::UI::Xaml::Controls::StackPanel const& content, const camel::server::Snapshot& snapshot,
                          const std::vector<camel::server::OutputRow>& outputs);
