@@ -674,9 +674,11 @@ public:
             try {
                 const auto counts = findArtistPictures(*library_, job, token);
                 const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
+                // A pass the shutdown cut short says so, as its names are not all looked up.
                 if (counts.found + counts.ambiguous + counts.none)
-                    log::info("artist pictures: %zu found, %zu left to choose, %zu without one, in %lld s", counts.found,
-                              counts.ambiguous, counts.none, static_cast<long long>(seconds.count()));
+                    log::info("artist pictures: %zu found, %zu left to choose, %zu without one, in %lld s%s", counts.found,
+                              counts.ambiguous, counts.none, static_cast<long long>(seconds.count()),
+                              stop.stop_requested() ? ", stopped" : "");
             } catch (const std::exception& e) {
                 log::warn("artist pictures: %s", e.what());
             }
