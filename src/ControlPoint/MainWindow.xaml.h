@@ -167,7 +167,8 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnCrossfeedValueChanged(Microsoft::UI::Xaml::Controls::NumberBox const&,
                                  Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
     void OnConvolutionToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
-    void OnConvolutionChooseClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnConvolutionChooseClick(Windows::Foundation::IInspectable const&,
+                                                    Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnConvolutionRemoveClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnCheckUpdatesClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnUpdateInstallClick(Windows::Foundation::IInspectable const&,
@@ -298,6 +299,8 @@ private:
     winrt::fire_and_forget switchToControl(camel::ControlledServer target);
     winrt::fire_and_forget playHere();
     winrt::fire_and_forget restartInRole();
+    // A music folder on the Server's computer, for a Control point (docs/Plan.md §17.8).
+    winrt::fire_and_forget chooseServerFolder();
     std::shared_ptr<camel::server::RemoteAccess> access_;
     uint64_t computersRefresh_ = 0;
     int computersTicks_ = 0;     // refresh ticks since the paired devices were last read

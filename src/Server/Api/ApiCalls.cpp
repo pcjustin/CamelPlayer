@@ -138,6 +138,8 @@ const std::map<std::string, Handler, std::less<>>& calls() {
          [](IServer& s, const json& a, const CancellationToken& t) { return json(s.folderTracksFrom(arg<int64_t>(a, 0), t)); }},
         {"fileFolders", [](IServer& s, const json& a, const auto&) { return json(s.fileFolders(arg<int64_t>(a, 0))); }},
         {"libraryRoots", [](IServer& s, const json&, const auto&) { return json(s.libraryRoots()); }},
+        {"serverFolders", [](IServer& s, const json& a, const auto&) { return json(s.serverFolders(arg<std::string>(a, 0))); }},
+        {"playerFirewallRule", [](IServer& s, const json&, const auto&) { return json(s.playerFirewallRule()); }},
         {"libraryRootContents",
          [](IServer& s, const json& a, const auto&) { return json(s.libraryRootContents(arg<int64_t>(a, 0))); }},
         {"libraryScanProgress", [](IServer& s, const json&, const auto&) { return json(s.libraryScanProgress()); }},

@@ -44,6 +44,7 @@
 #include "Common/util/StartWithWindows.h"
 #include "Common/util/Text.h"
 #include "Common/Version.h"
+#include "Server/Support/DiagnosticBundle.h"
 #include "TrayIcon.h"
 #include "HomeView.xaml.h"
 
@@ -301,6 +302,8 @@ void MainWindow::InitializeComponent() {
 
     if (!server_) server_ = createLocalServer();
     settings_ = server_->snapshot().settings;
+    if (!server_->filesHere())
+        fileDetails_.setFolderElsewhere(ui::format(L"FileDetails_OnServer", {camel::toWide(settings_.controlled.name)}));
     server_->setDiscordTexts({winrt::to_string(tr(L"Lamp_BitPerfect")), winrt::to_string(tr(L"Lamp_Lossless")),
                               winrt::to_string(tr(L"Lamp_Processed")), winrt::to_string(tr(L"Lamp_Lossy"))});
     auto dq = DispatcherQueue();
@@ -1386,8 +1389,13 @@ winrt::fire_and_forget MainWindow::refreshRoots() {
 
 winrt::fire_and_forget MainWindow::OnAddFolderClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     auto strong = get_strong();
-    const auto folders = pickMusicFolders(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()));
     if (!server_) co_return;
+    // A Control point chooses among the Server's folders (docs/Plan.md §17.8).
+    if (!server_->filesHere()) {
+        chooseServerFolder();
+        co_return;
+    }
+    const auto folders = pickMusicFolders(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()));
     for (const auto& folder : folders) {
         Command command;
         command.kind = CommandKind::AddLibraryRoot;
@@ -2025,17 +2033,34 @@ winrt::fire_and_forget MainWindow::OnDiagnosticBundleClick(Windows::Foundation::
     auto queue = DispatcherQueue();
     co_await resume_background();
     bool done = true;
+    // A Control point's bundle is the Server's, with this computer's own logs and settings in one beside it.
+    auto beside = std::filesystem::path(file).replace_filename(file.stem().wstring() + L"-this-computer.zip");
     try {
         server->writeDiagnosticBundle(file, includePaths, CAMEL_VERSION_STRING);
+        if (!server->filesHere()) {
+            camel::server::DiagnosticInput input;
+            input.dataDirectory = camel::dataDirectory();
+            std::wstring executable(32768, L'\0');
+            executable.resize(GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size())));
+            input.programDirectory = std::filesystem::path(executable).parent_path();
+            input.includePaths = includePaths;
+            input.appVersion = CAMEL_VERSION_STRING;
+            input.snapshot = server->snapshot();
+            input.capabilities = "This computer controls another CamelPlayer and plays nothing itself.\n";
+            camel::server::writeDiagnosticBundle(beside, input);
+        } else {
+            beside.clear();
+        }
     } catch (const std::exception& e) {
         camel::log::warn("diagnostic bundle: %s", e.what());
         done = false;
     }
-    queue.TryEnqueue([weak, done, file] {
+    queue.TryEnqueue([weak, done, file, beside] {
         auto self = weak.get();
         if (!self) return;
         self->DiagnosticButton().IsEnabled(true);
-        self->showPlaylistNotice(tr(done ? L"Diagnostic_Saved" : L"Diagnostic_Failed"), hstring(file.wstring()), !done);
+        const auto where = beside.empty() ? hstring(file.wstring()) : hstring(file.wstring() + L"\n" + beside.wstring());
+        self->showPlaylistNotice(tr(done ? L"Diagnostic_Saved" : L"Diagnostic_Failed"), where, !done);
     });
 }
 

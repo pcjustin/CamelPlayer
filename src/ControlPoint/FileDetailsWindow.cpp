@@ -348,12 +348,13 @@ void FileDetailsWindow::render() {
     label.Children().Append(openText);
     open.Content(label);
     Automation::AutomationProperties::SetName(open, tr(L"FileDetails_OpenFolder"));
-    open.IsEnabled(d.folderPresent);
+    open.IsEnabled(d.folderPresent && folderElsewhere_.empty());
     open.VerticalAlignment(VerticalAlignment::Top);
     open.Click([this](auto&&, auto&&) { openFolder(); });
     Grid::SetColumn(open, 1);
     path.Children().Append(open);
     content_.Children().Append(path);
+    if (!folderElsewhere_.empty()) content_.Children().Append(text(folderElsewhere_));
     if (d.problem != FileDetails::Problem::None) {
         InfoBar problem;
         problem.Severity(InfoBarSeverity::Warning);

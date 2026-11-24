@@ -244,6 +244,10 @@ struct RemoteServer::Impl {
         }
     }
 
+    std::filesystem::path cacheFolder() const {
+        return options.cache.empty() ? std::filesystem::temp_directory_path() / L"camelplayer-remote" : options.cache;
+    }
+
     HttpReply http(const std::string& method, const std::string& target, const std::string& body = {}) const {
         const SOCKET s = connect();
         HttpReply reply;
@@ -425,6 +429,10 @@ LibraryScanStart RemoteServer::scanLibraryNow(std::optional<int64_t> folder) {
 
 void RemoteServer::clearArtworkCache() {
     impl_->call("clearArtworkCache", json::array(), {});
+    // The covers this Control point kept go too, as they are made again from the Server's.
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(impl_->cacheFolder(), error))
+        if (entry.path().extension() == L".jpg") std::filesystem::remove(entry.path(), error);
 }
 
 LibraryAlbumPage RemoteServer::recentlyPlayedAlbums(int64_t offset, int64_t limit, const CancellationToken& token) const {
@@ -502,8 +510,7 @@ std::optional<ArtworkReference> RemoteServer::artwork(const ArtworkRequest& requ
     if (reply.status != 200) return std::nullopt;
     const auto key = reply.head.header("x-artwork-key");
     if (key.empty() || key.find_first_of("/\\:.") != std::string::npos) return std::nullopt;
-    const auto folder =
-        impl_->options.cache.empty() ? std::filesystem::temp_directory_path() / L"camelplayer-remote" : impl_->options.cache;
+    const auto folder = impl_->cacheFolder();
     std::filesystem::create_directories(folder);
     const auto file = folder / (toWide(key) + L".jpg");
     std::error_code ec;
@@ -615,6 +622,38 @@ PlaylistChange RemoteServer::importPlaylist(const std::filesystem::path& file) {
     const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
     const auto reply = impl_->http("POST", "/playlist?name=" + websocket::percentEncode(toUtf8(file.filename().wstring())), text);
     return as<PlaylistChange>(json::parse(reply.body));
+}
+
+std::vector<ServerFolder> RemoteServer::serverFolders(const std::string& pathUtf8) const {
+    return as<std::vector<ServerFolder>>(impl_->call("serverFolders", args(pathUtf8), {}));
+}
+
+std::string RemoteServer::keepFile(const std::filesystem::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot read " + toUtf8(file.wstring()));
+    const std::string bytes{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    const auto reply = impl_->http("POST", "/upload?name=" + websocket::percentEncode(toUtf8(file.filename().wstring())), bytes);
+    return json::parse(reply.body).at("path").get<std::string>();
+}
+
+// Kept under a name of its own for each path, so an impulse response read once is read from here after.
+std::filesystem::path RemoteServer::readableFile(const std::string& pathUtf8) const {
+    const auto folder = impl_->cacheFolder() / L"files";
+    std::filesystem::create_directories(folder);
+    const auto name = std::filesystem::path(toWide(pathUtf8)).filename().wstring();
+    const auto file = folder / (std::to_wstring(std::hash<std::string>{}(pathUtf8)) + L"-" + name);
+    std::error_code error;
+    if (std::filesystem::exists(file, error)) return file;
+    const auto reply = impl_->http("GET", "/upload?path=" + websocket::percentEncode(pathUtf8));
+    if (reply.status != 200) throw std::runtime_error("Server API: the Server does not send " + pathUtf8);
+    const auto partial = std::filesystem::path(file).concat(L".part");
+    std::ofstream(partial, std::ios::binary).write(reply.body.data(), std::streamsize(reply.body.size()));
+    std::filesystem::rename(partial, file, error);
+    return file;
+}
+
+bool RemoteServer::playerFirewallRule() const {
+    return as<bool>(impl_->call("playerFirewallRule", json::array(), {}));
 }
 
 void RemoteServer::exportPlaylist(int64_t playlist, const std::filesystem::path& file) const {

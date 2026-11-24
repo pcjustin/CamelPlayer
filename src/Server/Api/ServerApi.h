@@ -410,6 +410,13 @@ private:
     std::optional<Snapshot> current_;
 };
 
+// A folder on the Server's computer, offered when a Control point adds a music folder (docs/Plan.md §17.8).
+struct ServerFolder {
+    std::string name;     // as listed: a drive with its label, a share or a folder's own name
+    std::string pathUtf8; // what to open next or to add
+    bool operator==(const ServerFolder&) const = default;
+};
+
 // What opening the data at startup had to repair, for the window to tell the user.
 struct DataRecovery {
     SettingsRecovery settings = SettingsRecovery::None;
@@ -543,6 +550,20 @@ public:
     virtual std::optional<std::vector<uint8_t>> waveform(const std::string& pathUtf8) const = 0;
     // The path states' names in the app's language, for the activity's small image; the Server has no strings of its own.
     virtual void setDiscordTexts(const DiscordTexts& texts) = 0;
+
+    // Another computer's Server (docs/Plan.md §17.8): its files are not this computer's, so Explorer here cannot show
+    // them, and a file chosen here is sent to it.
+    virtual bool filesHere() const { return true; }
+    // The Server's drives for an empty path, the shares of `\\computer`, else the folders in `pathUtf8`, by name; throws
+    // std::runtime_error for one that cannot be listed. Its Windows user's rights decide what it reaches.
+    virtual std::vector<ServerFolder> serverFolders(const std::string& pathUtf8) const = 0;
+    // A file chosen on this computer as the Server reads it: the same path for its own window, a copy kept in its data
+    // folder for a Control point.
+    virtual std::string keepFile(const std::filesystem::path& file) = 0;
+    // A file the Server keeps that this computer can read: the same path for its own window, a copy for a Control point.
+    virtual std::filesystem::path readableFile(const std::string& pathUtf8) const = 0;
+    // Whether Windows Firewall on the Server's computer has the rule network players need (docs/Plan.md §5.10).
+    virtual bool playerFirewallRule() const = 0;
 };
 
 // Throws NewerSettingsError or NewerLibraryError for data a newer CamelPlayer wrote, and MigrationError or another

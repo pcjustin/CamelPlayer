@@ -338,6 +338,17 @@ struct ApiServer::Impl {
                 const auto text = readFile(file);
                 std::filesystem::remove(file);
                 respond(s, 200, "OK", "audio/x-mpegurl", text);
+            } else if (request.first == "POST" && path == "/upload") {
+                const auto file = uploadPath(std::filesystem::path(toWide(textOf(query, "name"))).filename());
+                std::ofstream(file, std::ios::binary).write(body->data(), std::streamsize(body->size()));
+                respond(s, 200, "OK", "application/json", json{{"path", toUtf8(file.wstring())}}.dump());
+            } else if (request.first == "GET" && path == "/upload") {
+                const auto wanted = textOf(query, "path");
+                if (!kept(wanted)) {
+                    respond(s, 403, "Forbidden", "text/plain", "not a file the Server keeps for its Control points");
+                    return;
+                }
+                respond(s, 200, "OK", "application/octet-stream", readFile(toWide(wanted)));
             } else if (request.first == "GET" && path == "/diagnostic") {
                 const auto file = uploadPath(L"diagnostic.zip");
                 server.writeDiagnosticBundle(file, textOf(query, "paths") == "1", textOf(query, "version"));
@@ -356,9 +367,23 @@ struct ApiServer::Impl {
         }
     }
 
+    std::filesystem::path uploadsFolder() const {
+        return options.uploads.empty() ? std::filesystem::temp_directory_path() / L"camelplayer-api" : options.uploads;
+    }
+
+    // Only what a Control point sent, and the impulse response the settings name, is read back.
+    bool kept(const std::string& pathUtf8) const {
+        std::error_code error;
+        const auto file = std::filesystem::weakly_canonical(toWide(pathUtf8), error);
+        const auto folder = std::filesystem::weakly_canonical(uploadsFolder(), error);
+        if (error || !std::filesystem::is_regular_file(file, error)) return false;
+        const auto inside = std::mismatch(folder.begin(), folder.end(), file.begin(), file.end()).first == folder.end();
+        return inside || (!pathUtf8.empty() && pathUtf8 == server.snapshot().settings.convolution.file);
+    }
+
     // A file of its own in the uploads folder for `name`.
     std::filesystem::path uploadPath(const std::filesystem::path& name) {
-        auto folder = options.uploads.empty() ? std::filesystem::temp_directory_path() / L"camelplayer-api" : options.uploads;
+        auto folder = uploadsFolder();
         std::filesystem::create_directories(folder);
         static std::atomic<uint64_t> next{0};
         const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();

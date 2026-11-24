@@ -25,6 +25,8 @@ public:
     void show(HWND owner, winrt::hstring const& title, winrt::Microsoft::UI::Xaml::ElementTheme theme, Read read);
     void setTheme(winrt::Microsoft::UI::Xaml::ElementTheme theme);
     void close();
+    // Why File Explorer here cannot open the file's folder, as on a Control point (docs/Plan.md §17.8); empty when it can.
+    void setFolderElsewhere(winrt::hstring const& reason) { folderElsewhere_ = reason; }
 
 private:
     struct Row {
@@ -51,6 +53,7 @@ private:
     std::shared_ptr<uint64_t> generation_ = std::make_shared<uint64_t>(0);
     winrt::hstring title_;
     std::optional<camel::server::FileDetails> details_;
+    winrt::hstring folderElsewhere_;
     bool black_ = false;
 };
 

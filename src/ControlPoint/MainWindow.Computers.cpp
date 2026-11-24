@@ -248,6 +248,48 @@ winrt::fire_and_forget tryPairing(PairForm form, ContentDialog shown) {
     }
 }
 
+// The folder browser of a Control point: the Server's folders, read through it.
+struct FolderForm {
+    std::shared_ptr<IServer> server;
+    TextBox path;
+    ListView folders;
+    TextBlock problem;
+    std::shared_ptr<std::vector<ServerFolder>> listed;
+};
+
+// One level up: a drive's root goes to the drives, a share to its computer's shares.
+std::wstring folderAbove(std::wstring path) {
+    while (path.size() > 3 && (path.ends_with(L'\\') || path.ends_with(L'/'))) path.pop_back();
+    if (path.size() <= 3 && path.size() >= 2 && path[1] == L':') return {};
+    const auto cut = path.find_last_of(L"\\/");
+    if (cut == std::wstring::npos || cut < 2) return {};
+    const auto above = path.substr(0, cut);
+    return above.size() == 2 && above[1] == L':' ? above + L"\\" : above;
+}
+
+winrt::fire_and_forget showFolders(FolderForm form, std::wstring path) {
+    winrt::apartment_context foreground;
+    form.path.Text(path);
+    form.problem.Visibility(Visibility::Collapsed);
+    co_await winrt::resume_background();
+    std::vector<ServerFolder> listed;
+    std::string failure;
+    try {
+        listed = form.server->serverFolders(toUtf8(path));
+    } catch (const std::exception& e) {
+        failure = e.what();
+    }
+    co_await foreground;
+    if (std::wstring(form.path.Text()) != path) co_return; // another folder was asked for meanwhile
+    *form.listed = std::move(listed);
+    form.folders.Items().Clear();
+    for (const auto& folder : *form.listed) form.folders.Items().Append(box_value(toWide(folder.name)));
+    if (!failure.empty()) {
+        form.problem.Text(ui::format(L"ServerFolder_Unreadable", {path}));
+        form.problem.Visibility(Visibility::Visible);
+    }
+}
+
 } // namespace
 
 std::shared_ptr<DevicePairing> MainWindow::devicePairing() const {
@@ -628,6 +670,75 @@ winrt::fire_and_forget MainWindow::chooseServerToControl() {
     const auto chosen = form.chosen;
     co_await ui::showDialog(dialog);
     if (*chosen && chosen->value().id != controlledId) switchToControl(chosen->value());
+}
+
+// The drives, shares and folders of the Server's computer, as its Windows user reaches them; no password is asked for
+// or sent (docs/Plan.md §17.8).
+winrt::fire_and_forget MainWindow::chooseServerFolder() {
+    auto strong = get_strong();
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"ServerFolder_Title", {toWide(settings_.controlled.name)})));
+    StackPanel content;
+    content.Spacing(12);
+    content.MinWidth(460);
+    TextBlock note;
+    note.Text(tr(L"ServerFolder_Note"));
+    note.TextWrapping(TextWrapping::Wrap);
+    content.Children().Append(note);
+    Grid where;
+    where.ColumnSpacing(8);
+    where.ColumnDefinitions().Append(ColumnDefinition());
+    ColumnDefinition upColumn;
+    upColumn.Width(GridLengthHelper::Auto());
+    where.ColumnDefinitions().Append(upColumn);
+    TextBox path;
+    path.Header(box_value(tr(L"ServerFolder_Path")));
+    path.PlaceholderText(tr(L"ServerFolder_PathPlaceholder"));
+    where.Children().Append(path);
+    Button up;
+    up.Content(box_value(tr(L"ServerFolder_Up")));
+    up.VerticalAlignment(VerticalAlignment::Bottom);
+    Grid::SetColumn(up, 1);
+    where.Children().Append(up);
+    content.Children().Append(where);
+    ListView folders;
+    folders.SelectionMode(ListViewSelectionMode::None);
+    folders.IsItemClickEnabled(true);
+    folders.Height(260);
+    Automation::AutomationProperties::SetName(folders, tr(L"ServerFolder_List"));
+    content.Children().Append(folders);
+    TextBlock problem;
+    problem.TextWrapping(TextWrapping::Wrap);
+    problem.Foreground(themeBrush(L"SystemFillColorCriticalBrush"));
+    problem.Visibility(Visibility::Collapsed);
+    content.Children().Append(problem);
+    dialog.Content(content);
+    dialog.PrimaryButtonText(tr(L"ServerFolder_Add"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+
+    const FolderForm form{server_, path, folders, problem, std::make_shared<std::vector<ServerFolder>>()};
+    folders.ItemClick([form](auto&&, ItemClickEventArgs const& e) {
+        const auto name = unbox_value_or<hstring>(e.ClickedItem(), L"");
+        for (const auto& folder : *form.listed)
+            if (toWide(folder.name) == std::wstring(name)) showFolders(form, toWide(folder.pathUtf8));
+    });
+    up.Click([form](auto&&, auto&&) { showFolders(form, folderAbove(std::wstring(form.path.Text()))); });
+    path.KeyDown([form](auto&&, Input::KeyRoutedEventArgs const& e) {
+        if (e.Key() != Windows::System::VirtualKey::Enter) return;
+        e.Handled(true);
+        showFolders(form, trimmed(form.path.Text()));
+    });
+    showFolders(form, {});
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
+    const auto chosen = trimmed(path.Text());
+    if (chosen.empty()) co_return;
+    Command command;
+    command.kind = CommandKind::AddLibraryRoot;
+    command.path = toUtf8(chosen);
+    submitCommand(std::move(command));
+    refreshRoots();
 }
 
 // Turning into a Control point restarts CamelPlayer without its library, outputs and background work; the music

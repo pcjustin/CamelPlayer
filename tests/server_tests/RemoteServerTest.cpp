@@ -25,6 +25,7 @@
 #include "Server/Remote/ApiSession.h"
 #include "Server/Remote/Connection.h"
 #include "Server/Remote/RemoteServer.h"
+#include "Common/util/Text.h"
 #include "TestUtil.h"
 
 using namespace camel::server;
@@ -490,4 +491,47 @@ TEST_F(RemoteServerTest, AControlPointKeepsItsOwnInterfaceSettings) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_FALSE(controlPoint->snapshot().settings.autoplay);
     EXPECT_EQ(controlPoint->snapshot().settings.theme, camel::Theme::Light);
+}
+
+// A Control point chooses music folders among the Server's, and sends the Server the files it chooses, which it reads
+// back to show them; nothing else of the Server's computer is sent (docs/Plan.md §17.8).
+TEST_F(RemoteServerTest, FoldersAndFilesGoThroughTheServer) {
+    EXPECT_TRUE(local->filesHere());
+    EXPECT_FALSE(remote->filesHere());
+    const auto drives = remote->serverFolders("");
+    EXPECT_EQ(drives, local->serverFolders(""));
+    EXPECT_TRUE(std::ranges::any_of(drives, [](const ServerFolder& d) { return d.pathUtf8 == "C:\\"; }));
+    const auto here = camel::toUtf8(dir.wstring());
+    const auto listed = remote->serverFolders(here);
+    EXPECT_EQ(listed, local->serverFolders(here));
+    EXPECT_TRUE(
+        std::ranges::any_of(listed, [&](const ServerFolder& f) { return f.name == "music" && f.pathUtf8 == here + "\\music"; }));
+    EXPECT_THROW(remote->serverFolders(here + "\\nowhere"), std::runtime_error);
+
+    const auto chosen = dir / "control" / "room.wav";
+    std::filesystem::create_directories(chosen.parent_path());
+    std::ofstream(chosen, std::ios::binary) << "an impulse response";
+    const auto kept = std::filesystem::path(camel::toWide(remote->keepFile(chosen)));
+    EXPECT_EQ(kept.parent_path(), dir / "data" / "uploads");
+    EXPECT_TRUE(kept.filename().wstring().ends_with(L"room.wav"));
+    const auto read = [](const std::filesystem::path& file) {
+        std::ifstream in(file, std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    };
+    EXPECT_EQ(read(kept), "an impulse response");
+    EXPECT_EQ(read(remote->readableFile(camel::toUtf8(kept.wstring()))), "an impulse response");
+    EXPECT_EQ(local->readableFile(camel::toUtf8(kept.wstring())), kept);
+
+    const auto track = camel::toUtf8((dir / "music" / "Amy-First.flac").wstring());
+    EXPECT_THROW(remote->readableFile(track), std::runtime_error);
+    auto settings = local->snapshot().settings;
+    settings.convolution.file = track;
+    Command command;
+    command.kind = CommandKind::ApplySettings;
+    command.settings = settings;
+    local->submit(command);
+    local->waitIdle();
+    EXPECT_EQ(read(remote->readableFile(track)), read(camel::toWide(track)));
+
+    EXPECT_EQ(remote->playerFirewallRule(), local->playerFirewallRule());
 }

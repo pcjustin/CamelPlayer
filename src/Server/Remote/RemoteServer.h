@@ -151,6 +151,11 @@ public:
     FileDetails fileDetails(const std::string& pathUtf8) const override;
     std::optional<std::vector<uint8_t>> waveform(const std::string& pathUtf8) const override;
     void setDiscordTexts(const DiscordTexts& texts) override;
+    bool filesHere() const override { return false; }
+    std::vector<ServerFolder> serverFolders(const std::string& pathUtf8) const override;
+    std::string keepFile(const std::filesystem::path& file) override;
+    std::filesystem::path readableFile(const std::string& pathUtf8) const override;
+    bool playerFirewallRule() const override;
 
 private:
     struct Impl;

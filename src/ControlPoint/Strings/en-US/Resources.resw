@@ -1105,4 +1105,15 @@ The next computer to connect claims this CamelPlayer without a code.</value></da
   <data name="Guide_ControlNo" xml:space="preserve"><value>No, only this computer</value></data>
   <data name="Guide_ControlYes" xml:space="preserve"><value>Yes, let other computers control it</value></data>
   <data name="Settings_AllowControl.Header" xml:space="preserve"><value>Other computers</value></data>
+  <data name="Firewall_ElsewhereText" xml:space="preserve"><value>Network players reach the computer that plays, CamelPlayer on {0}, so the rule is added there: in its Settings › Audio outputs, where Windows asks for an administrator.</value></data>
+  <data name="Convolution_NotSent" xml:space="preserve"><value>The impulse response could not be sent to the computer that plays.</value></data>
+  <data name="FileDetails_OnServer" xml:space="preserve"><value>The file is on {0}, so File Explorer on this computer cannot open its folder.</value></data>
+  <data name="ServerFolder_Title" xml:space="preserve"><value>Add a music folder on {0}</value></data>
+  <data name="ServerFolder_Note" xml:space="preserve"><value>The folders of the computer that plays, as its Windows user reaches them, NAS shares included. Type \\computer to see a computer’s shares; no password is asked for.</value></data>
+  <data name="ServerFolder_Path" xml:space="preserve"><value>Folder</value></data>
+  <data name="ServerFolder_PathPlaceholder" xml:space="preserve"><value>D:\Music or \\NAS\Music</value></data>
+  <data name="ServerFolder_Up" xml:space="preserve"><value>Up</value></data>
+  <data name="ServerFolder_List" xml:space="preserve"><value>Folders</value></data>
+  <data name="ServerFolder_Add" xml:space="preserve"><value>Add this folder</value></data>
+  <data name="ServerFolder_Unreadable" xml:space="preserve"><value>{0} cannot be listed: it is not there, or the computer that plays is not allowed in.</value></data>
 </root>

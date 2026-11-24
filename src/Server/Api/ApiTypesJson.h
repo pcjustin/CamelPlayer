@@ -155,6 +155,7 @@ CAMEL_JSON_STRUCT(LibraryArtistPage, revision, tracks, songs, albums, appearance
 CAMEL_JSON_STRUCT(LibraryFolderEntry, id, name, path, location, tracks)
 CAMEL_JSON_STRUCT(LibraryFolderListing, revision, folder, trail, folders, tracks)
 CAMEL_JSON_STRUCT(LibraryRootInfo, id, path, name, location, online, lastScan)
+CAMEL_JSON_STRUCT(ServerFolder, name, pathUtf8)
 CAMEL_JSON_STRUCT(LibraryRootContents, tracks, plays, favorites, playlistEntries)
 CAMEL_JSON_STRUCT(LibraryInitial, label, offset)
 CAMEL_JSON_STRUCT(LibraryNamePart, text, name)

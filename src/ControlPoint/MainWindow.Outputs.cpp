@@ -92,13 +92,6 @@ hstring dspSummary(const camel::server::SettingsDto& p) {
     return text.empty() ? tr(L"Output_DspNone") : hstring(text);
 }
 
-bool firewallRuleFound() {
-    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool found = camel::server::firewallRuleExists();
-    if (SUCCEEDED(com)) CoUninitialize();
-    return found;
-}
-
 // What kind of device a zone plays to: a local one, a network player, AirPlay or HQPlayer.
 const wchar_t* zoneGlyph(Backend backend) {
     switch (backend) {
@@ -361,8 +354,14 @@ winrt::fire_and_forget MainWindow::readFirewallRule() {
     if (std::exchange(firewallReading_, true)) co_return;
     auto weak = get_weak();
     auto queue = DispatcherQueue();
+    const auto server = server_;
     co_await winrt::resume_background();
-    const bool found = firewallRuleFound();
+    bool found = false;
+    try {
+        found = server->playerFirewallRule();
+    } catch (const std::exception& e) {
+        camel::log::warn("firewall rule: %s", e.what());
+    }
     queue.TryEnqueue([weak, found] {
         const auto self = weak.get();
         if (!self) return;
@@ -374,11 +373,18 @@ winrt::fire_and_forget MainWindow::readFirewallRule() {
 }
 
 winrt::fire_and_forget MainWindow::addFirewallRule() {
+    auto strong = get_strong();
+    if (!server_->filesHere()) {
+        co_await ui::showDialog(textDialog(ContentLayout().XamlRoot(), tr(L"Firewall_Title"),
+                                           ui::format(L"Firewall_ElsewhereText", {camel::toWide(settings_.controlled.name)})));
+        co_return;
+    }
     auto weak = get_weak();
     auto queue = DispatcherQueue();
+    const auto server = server_;
     co_await winrt::resume_background();
     camel::server::addFirewallRule();
-    const bool found = firewallRuleFound();
+    const bool found = server->playerFirewallRule();
     queue.TryEnqueue([weak, found] {
         const auto self = weak.get();
         if (!self) return;
@@ -396,6 +402,10 @@ winrt::fire_and_forget MainWindow::askFirewallRule() {
         co_return;
     }
     if (*firewallRule_) co_return;
+    if (!server_->filesHere()) {
+        addFirewallRule();
+        co_return;
+    }
     ContentDialog dialog;
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.Title(box_value(tr(L"Firewall_Title")));

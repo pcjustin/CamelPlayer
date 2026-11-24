@@ -481,11 +481,12 @@ winrt::fire_and_forget MainWindow::loadConvolution() {
     if (file.empty()) co_return;
     auto weak = get_weak();
     auto queue = DispatcherQueue();
+    const auto server = server_;
     co_await winrt::resume_background();
     camel::audio::LoadedImpulse loaded;
     std::optional<camel::audio::ImpulseProblem> problem;
     try {
-        loaded = camel::audio::loadImpulse(camel::toWide(file), rate);
+        loaded = camel::audio::loadImpulse(server->readableFile(file), rate);
     } catch (const camel::audio::ImpulseError& e) {
         problem = e.problem();
         camel::log::warn("impulse response: %s", e.what());
@@ -544,12 +545,30 @@ void MainWindow::OnConvolutionToggled(Windows::Foundation::IInspectable const&, 
     settingsChanged();
 }
 
-void MainWindow::OnConvolutionChooseClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+// A Control point sends the file to the Server, which keeps it in its data folder (docs/Plan.md §17.8).
+winrt::fire_and_forget MainWindow::OnConvolutionChooseClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
     const hstring types = tr(L"Convolution_FileTypes");
     const COMDLG_FILTERSPEC filter[] = {{types.c_str(), L"*.wav;*.zip"}};
     const auto chosen = ui::pickFile(Microsoft::UI::GetWindowFromWindowId(AppWindow().Id()), filter);
-    if (!chosen) return;
-    settings_.convolution.file = camel::toUtf8(chosen->wstring());
+    if (!chosen) co_return;
+    const auto server = server_;
+    const auto& file = *chosen; // in this coroutine's frame, so it outlives the co_await
+    winrt::apartment_context foreground;
+    ConvolutionInfoText().Text(tr(L"Convolution_Loading"));
+    co_await winrt::resume_background();
+    std::string kept;
+    try {
+        kept = server->keepFile(file);
+    } catch (const std::exception& e) {
+        camel::log::warn("impulse response: %s", e.what());
+    }
+    co_await foreground;
+    if (kept.empty()) {
+        ConvolutionInfoText().Text(tr(L"Convolution_NotSent"));
+        co_return;
+    }
+    settings_.convolution.file = kept;
     settings_.convolution.enabled = true;
     showDsp();
     settingsChanged();

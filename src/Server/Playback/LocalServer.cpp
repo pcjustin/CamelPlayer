@@ -56,6 +56,7 @@
 #include "Server/Playback/QueueSession.h"
 #include "Server/Playback/ReplayGain.h"
 #include "Server/Support/DiagnosticBundle.h"
+#include "Server/Support/ServerFolders.h"
 
 namespace camel::server {
 namespace {
@@ -3622,6 +3623,21 @@ void LocalServer::writeDiagnosticBundle(const std::filesystem::path& file, bool 
 
 DataRecovery LocalServer::dataRecovery() const {
     return impl_->dataRecovery();
+}
+std::vector<ServerFolder> LocalServer::serverFolders(const std::string& pathUtf8) const {
+    return foldersIn(pathUtf8);
+}
+std::string LocalServer::keepFile(const std::filesystem::path& file) {
+    return toUtf8(file.wstring());
+}
+std::filesystem::path LocalServer::readableFile(const std::string& pathUtf8) const {
+    return toWide(pathUtf8);
+}
+bool LocalServer::playerFirewallRule() const {
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool found = firewallRuleExists();
+    if (SUCCEEDED(com)) CoUninitialize();
+    return found;
 }
 DiscordStatus LocalServer::discordStatus() const {
     return impl_->discordStatus();

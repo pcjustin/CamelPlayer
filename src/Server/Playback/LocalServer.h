@@ -99,6 +99,10 @@ public:
     void writeDiagnosticBundle(const std::filesystem::path& file, bool includePaths,
                                const std::string& appVersion) const override;
     DataRecovery dataRecovery() const override;
+    std::vector<ServerFolder> serverFolders(const std::string& pathUtf8) const override;
+    std::string keepFile(const std::filesystem::path& file) override;
+    std::filesystem::path readableFile(const std::string& pathUtf8) const override;
+    bool playerFirewallRule() const override;
     DiscordStatus discordStatus() const override;
     Lyrics lyrics(const std::string& pathUtf8) const override;
     FileDetails fileDetails(const std::string& pathUtf8) const override;

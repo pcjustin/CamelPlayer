@@ -1105,4 +1105,15 @@
   <data name="Guide_ControlNo" xml:space="preserve"><value>不要，只用這台電腦</value></data>
   <data name="Guide_ControlYes" xml:space="preserve"><value>要，讓其他電腦控制它</value></data>
   <data name="Settings_AllowControl.Header" xml:space="preserve"><value>其他電腦</value></data>
+  <data name="Firewall_ElsewhereText" xml:space="preserve"><value>網路播放器連到的是播放的電腦，也就是 {0} 上的 CamelPlayer，所以規則要在那台電腦加入：在它的「設定 › 音訊輸出」中加入，Windows 會在那裡要求系統管理員權限。</value></data>
+  <data name="Convolution_NotSent" xml:space="preserve"><value>無法把脈衝響應傳送到播放的電腦。</value></data>
+  <data name="FileDetails_OnServer" xml:space="preserve"><value>檔案在 {0} 上，所以這台電腦的檔案總管無法開啟它的資料夾。</value></data>
+  <data name="ServerFolder_Title" xml:space="preserve"><value>在 {0} 上加入音樂資料夾</value></data>
+  <data name="ServerFolder_Note" xml:space="preserve"><value>播放的電腦上、它的 Windows 使用者能存取的資料夾，包括 NAS 的共用資料夾。輸入 \\電腦名稱 可列出那台電腦的共用資料夾；不會要求密碼。</value></data>
+  <data name="ServerFolder_Path" xml:space="preserve"><value>資料夾</value></data>
+  <data name="ServerFolder_PathPlaceholder" xml:space="preserve"><value>D:\Music 或 \\NAS\Music</value></data>
+  <data name="ServerFolder_Up" xml:space="preserve"><value>上一層</value></data>
+  <data name="ServerFolder_List" xml:space="preserve"><value>資料夾</value></data>
+  <data name="ServerFolder_Add" xml:space="preserve"><value>加入這個資料夾</value></data>
+  <data name="ServerFolder_Unreadable" xml:space="preserve"><value>無法列出 {0}：它不存在，或播放的電腦沒有權限存取。</value></data>
 </root>

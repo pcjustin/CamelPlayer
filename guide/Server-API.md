@@ -180,6 +180,8 @@ Arguments are listed in order. `?` marks a value that may be `null`.
 | `fileDetails` | path | file details |
 | `waveform` | path | bytes as numbers, or `null` |
 | `setDiscordTexts` | texts | `null` |
+| `serverFolders` | path | the drives for `""`, a computer's disk shares for `\\computer`, else the folders in the path |
+| `playerFirewallRule` | | `true` when Windows Firewall on the Server's computer has the rule network players need |
 
 Enumerations travel as names in lower camel case, such as `"recentlyAdded"` and `"albumArtist"`. Objects travel as their fields. The field names are those of the structures in `src/Server/Api/ServerApi.h` and the files it includes.
 
@@ -194,5 +196,7 @@ Files go over plain HTTP on the same port. Each request is answered on its own c
 | `POST /playlist?name=` | an M3U8 file | the playlist change of its import, as JSON |
 | `GET /playlist?id=` | | the playlist as M3U8, with the Server's paths |
 | `GET /diagnostic?paths=0\|1&version=` | | the diagnostic bundle, made on the Server, as a ZIP |
+| `POST /upload?name=` | a file | `{"path": …}`: where the Server keeps it, in its data folder, for a setting such as the convolution's impulse response |
+| `GET /upload?path=` | | a file the Server keeps from an upload, or the impulse response its settings name; 403 for any other |
 
-An upload may be up to 64 MB. An error comes back as `{"error": {"code": …, "message": …}}` with status 400, 413 or 500.
+An upload may be up to 64 MB. An error comes back as `{"error": {"code": …, "message": …}}` with status 400, 403, 413 or 500.
