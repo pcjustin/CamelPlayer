@@ -35,10 +35,11 @@ const std::map<std::string, Handler, std::less<>>& calls() {
     static const std::map<std::string, Handler, std::less<>> table = {
         {"submit", [](IServer& s, const json& a, const auto&) { return toJson(s.submit(commandFromJson(arg<json>(a, 0)))); }},
         {"snapshot", [](IServer& s, const json&, const auto&) { return toJson(s.snapshot()); }},
+        // The snapshot revision reached once the work is done, which the caller waits to be shown.
         {"waitIdle",
          [](IServer& s, const json&, const auto&) {
              s.waitIdle();
-             return json();
+             return json(s.snapshot().revision);
          }},
         {"browseTracks",
          [](IServer& s, const json& a, const CancellationToken& t) {

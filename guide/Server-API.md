@@ -147,7 +147,7 @@ Arguments are listed in order. `?` marks a value that may be `null`.
 | --- | --- | --- |
 | `submit` | command | command stamp |
 | `snapshot` | | snapshot, with whole queues |
-| `waitIdle` | | `null` once every command sent before is done |
+| `waitIdle` | | the snapshot `revision` reached once every command sent before is done, which an event then shows |
 | `browseTracks` | offset, limit, revision? | track page |
 | `searchTracks` | query, offset, limit, revision? | track page |
 | `searchLibrary` | query, offset, limit, revision?, totals | search results |

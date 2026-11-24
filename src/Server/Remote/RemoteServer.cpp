@@ -6,8 +6,10 @@
 
 #include <ws2tcpip.h>
 
+#include <algorithm>
 #include <charconv>
 #include <condition_variable>
+#include <deque>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -30,6 +32,12 @@
 #include "Server/Remote/RemoteAccess.h"
 
 namespace camel::server {
+
+namespace {
+
+constexpr size_t kHeldEvents = 64; // events kept for a listener that falls behind, the oldest going first
+
+} // namespace
 
 using nlohmann::json;
 using namespace remote;
@@ -73,6 +81,11 @@ struct RemoteServer::Impl {
     Options options;
     WinsockScope winsock;
     std::thread reader;
+    // The listener hears events on a thread of its own, so it may call the Server back as it may on the Server itself;
+    // the reader would otherwise wait for itself to read the answer.
+    std::thread dispatcher;
+    std::deque<Event> events; // under mutex, not yet told
+    bool telling = false;     // under mutex: the listener is being told one
     mutable std::mutex mutex;
     std::condition_variable changed;
     std::shared_ptr<Connection> connection; // replaced when the connection is made again
@@ -81,6 +94,7 @@ struct RemoteServer::Impl {
     uint16_t port = 0;
     std::map<uint64_t, Reply> pending;
     uint64_t lastCall = 0;
+    uint64_t lastSubmitted = 0; // the command this client submitted last, which waitIdle() waits to see done
     bool connected = false, refused = false, stopping = false;
     std::optional<bool> serverOlder;      // they share no API version: whether the Server is the one to update
     std::optional<Snapshot> current, raw; // as shown, and as the Server sent it
@@ -393,18 +407,19 @@ struct RemoteServer::Impl {
             decoder.decode(j.at("snapshot"));
             auto snapshot = snapshotFromJson(j["snapshot"]);
             const auto kind = j["event"] == "commandCompleted" ? EventKind::CommandCompleted : EventKind::StateChanged;
-            std::function<void(const Event&)> tell;
             {
                 std::lock_guard lock(mutex);
                 theirs = snapshot.settings;
                 raw = snapshot;
                 snapshot = project(std::move(snapshot));
                 current = snapshot;
-                tell = listener;
+                if (listener) {
+                    if (events.size() >= kHeldEvents) events.pop_front();
+                    events.push_back(Event{kind, snapshot});
+                }
             }
             changed.notify_all();
             if (discord) discord->observe(snapshot);
-            if (tell) tell(Event{kind, std::move(snapshot)});
             return;
         }
         const auto id = j.at("id").get<uint64_t>();
@@ -419,6 +434,28 @@ struct RemoteServer::Impl {
                 found->second.result = j.contains("result") ? j["result"] : json();
         }
         changed.notify_all();
+    }
+
+    // Tells the listener each event in turn; one that throws is logged, as the Server's own listener's failures are.
+    void dispatch() {
+        std::unique_lock lock(mutex);
+        for (;;) {
+            changed.wait(lock, [&] { return stopping || !events.empty(); });
+            if (stopping) return;
+            const Event event = std::move(events.front());
+            events.pop_front();
+            const auto tell = listener;
+            telling = true;
+            lock.unlock();
+            try {
+                if (tell) tell(event);
+            } catch (const std::exception& e) {
+                log::warn("Server API: the listener: %s", e.what());
+            }
+            lock.lock();
+            telling = false;
+            changed.notify_all();
+        }
     }
 
     json call(const std::string& name, json arguments, const CancellationToken& token) {
@@ -512,6 +549,7 @@ RemoteServer::RemoteServer(Options options) : impl_(std::make_shared<Impl>(std::
     impl_->startDiscord();
     impl_->open();
     impl_->reader = std::thread([impl = impl_.get()] { impl->run(); });
+    impl_->dispatcher = std::thread([impl = impl_.get()] { impl->dispatch(); });
     std::unique_lock lock(impl_->mutex);
     const bool answered = impl_->changed.wait_for(lock, impl_->options.timeout,
                                                   [this] { return impl_->current || !impl_->connected || impl_->serverOlder; });
@@ -644,6 +682,7 @@ void RemoteServer::shutdown() {
     impl_->changed.notify_all();
     if (closing) closing->shut();
     if (impl_->reader.joinable()) impl_->reader.join();
+    if (impl_->dispatcher.joinable()) impl_->dispatcher.join();
 }
 
 CommandStamp RemoteServer::submit(Command command) {
@@ -656,7 +695,10 @@ CommandStamp RemoteServer::submit(Command command) {
                 command.zone = impl_->following;
         }
     }
-    return commandStampFromJson(impl_->call("submit", args(toJson(command)), {}));
+    const auto stamp = commandStampFromJson(impl_->call("submit", args(toJson(command)), {}));
+    std::lock_guard lock(impl_->mutex);
+    impl_->lastSubmitted = std::max(impl_->lastSubmitted, stamp.id);
+    return stamp;
 }
 
 Snapshot RemoteServer::snapshot() const {
@@ -669,8 +711,19 @@ void RemoteServer::setListener(std::function<void(const Event&)> listener) {
     impl_->listener = std::move(listener);
 }
 
+// Done on the Server, shown here and told to the listener: the Server's answer, the revision its work reached, can come
+// before the event that shows it. An older Server answers nothing, and the last command submitted stands for it.
 void RemoteServer::waitIdle() {
-    impl_->call("waitIdle", json::array(), {});
+    const json reached = impl_->call("waitIdle", json::array(), {});
+    const bool fromListener = std::this_thread::get_id() == impl_->dispatcher.get_id();
+    std::unique_lock lock(impl_->mutex);
+    impl_->changed.wait_for(lock, std::chrono::seconds(10), [&] {
+        if (!impl_->connected) return true;
+        const auto& now = impl_->current;
+        const bool shown = now && (reached.is_number_unsigned() ? now->revision >= reached.get<uint64_t>()
+                                                                : now->command.id >= impl_->lastSubmitted);
+        return shown && (fromListener || (impl_->events.empty() && !impl_->telling));
+    });
 }
 
 LibraryTrackPage RemoteServer::browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,

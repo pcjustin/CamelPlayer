@@ -14,6 +14,8 @@
 
 #include "ControlPoint/CommandSubmit.h"
 #include "Server/Playback/LocalServer.h"
+#include "Server/Remote/ApiServer.h"
+#include "Server/Remote/RemoteServer.h"
 #include "Server/Library/LibraryScanner.h"
 #include "OutputBridge/CaptureOutput.h"
 #include "Engine/SamplePacker.h"
@@ -83,10 +85,88 @@ Command command(CommandKind kind) {
     return c;
 }
 
-class ServerTest : public ::testing::Test {
+// The running test's name as a folder's, the parameter's "/Local" or "/Remote" not making a folder of its own.
+std::string folderName() {
+    std::string name = ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    std::ranges::replace(name, '/', '-');
+    return name;
+}
+
+// The Server a test drives and, when asked for, the same Server as another computer's Control point sees it: its API on
+// loopback and a paired RemoteServer (docs/Plan.md §17.8). The remote view goes before the Server does.
+class ServerUnderTest {
+public:
+    ServerUnderTest() = default;
+    ServerUnderTest(const ServerUnderTest&) = delete;
+    ServerUnderTest& operator=(const ServerUnderTest&) = delete;
+    ~ServerUnderTest() { reset(); }
+
+    ServerUnderTest& operator=(std::unique_ptr<LocalServer> server) {
+        dropRemote();
+        local_ = std::move(server);
+        return *this;
+    }
+    void reset() {
+        dropRemote();
+        local_.reset();
+    }
+    LocalServer* operator->() const { return local_.get(); }
+    LocalServer& operator*() const { return *local_; }
+    LocalServer* get() const { return local_.get(); }
+    explicit operator bool() const { return local_ != nullptr; }
+
+    // The Server itself, or through the network when `remote`; from any thread.
+    IServer& api(bool remote) {
+        if (!remote) return *local_;
+        std::lock_guard lock(connecting_);
+        if (!remote_) connect();
+        return *remote_;
+    }
+
+private:
+    void connect() {
+        dir_ = testutil::tempDir() / "server-remote" /
+               (folderName() + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
+        std::filesystem::create_directories(dir_);
+        ApiServer::Options served;
+        served.port = 0;
+        served.portsToTry = 1;
+        served.loopbackOnly = true;
+        served.serverId = "test-server";
+        served.serverName = "Test PC";
+        served.pairings = dir_ / "pairings.json";
+        served.uploads = dir_ / "uploads";
+        api_ = std::make_unique<ApiServer>(*local_, served);
+        RemoteServer::Options options;
+        options.host = "127.0.0.1";
+        options.port = api_->port();
+        options.cache = dir_ / "cache";
+        options.token = RemoteServer::pair("127.0.0.1", api_->port(), "Test Control", "").token;
+        remote_ = std::make_unique<RemoteServer>(options);
+    }
+    void dropRemote() {
+        remote_.reset();
+        api_.reset();
+    }
+
+    std::unique_ptr<LocalServer> local_;
+    std::unique_ptr<ApiServer> api_;
+    std::unique_ptr<RemoteServer> remote_;
+    std::filesystem::path dir_;
+    std::mutex connecting_;
+};
+
+// Each Server test runs on the Server itself and again through the remote IServer, as a Control point on another computer
+// drives it (TC-R01).
+std::string throughName(const ::testing::TestParamInfo<bool>& info) {
+    return info.param ? "Remote" : "Local";
+}
+
+class ServerTest : public ::testing::TestWithParam<bool> {
 protected:
     Probe probe;
-    std::unique_ptr<LocalServer> server;
+    ServerUnderTest server;
+    IServer& api() { return server.api(GetParam()); }
     void SetUp() override {
         server = std::make_unique<LocalServer>(withoutAutoplay(), std::filesystem::path{}, [&](const Settings& settings) {
             if (probe.failBackend == settings.backend) throw std::runtime_error("injected output activation failure");
@@ -94,13 +174,13 @@ protected:
         });
     }
     Snapshot send(Command c) {
-        server->submit(std::move(c));
-        server->waitIdle();
-        return server->snapshot();
+        api().submit(std::move(c));
+        api().waitIdle();
+        return api().snapshot();
     }
 };
 
-TEST_F(ServerTest, LibraryWorkGoesOnWhilePlaybackIsAhead) {
+TEST_P(ServerTest, LibraryWorkGoesOnWhilePlaybackIsAhead) {
     const auto dir = testutil::tempDir() / "server-library-playback";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "music");
@@ -124,7 +204,7 @@ TEST_F(ServerTest, LibraryWorkGoesOnWhilePlaybackIsAhead) {
     std::ofstream(dir / "music" / "lyrics.lrc") << "lyrics";
     ASSERT_TRUE(waitFor(
         [&] { return store.openReader().scalar("SELECT COUNT(*) FROM files WHERE content_hash IS NOT NULL").value() == 1; }));
-    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing);
+    EXPECT_EQ(api().snapshot().playback.state, PlaybackState::Playing);
     server.reset();
 }
 
@@ -169,35 +249,39 @@ TEST(SnapshotCursorTest, RejectsStaleRevisionCommandGenerationQueueAndVersion) {
     EXPECT_EQ(cursor.current().value_or(Snapshot{}).revision, 10u);
 }
 
-TEST_F(ServerTest, RejectsInvalidCommandsBeforeAllocatingIds) {
+TEST_P(ServerTest, RejectsInvalidCommandsBeforeAllocatingIds) {
     Command c;
     c.apiVersion = kApiVersion + 1;
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = command(CommandKind::Load);
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = select();
     c.kind = CommandKind::Play;
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = command(CommandKind(255));
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = command(CommandKind::Stop);
     c.frame = 10;
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = select();
     c.source.emplace("a", FrameRange{1, 20});
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
-    c = command(CommandKind::ApplySettings);
-    c.settings = SettingsDto{};
-    c.settings->ks.packetCount = 0;
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
-    c.settings->ks.packetCount = 4;
-    c.settings->backend = Backend(255);
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
-    EXPECT_EQ(server->submit(Command{}).id, 1u);
-    server->waitIdle();
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
+    // Through the network the settings are read as a settings file is, each value put in range on the way, so none of
+    // these reaches the Server to be refused.
+    if (!GetParam()) {
+        c = command(CommandKind::ApplySettings);
+        c.settings = SettingsDto{};
+        c.settings->ks.packetCount = 0;
+        EXPECT_THROW(api().submit(c), std::invalid_argument);
+        c.settings->ks.packetCount = 4;
+        c.settings->backend = Backend(255);
+        EXPECT_THROW(api().submit(c), std::invalid_argument);
+    }
+    EXPECT_EQ(api().submit(Command{}).id, 1u);
+    api().waitIdle();
 }
 
-TEST_F(ServerTest, AssignsOrderedScopesAndDistinctQueueEntries) {
+TEST_P(ServerTest, AssignsOrderedScopesAndDistinctQueueEntries) {
     auto s = send(select("16-44.1k", CommandKind::Load));
     EXPECT_EQ(s.command, (CommandStamp{1, 1, 1}));
     EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
@@ -216,14 +300,14 @@ TEST_F(ServerTest, AssignsOrderedScopesAndDistinctQueueEntries) {
     EXPECT_EQ(send(Command{}).command, (CommandStamp{4, 3, 2}));
 }
 
-TEST_F(ServerTest, SerializesPlaybackControlsAndSeek) {
+TEST_P(ServerTest, SerializesPlaybackControlsAndSeek) {
     send(select());
-    server->submit(command(CommandKind::Pause));
+    api().submit(command(CommandKind::Pause));
     Command seek = command(CommandKind::Seek);
     seek.frame = 12000;
-    server->submit(seek);
-    server->waitIdle();
-    auto s = server->snapshot();
+    api().submit(seek);
+    api().waitIdle();
+    auto s = api().snapshot();
     EXPECT_EQ(s.playback.state, PlaybackState::Paused);
     EXPECT_EQ(s.playback.position, 12000u);
     EXPECT_FALSE(s.playback.error);
@@ -232,12 +316,12 @@ TEST_F(ServerTest, SerializesPlaybackControlsAndSeek) {
     EXPECT_FALSE(send(command(CommandKind::ShowControlPanel)).controlPanelOpened.value_or(true));
 }
 
-TEST_F(ServerTest, ConcurrentProducersReceiveUniqueOrderedIds) {
+TEST_P(ServerTest, ConcurrentProducersReceiveUniqueOrderedIds) {
     std::mutex mutex;
     std::vector<uint64_t> ids;
     auto producer = [&] {
         for (int i = 0; i < 25; ++i) {
-            auto id = server->submit(command(CommandKind::Pause)).id;
+            auto id = api().submit(command(CommandKind::Pause)).id;
             std::lock_guard lock(mutex);
             ids.push_back(id);
         }
@@ -247,14 +331,14 @@ TEST_F(ServerTest, ConcurrentProducersReceiveUniqueOrderedIds) {
     b.join();
     c.join();
     d.join();
-    server->waitIdle();
+    api().waitIdle();
     std::sort(ids.begin(), ids.end());
     ASSERT_EQ(ids.size(), 100u);
     for (size_t i = 0; i < ids.size(); ++i) EXPECT_EQ(ids[i], i + 1);
-    EXPECT_EQ(server->snapshot().command.id, 100u);
+    EXPECT_EQ(api().snapshot().command.id, 100u);
 }
 
-TEST_F(ServerTest, SuppressesBlockedOldGenerationAfterNewSelection) {
+TEST_P(ServerTest, SuppressesBlockedOldGenerationAfterNewSelection) {
     std::promise<void> opened;
     std::atomic<bool> released = false;
     probe.onOpen = [&] {
@@ -264,10 +348,10 @@ TEST_F(ServerTest, SuppressesBlockedOldGenerationAfterNewSelection) {
     std::mutex mutex;
     std::vector<Snapshot> events;
     struct DrainServer {
-        std::unique_ptr<LocalServer>& server;
+        ServerUnderTest& server;
         ~DrainServer() { server.reset(); }
     } drain{server};
-    server->setListener([&](const Event& e) {
+    api().setListener([&](const Event& e) {
         std::lock_guard lock(mutex);
         events.push_back(e.snapshot);
     });
@@ -280,35 +364,35 @@ TEST_F(ServerTest, SuppressesBlockedOldGenerationAfterNewSelection) {
     };
     {
         Release unblock{released};
-        server->submit(select());
+        api().submit(select());
         ASSERT_EQ(opened.get_future().wait_for(10s), std::future_status::ready);
-        const auto latest = server->submit(select("16-44.1k", CommandKind::Load));
+        const auto latest = api().submit(select("16-44.1k", CommandKind::Load));
         EXPECT_EQ(latest.generation, 2u);
     }
-    server->waitIdle();
-    server->setListener({});
+    api().waitIdle();
+    api().setListener({});
     ASSERT_FALSE(events.empty());
     for (const auto& e : events) EXPECT_EQ(e.command.generation, 2u);
-    EXPECT_EQ(server->snapshot().playback.pathUtf8, toUtf8(testutil::testFile("16-44.1k").wstring()));
+    EXPECT_EQ(api().snapshot().playback.pathUtf8, toUtf8(testutil::testFile("16-44.1k").wstring()));
 }
 
-TEST_F(ServerTest, ListenerMayReadSnapshotAndSubmitButExceptionsAreIsolated) {
+TEST_P(ServerTest, ListenerMayReadSnapshotAndSubmitButExceptionsAreIsolated) {
     std::atomic<int> callbacks = 0;
-    server->setListener([&](const Event& e) {
-        EXPECT_GE(server->snapshot().revision, e.snapshot.revision);
-        if (++callbacks == 1) server->submit(command(CommandKind::Pause));
+    api().setListener([&](const Event& e) {
+        EXPECT_GE(api().snapshot().revision, e.snapshot.revision);
+        if (++callbacks == 1) api().submit(command(CommandKind::Pause));
         throw std::runtime_error("injected listener failure");
     });
-    server->submit(select());
-    server->waitIdle();
-    server->waitIdle();
-    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Paused);
-    server->setListener({});
+    api().submit(select());
+    api().waitIdle();
+    api().waitIdle();
+    EXPECT_EQ(api().snapshot().playback.state, PlaybackState::Paused);
+    api().setListener({});
     EXPECT_GE(callbacks.load(), 2);
     EXPECT_EQ(send(Command{}).playback.state, PlaybackState::Stopped);
 }
 
-TEST_F(ServerTest, FileErrorsRemainVisibleAndNextSelectionRecovers) {
+TEST_P(ServerTest, FileErrorsRemainVisibleAndNextSelectionRecovers) {
     Command c = command(CommandKind::OpenAndPlay);
     c.source.emplace(toUtf8((testutil::tempDir() / "server-missing.flac").wstring()));
     auto s = send(c);
@@ -320,7 +404,7 @@ TEST_F(ServerTest, FileErrorsRemainVisibleAndNextSelectionRecovers) {
     EXPECT_EQ(s.playback.state, PlaybackState::Playing);
 }
 
-TEST_F(ServerTest, TrackDecoderOverrideSurvivesSettingsAndDoesNotChangeGlobalPreference) {
+TEST_P(ServerTest, TrackDecoderOverrideSurvivesSettingsAndDoesNotChangeGlobalPreference) {
     auto s = send(select("24-96k", CommandKind::OpenAndPlay, DecoderKind::Sndfile));
     EXPECT_EQ(s.playback.decoder, DecoderKind::Sndfile);
     EXPECT_EQ(decoderFor(s.settings.decoderByFormat, AudioFormat::Flac), DecoderKind::Sndfile);
@@ -337,7 +421,7 @@ TEST_F(ServerTest, TrackDecoderOverrideSurvivesSettingsAndDoesNotChangeGlobalPre
     EXPECT_FALSE(s.playback.error);
 }
 
-TEST_F(ServerTest, UnrelatedSettingsDoNotRestartPlaybackAndRequestedStateIsSeparate) {
+TEST_P(ServerTest, UnrelatedSettingsDoNotRestartPlaybackAndRequestedStateIsSeparate) {
     auto s = send(select());
     ASSERT_EQ(s.playback.state, PlaybackState::Playing);
     EXPECT_EQ(s.settings.backend, Backend::Wasapi);
@@ -362,7 +446,7 @@ TEST_F(ServerTest, UnrelatedSettingsDoNotRestartPlaybackAndRequestedStateIsSepar
     EXPECT_EQ(s.playback.activeDecoder, DecoderKind::Sndfile);
 }
 
-TEST_F(ServerTest, RequestedBackendRemainsVisibleWhenActivationFails) {
+TEST_P(ServerTest, RequestedBackendRemainsVisibleWhenActivationFails) {
     auto s = send(select());
     ASSERT_EQ(s.playback.activeBackend, Backend::Wasapi);
     probe.failBackend = Backend::Ks;
@@ -383,9 +467,9 @@ TEST_F(ServerTest, RequestedBackendRemainsVisibleWhenActivationFails) {
     ASSERT_TRUE(s.playback.error);
 }
 
-TEST_F(ServerTest, DestructorClosesActiveOutputAndDrainsCommands) {
+TEST_P(ServerTest, DestructorClosesActiveOutputAndDrainsCommands) {
     send(select());
-    server->submit(command(CommandKind::Pause));
+    api().submit(command(CommandKind::Pause));
     server.reset();
     EXPECT_GT(probe.closes.load(), 0);
 }
@@ -517,31 +601,31 @@ std::vector<uint64_t> entryIds(const Snapshot& s) {
     return ids;
 }
 
-TEST_F(ServerTest, RejectsInvalidQueuePayloads) {
-    EXPECT_THROW(server->submit(queueReplace({})), std::invalid_argument);
-    EXPECT_THROW(server->submit(queueReplace({source("24-96k")}, 1)), std::invalid_argument);
-    EXPECT_THROW(server->submit(command(CommandKind::QueueReorder)), std::invalid_argument);
-    EXPECT_THROW(server->submit(command(CommandKind::QueueSelect)), std::invalid_argument);
-    EXPECT_THROW(server->submit(command(CommandKind::SetShuffle)), std::invalid_argument);
+TEST_P(ServerTest, RejectsInvalidQueuePayloads) {
+    EXPECT_THROW(api().submit(queueReplace({})), std::invalid_argument);
+    EXPECT_THROW(api().submit(queueReplace({source("24-96k")}, 1)), std::invalid_argument);
+    EXPECT_THROW(api().submit(command(CommandKind::QueueReorder)), std::invalid_argument);
+    EXPECT_THROW(api().submit(command(CommandKind::QueueSelect)), std::invalid_argument);
+    EXPECT_THROW(api().submit(command(CommandKind::SetShuffle)), std::invalid_argument);
     Command c = command(CommandKind::SetRepeat);
     c.repeat = RepeatMode(7);
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = command(CommandKind::Next);
     c.entryId = 1;
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = queueReplace({TrackSource("a.flac", FrameRange{1, 2})});
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c = command(CommandKind::RemoveLibraryRoot);
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c.rootId = -1;
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
     c.kind = CommandKind::Stop;
     c.rootId = 1;
-    EXPECT_THROW(server->submit(c), std::invalid_argument);
-    EXPECT_EQ(server->snapshot().command.id, 0u);
+    EXPECT_THROW(api().submit(c), std::invalid_argument);
+    EXPECT_EQ(api().snapshot().command.id, 0u);
 }
 
-TEST_F(ServerTest, PlayNextListsTracksRightAfterTheCurrentOne) {
+TEST_P(ServerTest, PlayNextListsTracksRightAfterTheCurrentOne) {
     auto s = send(queueReplace({source("16-44.1k"), source("24-96k"), source("no-md5")}));
     const auto first = entryIds(s);
     Command next = command(CommandKind::QueuePlayNext);
@@ -563,7 +647,7 @@ TEST_F(ServerTest, PlayNextListsTracksRightAfterTheCurrentOne) {
     EXPECT_EQ(std::vector<uint64_t>(all.begin(), all.end() - 1), ids); // Add to queue still goes to the end
 }
 
-TEST_F(ServerTest, QueueNavigationReorderAndUpcomingEntry) {
+TEST_P(ServerTest, QueueNavigationReorderAndUpcomingEntry) {
     auto s = send(queueReplace({source("16-44.1k"), source("24-96k"), source("no-md5")}));
     const auto ids = entryIds(s);
     ASSERT_EQ(ids.size(), 3u);
@@ -601,7 +685,7 @@ TEST_F(ServerTest, QueueNavigationReorderAndUpcomingEntry) {
     EXPECT_EQ(s.queueEntryId, ids[1]);
 }
 
-TEST_F(ServerTest, ShuffleAndRepeatAreReportedInQueueSnapshot) {
+TEST_P(ServerTest, ShuffleAndRepeatAreReportedInQueueSnapshot) {
     auto s = send(queueReplace({source("16-44.1k"), source("24-96k")}));
     Command shuffle = command(CommandKind::SetShuffle);
     shuffle.shuffle = true;
@@ -616,21 +700,21 @@ TEST_F(ServerTest, ShuffleAndRepeatAreReportedInQueueSnapshot) {
     EXPECT_EQ(s.queue.upcomingEntryId, s.queueEntryId);
 }
 
-TEST_F(ServerTest, RepeatAllStopsWhenEveryEntryFails) {
+TEST_P(ServerTest, RepeatAllStopsWhenEveryEntryFails) {
     Command repeat = command(CommandKind::SetRepeat);
     repeat.repeat = RepeatMode::All;
     send(repeat);
     send(queueReplace({missingSource("queue-missing-1.flac"), missingSource("queue-missing-2.flac")}));
     const auto deadline = std::chrono::steady_clock::now() + 5s;
-    Snapshot s = server->snapshot();
+    Snapshot s = api().snapshot();
     while (std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(100ms);
-        const auto next = server->snapshot();
+        const auto next = api().snapshot();
         if (next.playback.revision == s.playback.revision && next.queueEntryId == s.queueEntryId) break;
         s = next;
     }
     std::this_thread::sleep_for(300ms);
-    const auto settled = server->snapshot();
+    const auto settled = api().snapshot();
     EXPECT_EQ(settled.playback.revision, s.playback.revision);
     EXPECT_EQ(settled.playback.state, PlaybackState::Stopped);
     EXPECT_EQ(settled.playback.error, ErrorCode::FileOpen);
@@ -737,19 +821,19 @@ TEST(ServerGaplessTest, MatchingTracksConcatenateBitExactlyThroughOneDeviceOpen)
 }
 
 // Library files played in real time through a 32-bit capture device, for play-statistics checks (docs/Plan.md §7.8).
-class LibraryPlaybackTest : public ::testing::Test {
+class LibraryPlaybackTest : public ::testing::TestWithParam<bool> {
 protected:
     std::filesystem::path dir;
     std::unique_ptr<LibraryStore> store;
     std::unique_ptr<LibraryScanner> scanner;
-    std::unique_ptr<LocalServer> server;
+    ServerUnderTest server;
+    IServer& api() { return server.api(GetParam()); }
     int64_t root = 0;
     CaptureOptions options;
 
     std::filesystem::path setUp(const std::vector<std::filesystem::path>& files) {
         dir = testutil::tempDir() / "server-play" /
-              (std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()) + "-" +
-               std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
+              (folderName() + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
         std::filesystem::create_directories(dir / "music");
         for (const auto& file : files) std::filesystem::copy_file(file, dir / "music" / file.filename());
         store = std::make_unique<LibraryStore>(dir / "db");
@@ -772,9 +856,9 @@ protected:
     }
 
     Snapshot send(Command c) {
-        server->submit(std::move(c));
-        server->waitIdle();
-        return server->snapshot();
+        api().submit(std::move(c));
+        api().waitIdle();
+        return api().snapshot();
     }
     bool waitFor(const std::function<bool()>& check, std::chrono::milliseconds timeout = 15s) {
         const auto end = std::chrono::steady_clock::now() + timeout;
@@ -784,11 +868,11 @@ protected:
         }
         return true;
     }
-    bool stopped() { return server->snapshot().playback.state == PlaybackState::Stopped; }
+    bool stopped() { return api().snapshot().playback.state == PlaybackState::Stopped; }
     // Plays are persisted through the Server's own writer, so tests wait for them rather than for a barrier.
     PlayStatistics plays(int64_t expected) {
         PlayStatistics result;
-        EXPECT_TRUE(waitFor([&] { return (result = server->playStatistics({})).historyTotal >= expected; }));
+        EXPECT_TRUE(waitFor([&] { return (result = api().playStatistics({})).historyTotal >= expected; }));
         return result;
     }
     int64_t file(const std::filesystem::path& path) {
@@ -802,7 +886,7 @@ protected:
 
 // The window's background reads go on while the Server closes; the parts they read are never freed under them.
 // A use after free shows under ASan.
-TEST_F(LibraryPlaybackTest, ReadsWhileTheServerClosesFindItsPartsOrNothing) {
+TEST_P(LibraryPlaybackTest, ReadsWhileTheServerClosesFindItsPartsOrNothing) {
     const auto music = setUp({testutil::generatedFile({"closing-reads", 44100, 16, 2, 0.5})});
     const std::string path = toUtf8((music / "closing-reads.flac").wstring());
     std::atomic<bool> closed = false;
@@ -814,11 +898,11 @@ TEST_F(LibraryPlaybackTest, ReadsWhileTheServerClosesFindItsPartsOrNothing) {
         readers.emplace_back([&] {
             while (!closed) {
                 try {
-                    (void)server->loudnessProgress();
-                    (void)server->discordStatus();
-                    server->setDiscordTexts({});
-                    (void)server->waveform(path);
-                    server->rereadLibrary();
+                    (void)api().loudnessProgress();
+                    (void)api().discordStatus();
+                    api().setDiscordTexts({});
+                    (void)api().waveform(path);
+                    api().rereadLibrary();
                 } catch (const std::exception&) {
                     // a closed library may refuse a read; it must not crash
                 }
@@ -826,31 +910,30 @@ TEST_F(LibraryPlaybackTest, ReadsWhileTheServerClosesFindItsPartsOrNothing) {
             }
         });
     std::this_thread::sleep_for(200ms);
-    server->shutdown();
+    server->shutdown(); // the Server's own, whichever way the reads come
     std::this_thread::sleep_for(50ms);
     closed = true;
     for (auto& reader : readers) reader.join();
     EXPECT_GT(reads.load(), 0);
 }
 
-TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
+TEST_P(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
     setUp({});
     const auto second = dir / "second";
     std::filesystem::create_directories(second / "album");
     std::filesystem::copy_file(testutil::generatedFile({"added-root", 48000, 16, 2, 0.2}), second / "album" / "a.flac");
     Command add = command(CommandKind::AddLibraryRoot);
-    EXPECT_THROW(server->submit(add), std::invalid_argument);
+    EXPECT_THROW(api().submit(add), std::invalid_argument);
     add.path = toUtf8(second.wstring());
     ASSERT_FALSE(send(add).commandError);
-    EXPECT_EQ(server->libraryRoots().size(), 2u);
+    EXPECT_EQ(api().libraryRoots().size(), 2u);
     // The monitor rereads roots on its next pass rather than after its 60-second availability interval.
     // Tracks and their albums appear with each written batch.
-    ASSERT_TRUE(
-        waitFor([&] { return server->browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt).total == 1; }, 20s));
-    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt).total, 1);
-    const auto albums = server->browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt);
-    EXPECT_EQ(server->albumDetail(albums.albums[0].id).tracks.size(), 1u);
-    const auto roots = server->browseFolder(std::nullopt);
+    ASSERT_TRUE(waitFor([&] { return api().browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt).total == 1; }, 20s));
+    EXPECT_EQ(api().browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt).total, 1);
+    const auto albums = api().browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt);
+    EXPECT_EQ(api().albumDetail(albums.albums[0].id).tracks.size(), 1u);
+    const auto roots = api().browseFolder(std::nullopt);
     EXPECT_EQ(roots.folders.size(), 2u);
     Command missing = command(CommandKind::AddLibraryRoot);
     missing.path = toUtf8((dir / "does-not-exist").wstring());
@@ -860,72 +943,72 @@ TEST_F(LibraryPlaybackTest, AnAddedRootIsIndexedPromptlyAndBrowsable) {
     EXPECT_TRUE(refused.finished.failure);
 }
 
-TEST_F(LibraryPlaybackTest, RemovingARootTakesItsTracksOutOfTheQueue) {
+TEST_P(LibraryPlaybackTest, RemovingARootTakesItsTracksOutOfTheQueue) {
     const auto a = testutil::generatedFile({"remove-root", 48000, 16, 2, 0.3});
     setUp({a});
     const auto outside = toUtf8(testutil::testFile("16-44.1k").wstring());
     send(queueReplace({track(a), TrackSource(outside)}));
     send(command(CommandKind::Stop));
-    EXPECT_EQ(server->libraryRootContents(root).tracks, 1);
+    EXPECT_EQ(api().libraryRootContents(root).tracks, 1);
     Command remove = command(CommandKind::RemoveLibraryRoot);
     remove.rootId = root;
     ASSERT_FALSE(send(remove).commandError);
-    EXPECT_TRUE(server->libraryRoots().empty());
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 1; }));
-    EXPECT_EQ(server->snapshot().queue.entries[0].source.pathUtf8(), outside);
+    EXPECT_TRUE(api().libraryRoots().empty());
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().queue.entries.size() == 1; }));
+    EXPECT_EQ(api().snapshot().queue.entries[0].source.pathUtf8(), outside);
 }
 
-TEST_F(LibraryPlaybackTest, ALibraryTrackPlaysUnderItsOnDiskSpelling) {
+TEST_P(LibraryPlaybackTest, ALibraryTrackPlaysUnderItsOnDiskSpelling) {
     const auto music = setUp({});
     std::filesystem::copy_file(testutil::generatedFile({"spelling", 48000, 16, 2, 0.3}), music / "Mixed Case.flac");
     ASSERT_TRUE(scanner->scan(root).complete);
-    const auto rows = server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt);
+    const auto rows = api().browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt);
     ASSERT_EQ(rows.tracks.size(), 1u);
     ASSERT_NE(rows.tracks[0].path.find("mixed case.flac"), std::string::npos); // the lowercase index key
     send(queueReplace({TrackSource(rows.tracks[0].path)}));
-    const auto path = server->snapshot().playback.pathUtf8;
+    const auto path = api().snapshot().playback.pathUtf8;
     EXPECT_EQ(std::filesystem::path(toWide(path)).filename(), L"Mixed Case.flac");
     EXPECT_FALSE(path.starts_with(R"(\\?\)"));
-    EXPECT_EQ(server->snapshot().queue.entries[0].source.pathUtf8(), path);
+    EXPECT_EQ(api().snapshot().queue.entries[0].source.pathUtf8(), path);
 }
 
-TEST_F(LibraryPlaybackTest, SavingTheQueueKeepsDuplicatesAndEntriesOutsideTheLibrary) {
+TEST_P(LibraryPlaybackTest, SavingTheQueueKeepsDuplicatesAndEntriesOutsideTheLibrary) {
     const auto a = testutil::generatedFile({"queue-save-a", 48000, 16, 2, 0.3});
     setUp({a});
     const auto outside = testutil::testFile("16-44.1k");
     send(queueReplace({track(a), TrackSource(toUtf8(outside.wstring())), track(a)}));
     send(command(CommandKind::Stop));
-    const auto saved = server->saveQueueAsPlaylist("Queue");
+    const auto saved = api().saveQueueAsPlaylist("Queue");
     EXPECT_EQ(saved.added, 3);
-    const auto page = server->playlistItems(saved.playlist, 0, 10);
+    const auto page = api().playlistItems(saved.playlist, 0, 10);
     ASSERT_EQ(page.items.size(), 3u);
     EXPECT_EQ(page.items[0].track, (LibraryTrackKey{file(a)}));
     EXPECT_FALSE(page.items[1].track);
     EXPECT_EQ(page.items[1].source, toUtf8(outside.wstring()));
     EXPECT_EQ(page.items[2].track, page.items[0].track);
-    EXPECT_TRUE(server->undoPlaylistChange(saved.undo));
-    EXPECT_TRUE(server->playlists().empty());
+    EXPECT_TRUE(api().undoPlaylistChange(saved.undo));
+    EXPECT_TRUE(api().playlists().empty());
 }
 
 // The queue is saved with the library file each entry carries, without asking the storage: saved while the storage is
 // away, its tracks stay the library's.
-TEST_F(LibraryPlaybackTest, SavingTheQueueWhileItsStorageIsAwayKeepsItsTracksInTheLibrary) {
+TEST_P(LibraryPlaybackTest, SavingTheQueueWhileItsStorageIsAwayKeepsItsTracksInTheLibrary) {
     const auto a = testutil::generatedFile({"queue-save-away", 48000, 16, 2, 0.3});
     const auto music = setUp({a});
     send(queueReplace({track(a)}));
     send(command(CommandKind::Stop));
     const auto id = file(a); // before it goes: the folder watch may then mark it unavailable
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries[0].file == id; }));
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().queue.entries[0].file == id; }));
     std::filesystem::rename(music / a.filename(), dir / a.filename());
-    const auto saved = server->saveQueueAsPlaylist("Away");
-    const auto page = server->playlistItems(saved.playlist, 0, 10);
+    const auto saved = api().saveQueueAsPlaylist("Away");
+    const auto page = api().playlistItems(saved.playlist, 0, 10);
     ASSERT_EQ(page.items.size(), 1u);
     EXPECT_EQ(page.items[0].track, (LibraryTrackKey{id}));
 }
 
 // A library command waits for the library writer beside the command thread: while another holds the library, the
 // Server answers the commands that follow.
-TEST_F(LibraryPlaybackTest, ALibraryCommandHoldsUpNoOtherCommandWhileTheLibraryIsBusy) {
+TEST_P(LibraryPlaybackTest, ALibraryCommandHoldsUpNoOtherCommandWhileTheLibraryIsBusy) {
     const auto a = testutil::generatedFile({"busy-library", 48000, 16, 2, 0.3});
     setUp({a});
     std::promise<void> release;
@@ -935,18 +1018,18 @@ TEST_F(LibraryPlaybackTest, ALibraryCommandHoldsUpNoOtherCommandWhileTheLibraryI
     Command favorite = command(CommandKind::SetFavorite);
     favorite.tracks = {LibraryTrackKey{file(a)}};
     favorite.favorite = true;
-    server->submit(std::move(favorite));
+    api().submit(std::move(favorite));
     Command shuffle = command(CommandKind::SetShuffle);
     shuffle.shuffle = true;
-    const auto stamp = server->submit(std::move(shuffle));
-    const bool answered = waitFor([&] { return server->snapshot().command.id >= stamp.id; }, 1000ms);
+    const auto stamp = api().submit(std::move(shuffle));
+    const bool answered = waitFor([&] { return api().snapshot().command.id >= stamp.id; }, 1000ms);
     release.set_value();
     holding.get();
-    server->waitIdle();
+    api().waitIdle();
     EXPECT_TRUE(answered);
 }
 
-TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningTheFileUntilPlay) {
+TEST_P(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningTheFileUntilPlay) {
     const auto a = testutil::generatedFile({"restore-a", 48000, 16, 2, 2.0});
     const auto b = testutil::generatedFile({"restore-b", 48000, 16, 2, 2.0});
     const auto c = testutil::generatedFile({"restore-c", 48000, 16, 2, 2.0});
@@ -969,8 +1052,8 @@ TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningThe
     std::filesystem::rename(music / b.filename(), music / "away.flac");
     server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
-    server->waitIdle();
-    auto s = server->snapshot();
+    api().waitIdle();
+    auto s = api().snapshot();
     ASSERT_EQ(s.queue.entries.size(), 3u);
     for (size_t i = 0; i < 3; ++i) {
         EXPECT_EQ(s.queue.entries[i].source, before.queue.entries[i].source);
@@ -995,8 +1078,8 @@ TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningThe
     seek.frame = 24000;
     EXPECT_EQ(send(seek).playback.position, 24000u);
     send(command(CommandKind::Play));
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.state == PlaybackState::Playing; }));
-    s = server->snapshot();
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().playback.state == PlaybackState::Playing; }));
+    s = api().snapshot();
     EXPECT_EQ(s.queueEntryId, s.queue.entries[1].id);
     EXPECT_GE(s.playback.position, 24000u);
     EXPECT_LT(s.playback.position, 72000u);
@@ -1005,7 +1088,7 @@ TEST_F(LibraryPlaybackTest, TheQueueRestoresPausedAtItsPositionWithoutOpeningThe
 }
 
 // A save of the queue that fails, as on a full disk, is not taken for saved: the next save writes the entries again.
-TEST_F(LibraryPlaybackTest, AQueueSaveThatFailedIsWrittenAgain) {
+TEST_P(LibraryPlaybackTest, AQueueSaveThatFailedIsWrittenAgain) {
     std::vector<std::filesystem::path> files;
     files.reserve(5);
     for (const char* name : {"save-a", "save-b", "save-c", "save-d", "save-e"})
@@ -1037,7 +1120,7 @@ TEST_F(LibraryPlaybackTest, AQueueSaveThatFailedIsWrittenAgain) {
     EXPECT_EQ(rows(), (std::vector<std::string>{"save-c.flac", "save-d.flac", "save-e.flac"}));
 }
 
-TEST_F(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
+TEST_P(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
     const auto a = testutil::generatedFile({"restore-gone-a", 48000, 16, 2, 0.5});
     const auto b = testutil::generatedFile({"restore-gone-b", 48000, 16, 2, 0.5});
     const auto music = setUp({a, b});
@@ -1054,19 +1137,19 @@ TEST_F(LibraryPlaybackTest, AnEntryWhoseFileIsGoneIsKeptAndPlaySkipsIt) {
         .get();
     server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
-    server->waitIdle();
-    auto s = server->snapshot();
+    api().waitIdle();
+    auto s = api().snapshot();
     ASSERT_EQ(s.queue.entries.size(), 2u);
     EXPECT_EQ(s.queueEntryId, s.queue.entries[0].id);
     EXPECT_EQ(s.queue.entries[0].title, "Kept title · Kept artist"); // what it showed, although the file is gone
     EXPECT_EQ(s.queue.entries[1].title, "Kept title");
     send(command(CommandKind::Play));
-    s = server->snapshot();
+    s = api().snapshot();
     EXPECT_EQ(s.queueEntryId, s.queue.entries[1].id);
     send(command(CommandKind::Stop));
 }
 
-TEST_F(LibraryPlaybackTest, AnUntitledTrackKeepsItsFileNameTitleAfterARestart) {
+TEST_P(LibraryPlaybackTest, AnUntitledTrackKeepsItsFileNameTitleAfterARestart) {
     const auto a = testutil::generatedFile({"untitled-gone", 48000, 16, 2, 0.5});
     const auto b = testutil::generatedFile({"untitled-kept", 48000, 16, 2, 0.5});
     const auto music = setUp({a, b});
@@ -1083,15 +1166,15 @@ TEST_F(LibraryPlaybackTest, AnUntitledTrackKeepsItsFileNameTitleAfterARestart) {
         .get();
     server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
-    server->waitIdle();
-    const auto s = server->snapshot();
+    api().waitIdle();
+    const auto s = api().snapshot();
     ASSERT_EQ(s.queue.entries.size(), 2u);
     EXPECT_EQ(s.queue.entries[0].title, toUtf8(a.stem().wstring()) + " · Artist"); // the file is gone: what it showed
     EXPECT_EQ(s.queue.entries[1].title, "");                                       // the control point shows the file name
     EXPECT_EQ(s.queue.entries[1].artist, "Artist");
 }
 
-TEST_F(LibraryPlaybackTest, AutoplayFollowsTheLastEntryWithAnUnplayedLibraryTrack) {
+TEST_P(LibraryPlaybackTest, AutoplayFollowsTheLastEntryWithAnUnplayedLibraryTrack) {
     const auto a = testutil::generatedFile({"auto-a", 48000, 16, 2, 0.6});
     const auto b = testutil::generatedFile({"auto-b", 48000, 16, 2, 0.6});
     const auto c = testutil::generatedFile({"auto-c", 48000, 16, 2, 0.6});
@@ -1109,22 +1192,22 @@ TEST_F(LibraryPlaybackTest, AutoplayFollowsTheLastEntryWithAnUnplayedLibraryTrac
         })
         .get();
     send(queueReplace({track(a)}));
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 2; }));
-    auto s = server->snapshot();
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().queue.entries.size() == 2; }));
+    auto s = api().snapshot();
     EXPECT_FALSE(s.queue.entries[0].automatic);
     EXPECT_TRUE(s.queue.entries[1].automatic);
     EXPECT_NE(s.queue.entries[1].source.pathUtf8().find("auto-c"), std::string::npos); // b was played this week
     EXPECT_EQ(s.queue.upcomingEntryId, s.queue.entries[1].id);
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queueEntryId == s.queue.entries[1].id; }));
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().queueEntryId == s.queue.entries[1].id; }));
     // Every track was played or queued: the one played longest ago follows.
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 3; }));
-    EXPECT_NE(server->snapshot().queue.entries[2].source.pathUtf8().find("auto-b"), std::string::npos);
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().queue.entries.size() == 3; }));
+    EXPECT_NE(api().snapshot().queue.entries[2].source.pathUtf8().find("auto-b"), std::string::npos);
     send(command(CommandKind::Stop));
 }
 
 // Autoplay picks one library track after another; when none of them plays, as with conversion off and a device that
 // takes none of the library's formats, it gives up after three failures in a row, with the last one's error shown.
-TEST_F(LibraryPlaybackTest, AutoplayStopsAfterThreeTracksInARowFail) {
+TEST_P(LibraryPlaybackTest, AutoplayStopsAfterThreeTracksInARowFail) {
     std::vector<std::filesystem::path> files;
     files.reserve(8);
     for (int i = 0; i < 8; ++i)
@@ -1138,17 +1221,17 @@ TEST_F(LibraryPlaybackTest, AutoplayStopsAfterThreeTracksInARowFail) {
     send(queueReplace({track(files[0])}));
     size_t entries = 0;
     for (int still = 0; still < 20; std::this_thread::sleep_for(100ms)) {
-        const auto now = server->snapshot().queue.entries.size();
+        const auto now = api().snapshot().queue.entries.size();
         still = now == entries ? still + 1 : 0;
         entries = now;
     }
-    const auto s = server->snapshot();
+    const auto s = api().snapshot();
     EXPECT_EQ(s.queue.entries.size(), 3u);
     EXPECT_EQ(s.playback.state, PlaybackState::Stopped);
     EXPECT_TRUE(s.playback.error);
 }
 
-TEST_F(LibraryPlaybackTest, AutoplayYieldsToAddedTracksRepeatAndTheSwitch) {
+TEST_P(LibraryPlaybackTest, AutoplayYieldsToAddedTracksRepeatAndTheSwitch) {
     const auto a = testutil::generatedFile({"yield-a", 48000, 16, 2, 3.0});
     const auto b = testutil::generatedFile({"yield-b", 48000, 16, 2, 3.0});
     const auto c = testutil::generatedFile({"yield-c", 48000, 16, 2, 3.0});
@@ -1156,7 +1239,7 @@ TEST_F(LibraryPlaybackTest, AutoplayYieldsToAddedTracksRepeatAndTheSwitch) {
     server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
     send(queueReplace({track(a)}));
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queue.entries.size() == 2; }));
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().queue.entries.size() == 2; }));
     Command add = command(CommandKind::QueueAdd);
     add.sources = {track(b)};
     auto s = send(add);
@@ -1168,23 +1251,23 @@ TEST_F(LibraryPlaybackTest, AutoplayYieldsToAddedTracksRepeatAndTheSwitch) {
     repeat.repeat = RepeatMode::All;
     send(repeat);
     send(command(CommandKind::Next));
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().queueEntryId == server->snapshot().queue.entries[1].id; }));
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().queueEntryId == api().snapshot().queue.entries[1].id; }));
     std::this_thread::sleep_for(300ms);
-    EXPECT_EQ(server->snapshot().queue.entries.size(), 2u); // repeat all never ends the queue
+    EXPECT_EQ(api().snapshot().queue.entries.size(), 2u); // repeat all never ends the queue
 
     Command off = command(CommandKind::ApplySettings);
-    auto settings = server->snapshot().settings;
+    auto settings = api().snapshot().settings;
     settings.autoplay = false;
     off.settings = settings;
     send(off);
     repeat.repeat = RepeatMode::Off;
     send(repeat);
     send(command(CommandKind::Next));
-    EXPECT_EQ(server->snapshot().queue.entries.size(), 2u);
-    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(api().snapshot().queue.entries.size(), 2u);
+    EXPECT_EQ(api().snapshot().playback.state, PlaybackState::Stopped);
 }
 
-TEST_F(LibraryPlaybackTest, PlayOnAnEmptyQueueStartsAutoplayAndItsEntriesSurviveARestart) {
+TEST_P(LibraryPlaybackTest, PlayOnAnEmptyQueueStartsAutoplayAndItsEntriesSurviveARestart) {
     const auto a = testutil::generatedFile({"empty-a", 48000, 16, 2, 2.0});
     setUp({a});
     server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
@@ -1197,13 +1280,13 @@ TEST_F(LibraryPlaybackTest, PlayOnAnEmptyQueueStartsAutoplayAndItsEntriesSurvive
     server.reset();
     server = std::make_unique<LocalServer>(Settings{}, dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
-    server->waitIdle();
-    s = server->snapshot();
+    api().waitIdle();
+    s = api().snapshot();
     ASSERT_EQ(s.queue.entries.size(), 1u);
     EXPECT_TRUE(s.queue.entries[0].automatic);
 }
 
-TEST_F(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiveSeconds) {
+TEST_P(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiveSeconds) {
     const auto a = testutil::generatedFile({"restore-playing", 48000, 16, 2, 9.0});
     setUp({a});
     send(queueReplace({track(a)}));
@@ -1215,11 +1298,11 @@ TEST_F(LibraryPlaybackTest, ThePositionIsSavedWhilePlayingSoACrashLosesAtMostFiv
         return at == std::string::npos ? uint64_t(0) : std::stoull(text.substr(at + 11));
     };
     ASSERT_TRUE(waitFor([&] { return saved() >= uint64_t(48000) * 3; }, 8s));
-    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing);
+    EXPECT_EQ(api().snapshot().playback.state, PlaybackState::Playing);
     send(command(CommandKind::Stop));
 }
 
-TEST_F(LibraryPlaybackTest, ShutdownSavesTheQueueAndLeavesTheServerReadable) {
+TEST_P(LibraryPlaybackTest, ShutdownSavesTheQueueAndLeavesTheServerReadable) {
     const auto a = testutil::generatedFile({"restore-shutdown", 48000, 16, 2, 2.0});
     setUp({a});
     send(queueReplace({track(a)}));
@@ -1227,33 +1310,34 @@ TEST_F(LibraryPlaybackTest, ShutdownSavesTheQueueAndLeavesTheServerReadable) {
     Command seek = command(CommandKind::Seek);
     seek.frame = 12000;
     send(seek);
+    // The Server's own: a Control point's shutdown() closes only its own connection.
     server->shutdown();
     server->shutdown();
-    EXPECT_THROW(server->submit(command(CommandKind::Play)), std::runtime_error);
-    EXPECT_EQ(server->browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt).total, 1);
+    EXPECT_THROW(api().submit(command(CommandKind::Play)), std::runtime_error);
+    EXPECT_EQ(api().browseTrackRows(TrackSort::Title, false, std::nullopt, 0, 10, std::nullopt).total, 1);
     auto row = store->openReader().prepare("SELECT value FROM app_state WHERE key='session:wasapi:'");
     ASSERT_TRUE(row.step());
     EXPECT_NE(row.text(0).find("\"position\":12000"), std::string::npos);
 }
 
-TEST_F(LibraryPlaybackTest, AClearedQueueStaysEmptyInsteadOfReopeningTheLastFile) {
+TEST_P(LibraryPlaybackTest, AClearedQueueStaysEmptyInsteadOfReopeningTheLastFile) {
     const auto a = testutil::generatedFile({"restore-cleared", 48000, 16, 2, 0.3});
     setUp({a});
     send(queueReplace({track(a)}));
     send(command(CommandKind::Stop));
     Command clear = command(CommandKind::QueueRemove);
-    clear.entryIds = entryIds(server->snapshot());
+    clear.entryIds = entryIds(api().snapshot());
     send(clear);
     server.reset();
     server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
-    server->waitIdle();
-    EXPECT_TRUE(server->snapshot().queue.entries.empty());
-    EXPECT_TRUE(server->snapshot().playback.pathUtf8.empty());
+    api().waitIdle();
+    EXPECT_TRUE(api().snapshot().queue.entries.empty());
+    EXPECT_TRUE(api().snapshot().playback.pathUtf8.empty());
 }
 
 // An entry saved with a decoder since removed, such as dr_mp3 (6) or minimp3 (8), restores with the setting's decoder.
-TEST_F(LibraryPlaybackTest, AQueueSavedWithARemovedDecoderRestoresWithTheSetting) {
+TEST_P(LibraryPlaybackTest, AQueueSavedWithARemovedDecoderRestoresWithTheSetting) {
     const auto a = testutil::generatedFile({"restore-removed-a", 48000, 16, 2, 0.3});
     const auto b = testutil::generatedFile({"restore-removed-b", 48000, 16, 2, 0.3});
     setUp({a, b});
@@ -1263,19 +1347,18 @@ TEST_F(LibraryPlaybackTest, AQueueSavedWithARemovedDecoderRestoresWithTheSetting
     store->write([](sqlite::Database& db) { db.exec("UPDATE queue SET decoder=6+2*(position>0)"); }).get();
     server = std::make_unique<LocalServer>(withoutAutoplay(), dir / "db" / "settings.json",
                                            [&](const Settings&) { return createCaptureOutput(options); });
-    server->waitIdle();
-    const auto s = server->snapshot();
+    api().waitIdle();
+    const auto s = api().snapshot();
     ASSERT_EQ(s.queue.entries.size(), 2u);
     for (const auto& entry : s.queue.entries) EXPECT_FALSE(entry.source.decoder());
 }
 
-TEST_F(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLength) {
+TEST_P(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLength) {
     const auto a = testutil::generatedFile({"play-gapless-a", 48000, 16, 2, 0.6});
     const auto b = testutil::generatedFile({"play-gapless-b", 48000, 16, 2, 0.4});
     setUp({a, b});
     send(queueReplace({track(a), track(b)}));
-    ASSERT_TRUE(
-        waitFor([&] { return stopped() && server->snapshot().queueEntryId == server->snapshot().queue.entries.back().id; }));
+    ASSERT_TRUE(waitFor([&] { return stopped() && api().snapshot().queueEntryId == api().snapshot().queue.entries.back().id; }));
     const auto statistics = plays(2);
     ASSERT_EQ(statistics.history.size(), 2u);
     EXPECT_EQ(statistics.history[0].track.file, file(b)); // newest first
@@ -1286,26 +1369,26 @@ TEST_F(LibraryPlaybackTest, GaplessTransitionsRecordEachTrackOnceWithItsFullLeng
     EXPECT_EQ(statistics.overview.plays, 2);
 }
 
-TEST_F(LibraryPlaybackTest, EachRepeatOneLoopIsANewPlay) {
+TEST_P(LibraryPlaybackTest, EachRepeatOneLoopIsANewPlay) {
     const auto a = testutil::generatedFile({"play-repeat", 48000, 16, 2, 0.4});
     setUp({a});
     Command repeat = command(CommandKind::SetRepeat);
     repeat.repeat = RepeatMode::One;
     send(repeat);
     send(queueReplace({track(a)}));
-    ASSERT_TRUE(waitFor([&] { return server->playStatistics({}).overview.plays >= 3; }));
+    ASSERT_TRUE(waitFor([&] { return api().playStatistics({}).overview.plays >= 3; }));
     send(command(CommandKind::Stop));
-    const auto statistics = server->playStatistics({});
+    const auto statistics = api().playStatistics({});
     EXPECT_EQ(statistics.tracks.size(), 1u);
     EXPECT_GE(statistics.tracks[0].plays, 3);
     EXPECT_GE(statistics.historyTotal, 3);
 }
 
-TEST_F(LibraryPlaybackTest, ASeekForwardCreditsOnlyTheAudioActuallyHeard) {
+TEST_P(LibraryPlaybackTest, ASeekForwardCreditsOnlyTheAudioActuallyHeard) {
     const auto a = testutil::generatedFile({"play-seek", 48000, 16, 2, 3.0});
     setUp({a});
     send(queueReplace({track(a)}));
-    ASSERT_TRUE(waitFor([&] { return server->snapshot().playback.position >= 9600; })); // 0.2 s
+    ASSERT_TRUE(waitFor([&] { return api().snapshot().playback.position >= 9600; })); // 0.2 s
     Command seek = command(CommandKind::Seek);
     seek.frame = 48000 * 27 / 10;
     send(seek);
@@ -1317,16 +1400,16 @@ TEST_F(LibraryPlaybackTest, ASeekForwardCreditsOnlyTheAudioActuallyHeard) {
     EXPECT_FALSE(statistics.history[0].counted); // well below half of three seconds
 }
 
-TEST_F(LibraryPlaybackTest, ADecodeFailureKeepsOnlyTheAudioHeardBeforeIt) {
+TEST_P(LibraryPlaybackTest, ADecodeFailureKeepsOnlyTheAudioHeardBeforeIt) {
     // The engine stops as soon as decoding fails, discarding predecoded audio, so little of the file is ever heard.
     const auto truncated = testutil::tempDir() / "play-truncated.flac";
     testaudio::writeTruncated(testutil::generatedFile({"play-truncated-source", 48000, 16, 2, 6.0}), truncated, 0.9);
     setUp({truncated});
     send(queueReplace({track(truncated)}));
     ASSERT_TRUE(waitFor([&] { return stopped(); }));
-    EXPECT_EQ(server->snapshot().playback.error, ErrorCode::DecodeFailed);
-    waitFor([&] { return server->playStatistics({}).historyTotal > 0; }, 2s); // nothing heard records nothing
-    const auto statistics = server->playStatistics({});
+    EXPECT_EQ(api().snapshot().playback.error, ErrorCode::DecodeFailed);
+    waitFor([&] { return api().playStatistics({}).historyTotal > 0; }, 2s); // nothing heard records nothing
+    const auto statistics = api().playStatistics({});
     ASSERT_LE(statistics.history.size(), 1u);
     for (const auto& play : statistics.history) {
         EXPECT_LT(play.heardMs, 1000); // the rest of the six seconds is not credited
@@ -1334,17 +1417,17 @@ TEST_F(LibraryPlaybackTest, ADecodeFailureKeepsOnlyTheAudioHeardBeforeIt) {
     }
 }
 
-TEST_F(LibraryPlaybackTest, TheCountIsSavedWhilePlayingSoACrashCannotLoseIt) {
+TEST_P(LibraryPlaybackTest, TheCountIsSavedWhilePlayingSoACrashCannotLoseIt) {
     const auto a = testutil::generatedFile({"play-durable", 48000, 16, 2, 6.0});
     setUp({a});
     send(queueReplace({track(a)}));
     const auto sql = "SELECT COUNT(*) FROM play_events WHERE counted=1 AND file_id=" + std::to_string(file(a));
     ASSERT_TRUE(waitFor([&] { return store->openReader().scalar(sql) == 1; }, 10s));
-    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Playing); // persisted at 3 s, before the play ended
+    EXPECT_EQ(api().snapshot().playback.state, PlaybackState::Playing); // persisted at 3 s, before the play ended
     send(command(CommandKind::Stop));
 }
 
-TEST_F(LibraryPlaybackTest, PlaysGoWithARemovedRootAndTheRootAddedAgainStartsAfresh) {
+TEST_P(LibraryPlaybackTest, PlaysGoWithARemovedRootAndTheRootAddedAgainStartsAfresh) {
     const auto a = testutil::generatedFile({"play-root", 48000, 16, 2, 0.4});
     setUp({a});
     send(queueReplace({track(a)}));
@@ -1353,13 +1436,15 @@ TEST_F(LibraryPlaybackTest, PlaysGoWithARemovedRootAndTheRootAddedAgainStartsAfr
     Command remove = command(CommandKind::RemoveLibraryRoot);
     remove.rootId = root;
     ASSERT_FALSE(send(remove).commandError);
-    ASSERT_TRUE(waitFor([&] { return server->playStatistics({}).history.empty(); }));
-    EXPECT_EQ(server->playStatistics({}).overview.plays, 0);
+    ASSERT_TRUE(waitFor([&] { return api().playStatistics({}).history.empty(); }));
+    EXPECT_EQ(api().playStatistics({}).overview.plays, 0);
     ASSERT_TRUE(scanner->scan(scanner->addRoot(dir / "music")).complete);
     EXPECT_NE(file(a), 0);
-    EXPECT_TRUE(server->playStatistics({}).history.empty());
+    EXPECT_TRUE(api().playStatistics({}).history.empty());
     EXPECT_EQ(store->openReader().scalar("SELECT COUNT(*) FROM stats"), 0);
 }
+
+INSTANTIATE_TEST_SUITE_P(Through, LibraryPlaybackTest, ::testing::Values(false, true), throughName);
 
 std::vector<int32_t> concatenatedReferences(const std::vector<std::filesystem::path>& files) {
     std::vector<int32_t> samples;
@@ -1383,7 +1468,7 @@ std::vector<int32_t> capturedSamples(const std::filesystem::path& capture) {
 }
 
 // A queue of over 2000 entries reads availability only when files or roots change, which removing a root does.
-TEST_F(ServerTest, RemovingTheRootOfALargeQueueEmptiesIt) {
+TEST_P(ServerTest, RemovingTheRootOfALargeQueueEmptiesIt) {
     const auto dir = testutil::tempDir() / "server-removed-root-large";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "music");
@@ -1402,13 +1487,13 @@ TEST_F(ServerTest, RemovingTheRootOfALargeQueueEmptiesIt) {
     remove.rootId = root;
     ASSERT_FALSE(send(remove).commandError);
     const auto emptied = std::chrono::steady_clock::now() + 3s;
-    while (!server->snapshot().queue.entries.empty() && std::chrono::steady_clock::now() < emptied)
+    while (!api().snapshot().queue.entries.empty() && std::chrono::steady_clock::now() < emptied)
         std::this_thread::sleep_for(10ms);
-    EXPECT_TRUE(server->snapshot().queue.entries.empty());
+    EXPECT_TRUE(api().snapshot().queue.entries.empty());
     server.reset();
 }
 
-TEST_F(ServerTest, RemovingThePlayingTracksRootFinishesTheTrackAndEmptiesTheQueue) {
+TEST_P(ServerTest, RemovingThePlayingTracksRootFinishesTheTrackAndEmptiesTheQueue) {
     const auto dir = testutil::tempDir() / "server-removed-root";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "music");
@@ -1443,23 +1528,23 @@ TEST_F(ServerTest, RemovingThePlayingTracksRootFinishesTheTrackAndEmptiesTheQueu
     EXPECT_EQ(removed.playback.state, PlaybackState::Playing);
     EXPECT_FALSE(removed.queue.upcomingEntryId);
     const auto end = std::chrono::steady_clock::now() + 5s;
-    while (server->snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {
+    while (api().snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {
         pull();
         std::this_thread::sleep_for(1ms);
     }
-    EXPECT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
+    EXPECT_EQ(api().snapshot().playback.state, PlaybackState::Stopped);
     EXPECT_TRUE(heard == concatenatedReferences({a}));
     const auto emptied = std::chrono::steady_clock::now() + 3s;
-    while (!server->snapshot().queue.entries.empty() && std::chrono::steady_clock::now() < emptied)
+    while (!api().snapshot().queue.entries.empty() && std::chrono::steady_clock::now() < emptied)
         std::this_thread::sleep_for(10ms);
-    EXPECT_TRUE(server->snapshot().queue.entries.empty());
+    EXPECT_TRUE(api().snapshot().queue.entries.empty());
     EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM files").value(), 0);
     ASSERT_TRUE(scanner.scan(scanner.addRoot(dir / "music")).complete);
-    EXPECT_TRUE(server->snapshot().queue.entries.empty());
+    EXPECT_TRUE(api().snapshot().queue.entries.empty());
     server.reset();
 }
 
-TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
+TEST_P(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
     const auto dir = testutil::tempDir() / "server-estimated-mp3";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "music");
@@ -1500,7 +1585,7 @@ TEST_F(ServerTest, PlaybackReplacesAnEstimatedMp3LengthWithTheExactOne) {
     server.reset();
 }
 
-TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) {
+TEST_P(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) {
     const auto dir = testutil::tempDir() / "server-play-statistics";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "music");
@@ -1514,7 +1599,7 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
                                            [&](const Settings&) { return std::make_unique<ManualOutput>(probe); });
     ASSERT_EQ(send(queueReplace({TrackSource(toUtf8(path.wstring()))})).playback.state, PlaybackState::Playing);
     const auto end = std::chrono::steady_clock::now() + 10s;
-    while (server->snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {
+    while (api().snapshot().playback.state == PlaybackState::Playing && std::chrono::steady_clock::now() < end) {
         {
             std::lock_guard lock(probe.renderMutex);
             if (probe.source) {
@@ -1524,9 +1609,9 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
         }
         std::this_thread::sleep_for(10ms); // about real time, so the Server observes continuous playback
     }
-    ASSERT_EQ(server->snapshot().playback.state, PlaybackState::Stopped);
-    server->waitIdle();
-    const auto statistics = server->playStatistics({});
+    ASSERT_EQ(api().snapshot().playback.state, PlaybackState::Stopped);
+    api().waitIdle();
+    const auto statistics = api().playStatistics({});
     ASSERT_EQ(statistics.history.size(), 1u);
     EXPECT_EQ(statistics.history[0].track, (LibraryTrackKey{file}));
     EXPECT_TRUE(statistics.history[0].counted);
@@ -1535,22 +1620,22 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
     EXPECT_EQ(store.openReader().scalar("SELECT play_count FROM stats WHERE file_id=" + std::to_string(file)), 1);
 
     Command reset = command(CommandKind::ResetPlayStatistics);
-    EXPECT_THROW(server->submit(reset), std::invalid_argument);
+    EXPECT_THROW(api().submit(reset), std::invalid_argument);
     reset.tracks = {{file}};
     ASSERT_FALSE(send(reset).commandError);
-    EXPECT_EQ(server->playStatistics({}).historyTotal, 0);
+    EXPECT_EQ(api().playStatistics({}).historyTotal, 0);
     EXPECT_EQ(store.openReader().scalar("SELECT play_count+listened_ms FROM stats WHERE file_id=" + std::to_string(file)), 0);
     Command all = command(CommandKind::ResetAllPlayStatistics);
     all.tracks = {{file}};
-    EXPECT_THROW(server->submit(all), std::invalid_argument);
+    EXPECT_THROW(api().submit(all), std::invalid_argument);
     all.tracks.clear();
     EXPECT_FALSE(send(all).commandError);
 
     Command favorite = command(CommandKind::SetFavorite);
-    EXPECT_THROW(server->submit(favorite), std::invalid_argument);
+    EXPECT_THROW(api().submit(favorite), std::invalid_argument);
     favorite.tracks = {{file}};
     favorite.favorite = true;
-    const auto marks = server->snapshot().queue.marks;
+    const auto marks = api().snapshot().queue.marks;
     const auto marked = send(favorite);
     EXPECT_FALSE(marked.commandError);
     ASSERT_EQ(marked.queue.entries.size(), 1u);
@@ -1559,20 +1644,22 @@ TEST_F(ServerTest, PlayingALibraryTrackRecordsOneCountedSessionThatResetClears) 
     EXPECT_GT(marked.queue.marks, marks);
     Command album = command(CommandKind::SetAlbumFavorite);
     album.favorite = true;
-    EXPECT_THROW(server->submit(album), std::invalid_argument);
+    EXPECT_THROW(api().submit(album), std::invalid_argument);
     album.albums = {store.openReader().scalar("SELECT album_id FROM tracks").value()};
     EXPECT_FALSE(send(album).commandError);
     EXPECT_EQ(store.openReader().scalar("SELECT album_favorite FROM stats WHERE file_id=" + std::to_string(file)), 1);
     Command artist = command(CommandKind::SetArtistFavorite);
     artist.favorite = true;
-    EXPECT_THROW(server->submit(artist), std::invalid_argument);
+    EXPECT_THROW(api().submit(artist), std::invalid_argument);
     artist.artists = {{LibraryGroupField::Genre, "Rock"}};
-    EXPECT_THROW(server->submit(artist), std::invalid_argument);
+    EXPECT_THROW(api().submit(artist), std::invalid_argument);
     artist.artists = {{LibraryGroupField::Composer, "Someone"}};
     EXPECT_FALSE(send(artist).commandError);
     EXPECT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM favorite_names WHERE field='composer' AND name='Someone'"), 1);
     server.reset();
 }
+
+INSTANTIATE_TEST_SUITE_P(Through, ServerTest, ::testing::Values(false, true), throughName);
 
 TEST(ServerGaplessTest, ReorderReplacesTheQueuedFileNotTheOneAlreadyDecoding) {
     const std::vector<std::filesystem::path> files = {testutil::testFile("24-96k"),
