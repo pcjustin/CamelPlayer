@@ -6,12 +6,15 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <nlohmann/json.hpp>
 
 #include "Server/Playback/LocalServer.h"
+#include "Server/Remote/ApiSession.h"
 
 namespace camel::server {
 
@@ -26,8 +29,13 @@ public:
         int portsToTry = 10;   // the next ones when another program holds it
         bool loopbackOnly = false;
         std::string serverId, serverName;
-        std::filesystem::path uploads;  // where uploaded playlists are kept
-        std::filesystem::path pairings; // the paired devices; in memory when empty
+        std::filesystem::path uploads;                      // where uploaded playlists are kept
+        std::filesystem::path pairings;                     // the paired devices; in memory when empty
+        uint32_t apiMin = kApiOldest, apiMax = kApiVersion; // the API versions served
+        std::string appVersion;                             // this CamelPlayer's, told to Control points
+        // Calls of the Server's computer rather than of its IServer, such as updating it; nothing for one it does not
+        // know. They run as the caller (Caller.h).
+        std::function<std::optional<ApiSession::Answer>(const std::string& call, const nlohmann::json& args)> calls;
     };
 
     // Starts listening; throws std::runtime_error when none of the ports is free.

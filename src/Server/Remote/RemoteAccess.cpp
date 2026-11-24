@@ -16,6 +16,7 @@
 
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
+#include "Server/Api/Caller.h"
 #include "Server/Remote/Discovery.h"
 
 namespace camel::server {
@@ -72,6 +73,8 @@ struct RemoteAccess::Impl {
         served.loopbackOnly = options.loopbackOnly;
         served.serverId = id;
         served.serverName = options.name;
+        served.appVersion = options.appVersion;
+        served.calls = [this](const std::string& call, const nlohmann::json&) { return updateCall(call); };
         if (!options.data.empty()) {
             served.uploads = options.data / L"uploads";
             served.pairings = options.data / L"pairings.json";
@@ -109,6 +112,56 @@ struct RemoteAccess::Impl {
         if (!api) throw std::runtime_error("Server API: other computers may not control this one");
         return f(*api);
     }
+
+    std::mutex installMutex;
+    Install install;
+
+    // Whether only an administrator may change the program folder, as under Program Files.
+    bool needsAdministrator() const {
+        if (options.programDirectory.empty()) return false;
+        const auto probe = options.programDirectory / L"camelplayer-update-check";
+        const HANDLE file = CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_ACCESS_DENIED;
+        CloseHandle(file);
+        return false;
+    }
+
+    // Update Server from a Control point (docs/Plan.md §17.8): the Server looks for the release on GitHub itself,
+    // says what stops, and installs it with its own updater.
+    std::optional<ApiSession::Answer> updateCall(const std::string& call) {
+        if (call == "serverUpdate") {
+            nlohmann::json state{{"version", options.appVersion},
+                                 {"release", nullptr},
+                                 {"administrator", needsAdministrator()},
+                                 {"playing", nlohmann::json::array()},
+                                 {"connected", nlohmann::json::array()}};
+            if (const auto release = update::check(options.appVersion))
+                state["release"] = {{"version", release->version}, {"notes", release->notes}};
+            for (const auto& zone : server.snapshot().zones)
+                if (zone.playback.state == PlaybackState::Playing) state["playing"].push_back(zone.name);
+            for (const auto& device : withApi([](ApiServer& api) { return api.pairedDevices(); }))
+                if (device.value("connected", false) && device.value("id", std::string()) != currentCaller().device)
+                    state["connected"].push_back(device.value("name", std::string()));
+            return ApiSession::Answer{std::move(state), {}};
+        }
+        if (call == "updateServer") {
+            const auto release = update::check(options.appVersion);
+            if (!release) throw std::invalid_argument("CamelPlayer is up to date");
+            if (needsAdministrator()) throw std::logic_error("the program folder needs an administrator");
+            Install installing;
+            {
+                std::lock_guard lock(installMutex);
+                installing = install;
+            }
+            if (!installing) throw std::logic_error("CamelPlayer cannot install an update now");
+            log::info("update: %s asked for %s", currentCaller().name.c_str(), release->version.c_str());
+            auto prepared = update::prepare(*release, {}, {});
+            return ApiSession::Answer{nlohmann::json{{"version", release->version}},
+                                      [installing, release = *release, prepared] { installing(release, prepared); }};
+        }
+        return std::nullopt;
+    }
 };
 
 RemoteAccess::RemoteAccess(LocalServer& server, Options options) : impl_(std::make_unique<Impl>(server, std::move(options))) {
@@ -141,6 +194,11 @@ std::optional<uint16_t> RemoteAccess::port() const {
 
 const std::string& RemoteAccess::serverId() const {
     return impl_->id;
+}
+
+void RemoteAccess::setInstall(Install install) {
+    std::lock_guard lock(impl_->installMutex);
+    impl_->install = std::move(install);
 }
 
 std::string RemoteAccess::pairingCode() {

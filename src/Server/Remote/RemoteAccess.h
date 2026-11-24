@@ -12,6 +12,7 @@
 
 #include "Server/Remote/ApiServer.h"
 #include "Server/Remote/DevicePairing.h"
+#include "Server/Support/Updates.h"
 
 namespace camel::server {
 
@@ -25,7 +26,11 @@ public:
         uint16_t port = ApiServer::kPort;
         bool loopbackOnly = false;
         bool announce = true;
+        std::string appVersion;                 // this CamelPlayer's, which an update is looked for after
+        std::filesystem::path programDirectory; // one only an administrator may change is not updated from afar
     };
+    // Installs a verified release and exits, for the updater to start the new version (docs/Plan.md §8.6).
+    using Install = std::function<void(const update::Release&, const update::Prepared&)>;
     RemoteAccess(LocalServer& server, Options options);
     ~RemoteAccess() override; // as stop()
     RemoteAccess(const RemoteAccess&) = delete;
@@ -36,6 +41,8 @@ public:
     // The port served while other computers may control this one; nothing while they may not, or none was free.
     std::optional<uint16_t> port() const;
     const std::string& serverId() const;
+    // How a Control point's Update Server installs: the window's own way out.
+    void setInstall(Install install);
 
     // Throw std::runtime_error while the Server API is not served.
     std::string pairingCode() override;

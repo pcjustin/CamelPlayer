@@ -30,6 +30,7 @@
 #include "Common/util/Measure.h"
 #include "Common/util/StartWithWindows.h"
 #include "Common/util/Text.h"
+#include "Common/Version.h"
 
 namespace {
 
@@ -118,10 +119,19 @@ std::wstring instanceName() {
 
 enum class Unreached : uint8_t { Retry, PlayHere, Close };
 
-// A Server that cannot be reached, or no longer knows this computer, at the start of a Control point.
-Unreached askUnreached(bool notPaired, const std::string& server) {
-    const auto title = ui::format(notPaired ? L"Control_NotPairedTitle" : L"Control_UnreachedTitle", {camel::toWide(server)});
-    const auto text = ui::tr(notPaired ? L"Control_NotPairedText" : L"Control_UnreachedText");
+// Why a Control point's Server could not be used at the start.
+enum class Failed : uint8_t { Unreached, NotPaired, ServerTooOld, ThisTooOld };
+
+// A Server that cannot be reached, no longer knows this computer or shares no API version with it, at the start of a
+// Control point; only one that cannot be reached is worth trying again.
+Unreached askUnreached(Failed why, const std::string& server, const std::string& version) {
+    const wchar_t* titles[] = {L"Control_UnreachedTitle", L"Control_NotPairedTitle", L"Control_ServerTooOldTitle",
+                               L"Control_ThisTooOldTitle"};
+    const wchar_t* texts[] = {L"Control_UnreachedText", L"Control_NotPairedText", L"Control_ServerTooOldText",
+                              L"Control_ThisTooOldText"};
+    const auto title = ui::format(titles[size_t(why)], {camel::toWide(server)});
+    const auto text = ui::format(texts[size_t(why)], {camel::toWide(version), L"" CAMEL_VERSION_STRING});
+    const bool notPaired = why != Failed::Unreached;
     const auto retry = ui::tr(L"Error_LibraryRetry");
     const auto play = ui::tr(L"Control_PlayHere");
     const auto close = ui::tr(L"Error_LibraryClose");
@@ -155,6 +165,8 @@ std::shared_ptr<camel::server::IServer> reachControlled(camel::Settings& own, co
         return std::make_shared<camel::server::RemoteServer>(options);
     } catch (const camel::server::NotPaired&) {
         throw;
+    } catch (const camel::server::VersionMismatch&) {
+        throw;
     } catch (const std::exception& e) {
         camel::log::warn("control: %s:%u not reached: %s", own.controlled.host.c_str(), unsigned(own.controlled.port), e.what());
         for (const auto& found : camel::server::findServers(std::chrono::milliseconds(1500))) {
@@ -175,16 +187,21 @@ std::shared_ptr<camel::server::IServer> reachControlled(camel::Settings& own, co
 std::shared_ptr<camel::server::IServer> openControlled(camel::Settings& own, bool& closing) {
     const camel::server::ServerTokens tokens(camel::dataDirectory() / L"server-tokens");
     for (;;) {
-        bool notPaired = false;
+        Failed why = Failed::Unreached;
+        std::string version;
         try {
             return reachControlled(own, tokens.token(own.controlled.id).value_or(""));
         } catch (const camel::server::NotPaired&) {
             camel::log::warn("control: no longer paired with %s", own.controlled.name.c_str());
-            notPaired = true;
+            why = Failed::NotPaired;
+        } catch (const camel::server::VersionMismatch& e) {
+            camel::log::warn("control: %s (it runs %s)", e.what(), e.serverVersion.c_str());
+            why = e.serverOlder ? Failed::ServerTooOld : Failed::ThisTooOld;
+            version = e.serverVersion;
         } catch (const std::exception& e) {
             camel::log::warn("control: %s", e.what());
         }
-        switch (askUnreached(notPaired, own.controlled.name)) {
+        switch (askUnreached(why, own.controlled.name, version)) {
         case Unreached::Retry:
             continue;
         case Unreached::PlayHere:
@@ -292,6 +309,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         camel::server::RemoteAccess::Options options;
         options.data = camel::dataDirectory();
         options.name = camel::server::computerName();
+        options.appVersion = CAMEL_VERSION_STRING;
+        if (wchar_t program[MAX_PATH]; GetModuleFileNameW(nullptr, program, MAX_PATH))
+            options.programDirectory = std::filesystem::path(program).parent_path();
         access = std::make_shared<camel::server::RemoteAccess>(*local, options);
     }
     try {

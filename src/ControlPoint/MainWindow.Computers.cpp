@@ -26,6 +26,9 @@
 #include "Server/Remote/RemoteAccess.h"
 #include "Server/Remote/RemoteServer.h"
 #include "Server/Remote/ServerTokens.h"
+#include "Server/Support/Updates.h"
+#include "Common/Version.h"
+#include "MainWindowParts.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -35,6 +38,8 @@ using namespace camel::server;
 using ui::tr;
 
 namespace winrt::CamelPlayer::implementation {
+
+using namespace mainwindow;
 
 namespace {
 
@@ -308,9 +313,26 @@ void MainWindow::showLink() {
     if (shownLink_ == link) return;
     shownLink_ = link;
     const auto name = toWide(settings_.controlled.name);
-    const bool refused = link == IServer::Link::Refused;
-    ConnectionBar().Title(ui::format(refused ? L"Link_RefusedTitle" : L"Link_LostTitle", {name}));
-    ConnectionBar().Message(tr(refused ? L"Link_RefusedText" : L"Link_LostText"));
+    const auto remote = std::dynamic_pointer_cast<RemoteServer>(server_);
+    const auto version = toWide(remote ? remote->serverVersion() : std::string());
+    switch (link) {
+    case IServer::Link::Refused:
+        ConnectionBar().Title(ui::format(L"Link_RefusedTitle", {name}));
+        ConnectionBar().Message(tr(L"Link_RefusedText"));
+        break;
+    case IServer::Link::ServerTooOld:
+        ConnectionBar().Title(ui::format(L"Control_ServerTooOldTitle", {name}));
+        ConnectionBar().Message(ui::format(L"Control_ServerTooOldText", {version, L"" CAMEL_VERSION_STRING}));
+        break;
+    case IServer::Link::ThisTooOld:
+        ConnectionBar().Title(ui::format(L"Control_ThisTooOldTitle", {name}));
+        ConnectionBar().Message(ui::format(L"Control_ThisTooOldText", {version, L"" CAMEL_VERSION_STRING}));
+        break;
+    default:
+        ConnectionBar().Title(ui::format(L"Link_LostTitle", {name}));
+        ConnectionBar().Message(tr(L"Link_LostText"));
+        break;
+    }
     ConnectionBar().IsOpen(link != IServer::Link::Connected);
 }
 
@@ -353,6 +375,27 @@ void MainWindow::showChanges(const Snapshot& snapshot) {
 
 void MainWindow::useRemoteAccess(std::shared_ptr<RemoteAccess> access) {
     access_ = std::move(access);
+    // A Control point's Update Server confirmed there what stops; this window only steps aside for the updater.
+    if (access_)
+        access_->setInstall(
+            [weak = get_weak(), queue = DispatcherQueue()](const update::Release& release, const update::Prepared& prepared) {
+                queue.TryEnqueue([weak, release, prepared] {
+                    const auto self = weak.get();
+                    if (!self) return;
+                    std::wstring executable(32768, L'\0');
+                    executable.resize(GetModuleFileNameW(nullptr, executable.data(), DWORD(executable.size())));
+                    try {
+                        update::startUpdater(std::filesystem::path(executable).parent_path(), prepared, dataDirectory(),
+                                             release.version, CAMEL_VERSION_STRING);
+                    } catch (const std::exception& e) {
+                        log::warn("update: %s", e.what());
+                        return;
+                    }
+                    log::info("update: CamelUpdater takes over to install %s", release.version.c_str());
+                    self->exiting_ = true;
+                    self->Close();
+                });
+            });
     populateComputers();
 }
 
@@ -373,6 +416,13 @@ void MainWindow::populateComputers() {
         AllowControlSwitch().OffContent(allow);
     }
     PlayHereButton().Visibility(remote ? Visibility::Visible : Visibility::Collapsed);
+    UpdateServerButton().Visibility(remote ? Visibility::Visible : Visibility::Collapsed);
+    // A Control point older than its Server offers to update itself (docs/Plan.md §17.8).
+    if (const auto theirs = remote ? update::parseVersion(remote->serverVersion()) : std::nullopt;
+        theirs && !offeredOwnUpdate_ && *theirs > update::parseVersion(CAMEL_VERSION_STRING).value_or(update::Version{})) {
+        offeredOwnUpdate_ = true;
+        checkForUpdates(true);
+    }
     AllowControlSwitch().IsOn(settings_.allowControl);
     AllowControlSwitch().IsEnabled(remote || access_);
     populating_ = wasPopulating;
@@ -680,6 +730,69 @@ winrt::fire_and_forget MainWindow::OnRenameDeviceClick(Windows::Foundation::IIns
     }
     RenameText().Visibility(Visibility::Collapsed);
     refreshComputers();
+}
+
+// Update Server (docs/Plan.md §17.8): the Server finds the release itself; what stops is said here first, and a Server
+// only an administrator may update is left to be updated at its own computer.
+winrt::fire_and_forget MainWindow::OnUpdateServerClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    const auto remote = std::dynamic_pointer_cast<RemoteServer>(server_);
+    if (!remote) co_return;
+    const auto name = toWide(settings_.controlled.name);
+    winrt::apartment_context foreground;
+    UpdateServerButton().IsEnabled(false);
+    co_await winrt::resume_background();
+    nlohmann::json state;
+    std::string failure;
+    try {
+        state = remote->serverUpdate();
+    } catch (const std::exception& e) {
+        failure = e.what();
+    }
+    co_await foreground;
+    UpdateServerButton().IsEnabled(true);
+    const auto root = ContentLayout().XamlRoot();
+    if (!failure.empty()) {
+        co_await ui::showDialog(textDialog(root, ui::format(L"UpdateServer_FailedTitle", {name}),
+                                           ui::format(L"UpdateServer_Failed", {name, toWide(failure)})));
+        co_return;
+    }
+    const auto current = toWide(state.value("version", std::string()));
+    if (state["release"].is_null()) {
+        co_await ui::showDialog(textDialog(root, ui::format(L"UpdateServer_UpToDateTitle", {name}),
+                                           ui::format(L"UpdateServer_UpToDateText", {current})));
+        co_return;
+    }
+    const auto version = toWide(state["release"].value("version", std::string()));
+    if (state.value("administrator", false)) {
+        co_await ui::showDialog(textDialog(root, ui::format(L"UpdateServer_AdministratorTitle", {name}),
+                                           ui::format(L"UpdateServer_AdministratorText", {version})));
+        co_return;
+    }
+    const auto listed = [&](const char* key) {
+        std::vector<std::wstring> names;
+        for (const auto& item : state.value(key, nlohmann::json::array())) names.push_back(toWide(item.get<std::string>()));
+        return lines(names);
+    };
+    std::wstring text(tr(L"UpdateServer_Text"));
+    if (const auto playing = listed("playing"); !playing.empty())
+        text += L"\n\n" + std::wstring(ui::format(L"UpdateServer_Playing", {playing}));
+    if (const auto connected = listed("connected"); !connected.empty())
+        text += L"\n\n" + std::wstring(ui::format(L"UpdateServer_Connected", {connected}));
+    auto dialog = question(root, ui::format(L"UpdateServer_Title", {name, version}), hstring(text), tr(L"UpdateServer_Button"));
+    if (co_await ui::showDialog(dialog) != ContentDialogResult::Primary) co_return;
+    UpdateServerButton().IsEnabled(false);
+    co_await winrt::resume_background();
+    try {
+        remote->updateServer();
+    } catch (const std::exception& e) {
+        failure = e.what();
+    }
+    co_await foreground;
+    UpdateServerButton().IsEnabled(true);
+    co_await ui::showDialog(textDialog(root, ui::format(L"UpdateServer_Title", {name, version}),
+                                       failure.empty() ? ui::format(L"UpdateServer_Started", {name, version})
+                                                       : ui::format(L"UpdateServer_Failed", {name, toWide(failure)})));
 }
 
 void MainWindow::OnControlAnotherClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {

@@ -24,6 +24,9 @@ namespace camel::server {
 
 // Version 2 has zones (docs/Plan.md §5.12).
 inline constexpr uint32_t kApiVersion = 2;
+// The oldest version a Server still serves (docs/Plan.md §17.8): kept for a while after a new one, so updating either
+// computer first keeps the link.
+inline constexpr uint32_t kApiOldest = 2;
 
 struct FrameRange {
     uint64_t first = 0;
@@ -582,7 +585,8 @@ public:
     // them, and a file chosen here is sent to it.
     virtual bool filesHere() const { return true; }
     // Whether it answers: another computer's Server may be lost for a while, or no longer know this device.
-    enum class Link : uint8_t { Connected, Lost, Refused };
+    // ServerTooOld and ThisTooOld: they share no API version, and the one named needs an update.
+    enum class Link : uint8_t { Connected, Lost, Refused, ServerTooOld, ThisTooOld };
     virtual Link link() const { return Link::Connected; }
     // The Server's drives for an empty path, the shares of `\\computer`, else the folders in `pathUtf8`, by name; throws
     // std::runtime_error for one that cannot be listed. Its Windows user's rights decide what it reaches.

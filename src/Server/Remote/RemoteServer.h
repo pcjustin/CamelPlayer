@@ -34,6 +34,17 @@ public:
     int64_t until = 0;
 };
 
+// The Server serves no API version this Control point speaks (docs/Plan.md §17.8): `serverOlder` when the Server needs
+// an update, else this computer does.
+class VersionMismatch : public std::runtime_error {
+public:
+    VersionMismatch(bool older, std::string version)
+        : std::runtime_error(older ? "Server API: the Server needs an update" : "Server API: this computer needs an update"),
+          serverOlder(older), serverVersion(std::move(version)) {}
+    bool serverOlder = false;
+    std::string serverVersion; // the Server's CamelPlayer
+};
+
 // Another computer's CamelPlayer through the Server API (docs/Plan.md §17.8, docs/Server-API.md), the same IServer
 // the window uses for its own: calls go out as JSON and wait for their answers, each on the caller's thread; the
 // Server's events come in pushed and keep the snapshot; covers, uploads and downloads go over plain HTTP.
@@ -48,6 +59,7 @@ public:
         // A Control point's own settings.json: what belongs to its computer (copyComputerSettings) is read from it and
         // saved to it, never to the Server, whose settings show for the rest. Empty shows the Server's alone.
         std::filesystem::path ownSettings;
+        uint32_t apiVersion = kApiVersion; // the version spoken, another only in tests
     };
     // Connects and waits for the Server's first snapshot; throws NotPaired without a token the Server knows, and
     // std::runtime_error when it cannot connect.
@@ -58,8 +70,14 @@ public:
 
     bool connected() const;
     Link link() const override;
-    nlohmann::json hello() const; // what the Server said of itself as the connection opened
-    std::string device() const;   // this device's ID, as the Server knows it
+    nlohmann::json hello() const;      // what the Server said of itself as the connection opened
+    std::string device() const;        // this device's ID, as the Server knows it
+    std::string serverVersion() const; // the Server's CamelPlayer version, as it said
+    // Update Server (docs/Plan.md §17.8): what an update of the Server would be, {"version", "release" (null or
+    // {"version", "notes"}), "administrator", "playing", "connected"}, and having it install the release, after which
+    // it restarts and this connection is made again.
+    nlohmann::json serverUpdate();
+    std::string updateServer();
 
     struct Paired {
         std::string token, device;

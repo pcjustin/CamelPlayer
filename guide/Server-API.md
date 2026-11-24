@@ -59,6 +59,8 @@ A paired device may make these calls on the WebSocket:
 | `resetOwner` | | `null`; every device is forgotten and cut off, the caller included, and the next to ask claims the Server |
 | `follow` | zone | `null`; the zone the caller follows, which `pairedDevices` shows |
 | `renameDevice` | name | `{"name": …}`, or `{"error": "nameTaken", "suggestion": …}` when another paired device has it |
+| `serverUpdate` | | `{"version", "release", "administrator", "playing", "connected"}`: the Server's CamelPlayer version; the newer release it finds on GitHub as `{"version", "notes"}`, or `null`; whether its program folder needs an administrator, in which case it is updated only at its own computer; the names of the zones playing and of the other devices connected, which an update stops and cuts off |
+| `updateServer` | | `{"version": …}` once the Server has downloaded and checked the release; it then installs it with its own updater and restarts, its queues paused. `invalidArgument` when it is up to date, `notAllowed` when its program folder needs an administrator |
 
 ## The WebSocket
 
@@ -67,8 +69,10 @@ Open a WebSocket at `ws://<host>:<port>/api` (RFC 6455, version 13). Every messa
 Once the connection is open, the Server sends a `hello` message and then its first snapshot:
 
 ```json
-{"hello": {"api": {"min": 2, "max": 2}, "server": {"id": "…", "name": "Study PC"}, "device": "…"}}
+{"hello": {"api": {"min": 2, "max": 2}, "server": {"id": "…", "name": "Study PC", "version": "0.6.0"}, "device": "…"}}
 ```
+
+`api` is the range of API versions the Server serves: after a new version it keeps serving the one before for a while, so updating either computer first keeps the link. A Control point whose version is outside the range closes the connection and says which side needs an update: the Server when its own version is above `max`, itself when below `min`. `version` is the Server's CamelPlayer release.
 
 `device` is the ID the Server gave the connecting device when it paired, as `pairedDevices` lists it.
 

@@ -78,6 +78,7 @@ struct RemoteServer::Impl {
     std::map<uint64_t, Reply> pending;
     uint64_t lastCall = 0;
     bool connected = false, refused = false, stopping = false;
+    std::optional<bool> serverOlder;      // they share no API version: whether the Server is the one to update
     std::optional<Snapshot> current, raw; // as shown, and as the Server sent it
     std::function<void(const Event&)> listener;
     std::function<void(const json&)> noticeListener;
@@ -337,8 +338,18 @@ struct RemoteServer::Impl {
     void handle(const std::string& text) {
         json j = json::parse(text);
         if (j.contains("hello")) {
-            std::lock_guard lock(mutex);
-            hello = j["hello"];
+            {
+                std::lock_guard lock(mutex);
+                hello = j["hello"];
+                const auto api = hello.value("api", json::object());
+                if (options.apiVersion > api.value("max", 0U))
+                    serverOlder = true;
+                else if (options.apiVersion < api.value("min", 0U))
+                    serverOlder = false;
+                if (serverOlder) refused = true;
+            }
+            changed.notify_all();
+            if (serverOlder) throw std::runtime_error("Server API: no version in common");
             return;
         }
         if (j.contains("notice")) {
@@ -472,8 +483,15 @@ RemoteServer::RemoteServer(Options options) : impl_(std::make_shared<Impl>(std::
     impl_->open();
     impl_->reader = std::thread([impl = impl_.get()] { impl->run(); });
     std::unique_lock lock(impl_->mutex);
-    if (!impl_->changed.wait_for(lock, impl_->options.timeout, [this] { return impl_->current || !impl_->connected; }) ||
-        !impl_->current) {
+    const bool answered = impl_->changed.wait_for(lock, impl_->options.timeout,
+                                                  [this] { return impl_->current || !impl_->connected || impl_->serverOlder; });
+    if (const auto older = impl_->serverOlder) {
+        const auto version = impl_->hello.contains("server") ? impl_->hello["server"].value("version", std::string()) : "";
+        lock.unlock();
+        shutdown();
+        throw VersionMismatch(*older, version);
+    }
+    if (!answered || !impl_->current) {
         lock.unlock();
         shutdown();
         throw std::runtime_error("Server API: the Server sent no state");
@@ -491,7 +509,21 @@ bool RemoteServer::connected() const {
 
 IServer::Link RemoteServer::link() const {
     std::lock_guard lock(impl_->mutex);
+    if (impl_->serverOlder) return *impl_->serverOlder ? Link::ServerTooOld : Link::ThisTooOld;
     return impl_->connected ? Link::Connected : impl_->refused ? Link::Refused : Link::Lost;
+}
+
+std::string RemoteServer::serverVersion() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->hello.contains("server") ? impl_->hello["server"].value("version", std::string()) : std::string();
+}
+
+json RemoteServer::serverUpdate() {
+    return impl_->call("serverUpdate", json::array(), {});
+}
+
+std::string RemoteServer::updateServer() {
+    return impl_->call("updateServer", json::array(), {}).at("version").get<std::string>();
 }
 
 json RemoteServer::hello() const {

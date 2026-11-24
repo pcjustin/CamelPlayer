@@ -122,7 +122,7 @@ std::string partsReadBackOtherwise(const SettingsDto& sent, const SettingsDto& b
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion != kApiVersion || c.kind > CommandKind::Transfer)
+    if (c.apiVersion < kApiOldest || c.apiVersion > kApiVersion || c.kind > CommandKind::Transfer)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;

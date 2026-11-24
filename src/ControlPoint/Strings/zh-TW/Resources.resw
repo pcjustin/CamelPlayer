@@ -1134,4 +1134,23 @@
   <data name="Paired_ConnectedZone" xml:space="preserve"><value>{0} · 目前已連線 · 跟隨 {1}</value></data>
   <data name="Settings_DeviceName.Header" xml:space="preserve"><value>這台電腦的名稱（已配對的裝置會這樣列出它）</value></data>
   <data name="Settings_RenameDevice.Content" xml:space="preserve"><value>重新命名</value></data>
+  <data name="Control_ServerTooOldTitle" xml:space="preserve"><value>{0} 上的 CamelPlayer 需要更新</value></data>
+  <data name="Control_ServerTooOldText" xml:space="preserve"><value>它的版本是 CamelPlayer {0}，這台電腦的 CamelPlayer {1} 已無法控制它。請在那台電腦更新後再試一次。</value></data>
+  <data name="Control_ThisTooOldTitle" xml:space="preserve"><value>這台電腦的 CamelPlayer 需要更新，才能控制 {0} 上的 CamelPlayer</value></data>
+  <data name="Control_ThisTooOldText" xml:space="preserve"><value>那台電腦的版本是 CamelPlayer {0}，這台是 {1}。請先在這台電腦播放音樂，再到「設定 › 關於」更新。</value></data>
+  <data name="Settings_UpdateServer.Content" xml:space="preserve"><value>更新那台電腦上的 CamelPlayer…</value></data>
+  <data name="UpdateServer_UpToDateTitle" xml:space="preserve"><value>{0} 上的 CamelPlayer 已是最新版</value></data>
+  <data name="UpdateServer_UpToDateText" xml:space="preserve"><value>它的版本是 CamelPlayer {0}，就是最新的版本。</value></data>
+  <data name="UpdateServer_AdministratorTitle" xml:space="preserve"><value>請在 {0} 上更新 CamelPlayer</value></data>
+  <data name="UpdateServer_AdministratorText" xml:space="preserve"><value>CamelPlayer {0} 已經推出，但那台電腦的 CamelPlayer 位於只有系統管理員能修改的資料夾，只能在那台電腦上允許。</value></data>
+  <data name="UpdateServer_Title" xml:space="preserve"><value>把 {0} 上的 CamelPlayer 更新為 {1}？</value></data>
+  <data name="UpdateServer_Text" xml:space="preserve"><value>那台電腦會下載並檢查更新，然後重新啟動，佇列會暫停。它回來後，這台電腦會自動重新連線。</value></data>
+  <data name="UpdateServer_Playing" xml:space="preserve"><value>這些區域正在播放，會停止：
+{0}</value></data>
+  <data name="UpdateServer_Connected" xml:space="preserve"><value>這些電腦會中斷，直到它回來：
+{0}</value></data>
+  <data name="UpdateServer_Button" xml:space="preserve"><value>更新</value></data>
+  <data name="UpdateServer_Started" xml:space="preserve"><value>{0} 上的 CamelPlayer 正在安裝 {1}，並會重新啟動。</value></data>
+  <data name="UpdateServer_FailedTitle" xml:space="preserve"><value>更新 {0} 上的 CamelPlayer</value></data>
+  <data name="UpdateServer_Failed" xml:space="preserve"><value>無法更新 {0} 上的 CamelPlayer：{1}</value></data>
 </root>

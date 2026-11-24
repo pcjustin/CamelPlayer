@@ -252,6 +252,8 @@ struct ApiServer::Impl {
             if (serial >= following.serial) following = {args.at(0).get<std::string>(), serial};
             return ApiSession::Answer{nullptr, {}};
         }
+        if (options.calls)
+            if (auto answer = options.calls(call, args)) return answer;
         if (call == "renameDevice") {
             const auto device = currentCaller().device;
             const auto name = args.at(0).get<std::string>();
@@ -309,8 +311,8 @@ struct ApiServer::Impl {
         auto connection = std::make_shared<Connection>(s, false, std::move(rest));
         auto session = std::make_shared<ApiSession>(
             server, [connection](const std::string& message) { connection->send(message); },
-            json{{"api", {{"min", 2}, {"max", 2}}},
-                 {"server", {{"id", options.serverId}, {"name", options.serverName}}},
+            json{{"api", {{"min", options.apiMin}, {"max", options.apiMax}}},
+                 {"server", {{"id", options.serverId}, {"name", options.serverName}, {"version", options.appVersion}}},
                  {"device", device}},
             [this](const std::string& call, const json& args) { return pairingCall(call, args); },
             Caller{device, deviceName(device), id});

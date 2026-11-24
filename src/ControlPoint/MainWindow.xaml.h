@@ -141,6 +141,8 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnPlayHereClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     winrt::fire_and_forget OnRenameDeviceClick(Windows::Foundation::IInspectable const&,
                                                Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnUpdateServerClick(Windows::Foundation::IInspectable const&,
+                                               Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnVolumeChanged(Windows::Foundation::IInspectable const&,
@@ -314,6 +316,7 @@ private:
     uint64_t shownNotice_ = 0;                  // the last change of no one zone shown or passed over
     uint64_t shownTransfer_ = 0;                // the last Transfer to… seen
     bool changesKnown_ = false;                 // the first snapshot set where the changes start
+    bool offeredOwnUpdate_ = false;             // this Control point, older than its Server, looked for its own update
     uint64_t settingsStamp_ = 0;                // the last settings this window sent
     camel::server::SettingsDto serverSettings_; // the Server's, as the last snapshot had them
     std::shared_ptr<camel::server::RemoteAccess> access_;

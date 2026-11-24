@@ -653,6 +653,7 @@
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button x:Uid="Settings_ControlAnother" Click="OnControlAnotherClick" />
                                     <Button x:Name="PlayHereButton" x:Uid="Settings_PlayHere" Click="OnPlayHereClick" Visibility="Collapsed" />
+                                    <Button x:Name="UpdateServerButton" x:Uid="Settings_UpdateServer" Click="OnUpdateServerClick" Visibility="Collapsed" />
                                 </StackPanel>
                                 <StackPanel Spacing="4">
                                     <ToggleSwitch x:Name="AllowControlSwitch" x:Uid="Settings_AllowControl" Toggled="OnAllowControlToggled" />
