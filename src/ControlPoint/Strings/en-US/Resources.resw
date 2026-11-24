@@ -787,7 +787,11 @@ Details: {0}</value></data>
   <data name="Zone_TransferHere" xml:space="preserve"><value>Transfer the queue here</value></data>
   <data name="Zone_OutputSettings" xml:space="preserve"><value>Output settings…</value></data>
   <data name="Zone_PlayName" xml:space="preserve"><value>{0} {1}</value></data>
-  <data name="Zone_GroupHeading" xml:space="preserve"><value>Receivers in this group</value></data>
+  <data name="Zone_Group" xml:space="preserve"><value>Group zones…</value></data>
+  <data name="Zone_GroupTitle" xml:space="preserve"><value>Group with {0}</value></data>
+  <data name="Zone_GroupText" xml:space="preserve"><value>Choose the AirPlay receivers that play with {0}. They play its queue in step, as one zone; each keeps its own level and its Stereo, Left or Right.</value></data>
+  <data name="Zone_GroupSave" xml:space="preserve"><value>Group</value></data>
+  <data name="Zone_Ungroup" xml:space="preserve"><value>Ungroup</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>Pause all</value></data>
   <data name="Zone_Offline" xml:space="preserve"><value>Not connected</value></data>
   <data name="Zone_InUseBy" xml:space="preserve"><value>In use by {0}</value></data>

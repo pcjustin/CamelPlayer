@@ -239,6 +239,17 @@ TEST(ApiJson, AddingALibraryRootRoundTripsItsPath) {
     EXPECT_THROW(commandFromJson(j), std::invalid_argument);
 }
 
+TEST(ApiJson, GroupingZonesRoundTripsTheZones) {
+    Command c;
+    c.kind = CommandKind::GroupZones;
+    c.zone = "airplay:A1";
+    c.zones = {"airplay:B2", "airplay:C3"};
+    EXPECT_EQ(throughText(c, commandFromJson), c);
+    auto j = toJson(c);
+    j["zones"] = json::array({1});
+    EXPECT_THROW(commandFromJson(j), std::invalid_argument);
+}
+
 // A wrong type or a number too large for its field is refused with std::invalid_argument, as every malformed value is,
 // not let through cut to fit or thrown as nlohmann's own error.
 TEST(ApiJson, AWrongTypeOrRangeIsRefusedAsMalformed) {

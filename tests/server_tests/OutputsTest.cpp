@@ -1017,6 +1017,71 @@ TEST(AirPlayGroupTest, AReceiverThatBecameUnsupportedLeavesTheGroup) {
     EXPECT_FALSE(saved(s, Backend::AirPlay, "HP-B")->enabled);
 }
 
+// Zone groups (MZ-R24): a zone not in use takes the others and is left alone again, each keeping its own entry.
+TEST(AirPlayGroupTest, AZoneNotInUseIsGroupedWithOthersAndUngrouped) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Asio, "a-dave", withReceivers());
+    setOutputEnabled(s, Backend::AirPlay, "HP-A", true, withReceivers());
+    EXPECT_TRUE(groupAirPlay(s, "HP-A", {"HP-B", "PAIR", "HP-B"}, withReceivers()).empty());
+    EXPECT_EQ(saved(s, Backend::AirPlay, "HP-A")->airplayGroup, (std::vector<std::string>{"HP-A", "HP-B", "PAIR"}));
+    EXPECT_EQ(withOutputParameters(s, Backend::AirPlay, "HP-A", withReceivers()).airplayGroup,
+              (std::vector<std::string>{"HP-A", "HP-B", "PAIR"}));
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "HP-B")->enabled);
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "PAIR")->enabled);
+    EXPECT_EQ(s.backend, Backend::Asio);
+    groupAirPlay(s, "HP-A", {"PAIR"}, withReceivers());
+    EXPECT_EQ(saved(s, Backend::AirPlay, "HP-A")->airplayGroup, (std::vector<std::string>{"HP-A", "PAIR"}));
+    groupAirPlay(s, "HP-A", {}, withReceivers());
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "HP-A")->airplayGroup.empty());
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "HP-B")->enabled);
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "PAIR")->enabled);
+}
+
+// A receiver of another group moves over; the receiver another group was formed with leaves it to the next.
+TEST(AirPlayGroupTest, AReceiverOfAnotherGroupMovesOverAndItsGroupGoesOnUnderTheNext) {
+    Settings s = fresh();
+    selectOutput(s, Backend::Asio, "a-dave", withReceivers());
+    groupAirPlay(s, "HP-B", {"PAIR"}, withReceivers());
+    groupAirPlay(s, "HP-A", {"PAIR"}, withReceivers());
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "HP-B")->airplayGroup.empty());
+    EXPECT_EQ(saved(s, Backend::AirPlay, "HP-A")->airplayGroup, (std::vector<std::string>{"HP-A", "PAIR"}));
+
+    groupAirPlay(s, "HP-A", {}, withReceivers());
+    groupAirPlay(s, "HP-B", {"PAIR"}, withReceivers());
+    std::ranges::find_if(s.outputs, [](const SavedOutput& o) { return o.id == "HP-B"; })->volumeDb = -21.0;
+    const auto moves = groupAirPlay(s, "HP-A", {"HP-B"}, withReceivers());
+    ASSERT_EQ(moves.size(), 1U);
+    EXPECT_EQ(moves[0].from, "HP-B");
+    EXPECT_EQ(moves[0].to, "PAIR");
+    EXPECT_EQ(saved(s, Backend::AirPlay, "PAIR")->volumeDb, -21.0);
+    EXPECT_TRUE(saved(s, Backend::AirPlay, "PAIR")->airplayGroup.empty());
+    EXPECT_EQ(saved(s, Backend::AirPlay, "HP-A")->airplayGroup, (std::vector<std::string>{"HP-A", "HP-B"}));
+}
+
+// The zone in use edits its own group; joining another, alone, it makes that one in use, and with a group of its own it
+// leaves that group to the next, which stays in use.
+TEST(AirPlayGroupTest, TheZoneInUseGroupsAndJoinsAnother) {
+    Settings s = fresh();
+    selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());
+    groupAirPlay(s, "HP-A", {"HP-B"}, withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A", "HP-B"}));
+    groupAirPlay(s, "HP-A", {}, withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+
+    groupAirPlay(s, "HP-B", {"HP-A"}, withReceivers());
+    EXPECT_EQ(s.airplay.deviceId, "HP-B");
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-B", "HP-A"}));
+
+    selectOutput(s, Backend::AirPlay, "PAIR", withReceivers());
+    groupAirPlay(s, "PAIR", {"HP-A"}, withReceivers());
+    EXPECT_EQ(group(s), (std::vector<std::string>{"PAIR", "HP-A"}));
+    EXPECT_EQ(saved(s, Backend::AirPlay, "HP-B")->airplayGroup, (std::vector<std::string>{}));
+    groupAirPlay(s, "HP-B", {"PAIR"}, withReceivers());
+    EXPECT_EQ(s.airplay.deviceId, "HP-A");
+    EXPECT_EQ(group(s), (std::vector<std::string>{"HP-A"}));
+    EXPECT_EQ(saved(s, Backend::AirPlay, "HP-B")->airplayGroup, (std::vector<std::string>{"HP-B", "PAIR"}));
+}
+
 TEST(AirPlayGroupTest, ChannelsAndTheGroupSurviveInTheSettingsFile) {
     Settings s = fresh();
     selectOutput(s, Backend::AirPlay, "HP-A", withReceivers());

@@ -18,6 +18,8 @@
 #include "Server/Network/AirPlayFinder.h"
 #include "Server/Playback/LocalServer.h"
 #include "Server/Playback/Outputs.h"
+#include "Server/Remote/ApiServer.h"
+#include "Server/Remote/RemoteServer.h"
 #include "TestUtil.h"
 
 using namespace camel;
@@ -188,6 +190,28 @@ protected:
         server.waitIdle();
     }
 
+    static Command group(const std::string& zone, const std::vector<std::string>& members) {
+        Command c;
+        c.kind = CommandKind::GroupZones;
+        c.zone = zone;
+        c.zones = members;
+        return c;
+    }
+
+    static Settings threeAlone() {
+        Settings settings;
+        settings.backend = Backend::AirPlay;
+        settings.airplay.deviceId = "A10000000001";
+        settings.outputs = {enabled(Backend::AirPlay, "A10000000001"), enabled(Backend::AirPlay, "B20000000002"),
+                            enabled(Backend::AirPlay, "C30000000003")};
+        settings.volume.mode = VolumeMode::Fixed;
+        for (auto& output : settings.outputs) output.volumeMode = VolumeMode::Fixed;
+        return settings;
+    }
+
+    const std::string a = zoneId(Backend::AirPlay, "A10000000001"), b = zoneId(Backend::AirPlay, "B20000000002"),
+                      c = zoneId(Backend::AirPlay, "C30000000003");
+
     // The loudest sample a receiver was sent.
     double peak(size_t receiver) const {
         int peakValue = 0;
@@ -221,7 +245,7 @@ TEST_F(AirPlayZonesTest, TwoGroupsPlayAtOnceAndAReceiverPlaysInOneOfThemOnly) {
     const auto a = zoneId(Backend::AirPlay, "A10000000001"), bZone = zoneId(Backend::AirPlay, "B20000000002");
     auto s = server->snapshot();
     ASSERT_EQ(s.zones.size(), 2U) << "C is in A's group, so not a zone";
-    EXPECT_EQ(in(s, a).name, "Receiver A + Receiver C");
+    EXPECT_EQ(in(s, a).name, "Receiver A + 1");
     EXPECT_EQ(in(s, bZone).name, "Receiver B");
     // A plays a loud tone, B a quiet one, so each receiver's packets tell which zone they came from.
     server->submit(playIn(a, testutil::generatedFile({"airplay-zone-loud", 44100, 16, 2, 20.0, true, -3.0})));
@@ -272,7 +296,7 @@ TEST_F(AirPlayZonesTest, AReceiverMovesFromAStoppedGroupIntoAnother) {
     }));
     auto s = server->snapshot();
     EXPECT_EQ(s.zones.size(), 2U);
-    EXPECT_EQ(in(s, a).name, "Receiver A + Receiver C");
+    EXPECT_EQ(in(s, a).name, "Receiver A + 1");
     EXPECT_EQ(in(s, bZone).name, "Receiver B");
     server->submit(playIn(a, testutil::generatedFile({"airplay-move-loud", 44100, 16, 2, 20.0, true, -3.0})));
     server->waitIdle();
@@ -319,6 +343,185 @@ TEST_F(AirPlayZonesTest, TheFirstReceiverTakenOutOfAPlayingGroupLeavesItsZoneToT
     const size_t aPackets = rtsp_[0].packetCount(), cPackets = rtsp_[2].packetCount();
     EXPECT_TRUE(waitFor([&] { return rtsp_[2].packetCount() > cPackets + 50; }));
     EXPECT_LT(rtsp_[0].packetCount(), aPackets + 10);
+    server->shutdown();
+}
+
+// Zones grouped as in Roon (MZ-R24): A, playing, takes B and C, which play its queue in step, named "Receiver A + 2";
+// ungrouped, A plays on with its queue and B and C are zones of their own again, stopped.
+TEST_F(AirPlayZonesTest, ZonesGroupedPlayTheQueueOfTheFirstWhichKeepsItWhenUngrouped) {
+    auto server = serverFor(threeAlone());
+    ASSERT_EQ(server->snapshot().zones.size(), 3U);
+    server->submit(playIn(a, testutil::generatedFile({"airplay-grouped", 44100, 16, 2, 30.0, true, -3.0})));
+    server->waitIdle();
+    ASSERT_TRUE(waitFor([&] { return playing(in(server->snapshot(), a)); }));
+    const auto before = in(server->snapshot(), a);
+    server->submit(group(a, {b, c}));
+    server->waitIdle();
+    auto s = server->snapshot();
+    EXPECT_FALSE(s.commandError);
+    ASSERT_EQ(s.zones.size(), 1U);
+    EXPECT_EQ(in(s, a).name, "Receiver A + 2");
+    EXPECT_EQ(nativeSettings(s.settings).airplayGroup,
+              (std::vector<std::string>{"A10000000001", "B20000000002", "C30000000003"}));
+    EXPECT_TRUE(waitFor([&] {
+        const auto now = server->snapshot();
+        return in(now, a).playback.receivers.size() == 3 && playing(in(now, a)) && rtsp_[1].packetCount() > 50 &&
+               rtsp_[2].packetCount() > 50;
+    }));
+    EXPECT_GT(peak(1), 0.5);
+    EXPECT_GT(peak(2), 0.5);
+    EXPECT_EQ(in(server->snapshot(), a).queue.entries, before.queue.entries);
+    EXPECT_EQ(in(server->snapshot(), a).queueEntryId, before.queueEntryId);
+
+    server->submit(group(a, {}));
+    server->waitIdle();
+    s = server->snapshot();
+    ASSERT_EQ(s.zones.size(), 3U);
+    EXPECT_EQ(in(s, a).name, "Receiver A");
+    EXPECT_EQ(in(s, a).queue.entries, before.queue.entries);
+    EXPECT_EQ(in(s, a).queueEntryId, before.queueEntryId);
+    for (const auto& other : {b, c}) {
+        EXPECT_EQ(in(s, other).playback.state, PlaybackState::Stopped);
+        EXPECT_TRUE(in(s, other).queue.entries.empty());
+    }
+    const size_t aPackets = rtsp_[0].packetCount(), bPackets = rtsp_[1].packetCount();
+    EXPECT_TRUE(waitFor([&] { return rtsp_[0].packetCount() > aPackets + 50; }));
+    const auto after = in(server->snapshot(), a).playback;
+    EXPECT_TRUE(after.state == PlaybackState::Playing && after.position > 0)
+        << int(after.state) << " at " << after.position << ": " << after.errorDetail;
+    EXPECT_LT(rtsp_[1].packetCount(), bPackets + 10);
+    server->shutdown();
+}
+
+// Each member keeps its own level and its channels in the group and after it; a zone not in use groups too.
+TEST_F(AirPlayZonesTest, EachMemberKeepsItsLevelAndChannels) {
+    auto settings = threeAlone();
+    for (auto& output : settings.outputs) output.volumeMode = VolumeMode::Player;
+    settings.volume.mode = VolumeMode::Player;
+    settings.outputs[2].airplay.channels = AirPlayChannels::Left;
+    auto server = serverFor(settings);
+    server->submit(group(b, {c}));
+    server->waitIdle();
+    ASSERT_TRUE(waitFor([&] { return in(server->snapshot(), b).playback.receivers.size() == 2; }));
+    EXPECT_EQ(server->snapshot().selectedZone, a);
+    Command level;
+    level.kind = CommandKind::SetReceiverVolume;
+    level.zone = b;
+    level.receiver = "C30000000003";
+    level.playerVolume = 30;
+    server->submit(level);
+    server->waitIdle();
+    const auto receiver = [&](const std::string& zone, const std::string& id) {
+        const auto receivers = in(server->snapshot(), zone).playback.receivers;
+        const auto found = std::ranges::find(receivers, id, &ReceiverState::id);
+        return found == receivers.end() ? ReceiverState{} : *found;
+    };
+    EXPECT_TRUE(waitFor([&] { return receiver(b, "C30000000003").level == 30U; }));
+    EXPECT_EQ(receiver(b, "C30000000003").channels, AirPlayChannels::Left);
+    EXPECT_EQ(receiver(b, "B20000000002").channels, AirPlayChannels::Stereo);
+    server->submit(group(b, {}));
+    server->waitIdle();
+    EXPECT_TRUE(waitFor([&] { return receiver(c, "C30000000003").level == 30U; }));
+    EXPECT_EQ(receiver(c, "C30000000003").channels, AirPlayChannels::Left);
+    server->shutdown();
+}
+
+// Zones group only with zones of their kind, and a zone playing apart is not taken; nothing changes.
+TEST_F(AirPlayZonesTest, AZoneOfAnotherKindOrPlayingApartIsNotGrouped) {
+    auto server = serverFor(threeAlone());
+    server->submit(group(a, {zoneId(Backend::Wasapi, "speakers")}));
+    server->waitIdle();
+    ASSERT_TRUE(server->snapshot().commandError);
+    EXPECT_NE(server->snapshot().commandError->detail.find("kinds"), std::string::npos);
+    server->submit(playIn(b, testutil::generatedFile({"airplay-apart", 44100, 16, 2, 30.0, true, -30.0})));
+    server->waitIdle();
+    ASSERT_TRUE(waitFor([&] { return playing(in(server->snapshot(), b)); }));
+    server->submit(group(a, {b, c}));
+    server->waitIdle();
+    const auto s = server->snapshot();
+    ASSERT_TRUE(s.commandError);
+    EXPECT_EQ(s.commandError->code, audio::ErrorCode::DeviceInUse);
+    EXPECT_EQ(s.commandError->detail, "in use by Receiver B");
+    EXPECT_EQ(s.zones.size(), 3U);
+    EXPECT_LT(nativeSettings(s.settings).airplayGroup.size(), 2U);
+    server->shutdown();
+}
+
+// A queue moved onto a group plays on all of its receivers, and moved from it plays on one alone, the group stopped.
+TEST_F(AirPlayZonesTest, AQueueMovesOntoAGroupAndFromIt) {
+    auto server = serverFor(threeAlone());
+    server->submit(group(a, {c}));
+    server->submit(playIn(b, testutil::generatedFile({"airplay-transferred", 44100, 16, 2, 30.0, true, -3.0})));
+    server->waitIdle();
+    ASSERT_TRUE(waitFor([&] { return playing(in(server->snapshot(), b)); }));
+    Command onto;
+    onto.kind = CommandKind::Transfer;
+    onto.zone = b;
+    onto.target = a;
+    server->submit(onto);
+    server->waitIdle();
+    ASSERT_TRUE(waitFor([&] {
+        const auto now = server->snapshot();
+        return playing(in(now, a)) && in(now, b).queue.entries.empty() && rtsp_[2].packetCount() > 50;
+    }));
+    EXPECT_GT(peak(2), 0.5);
+    Command from;
+    from.kind = CommandKind::Transfer;
+    from.zone = a;
+    from.target = b;
+    server->submit(from);
+    server->waitIdle();
+    ASSERT_TRUE(waitFor([&] {
+        const auto now = server->snapshot();
+        return playing(in(now, b)) && in(now, a).queue.entries.empty() && in(now, a).playback.state == PlaybackState::Stopped;
+    }));
+    const size_t cPackets = rtsp_[2].packetCount();
+    std::this_thread::sleep_for(500ms);
+    EXPECT_LT(rtsp_[2].packetCount(), cPackets + 10);
+    server->shutdown();
+}
+
+// A Control point on another computer groups zones, and one that followed a zone grouped into another follows the
+// group.
+TEST_F(AirPlayZonesTest, AControlPointFollowsTheGroupItsZoneJoined) {
+    auto server = serverFor(threeAlone());
+    const auto dir = testutil::tempDir() /
+                     ("airplay-group-point-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
+    std::filesystem::create_directories(dir);
+    ApiServer::Options options;
+    options.port = 0;
+    options.portsToTry = 1;
+    options.loopbackOnly = true;
+    options.serverId = "test-server";
+    options.serverName = "Test PC";
+    options.pairings = dir / "pairings.json";
+    ApiServer api(*server, options);
+    RemoteServer::Options remote;
+    remote.host = "127.0.0.1";
+    remote.port = api.port();
+    remote.cache = dir / "cache";
+    remote.token = RemoteServer::pair("127.0.0.1", api.port(), "Control 1", "").token;
+    remote.ownSettings = dir / "Control 1.json";
+    RemoteServer point(remote);
+    auto settings = nativeSettings(point.snapshot().settings);
+    selectOutput(settings, Backend::AirPlay, "B20000000002", point.snapshot().devices);
+    Command choose;
+    choose.kind = CommandKind::ApplySettings;
+    choose.settings = settingsDto(settings);
+    point.submit(choose);
+    point.waitIdle();
+    ASSERT_TRUE(waitFor([&] { return point.snapshot().selectedZone == b; }));
+    point.submit(group(a, {b}));
+    point.waitIdle();
+    EXPECT_TRUE(waitFor([&] {
+        const auto now = point.snapshot();
+        return now.selectedZone == a && in(now, a).name == "Receiver A + 1";
+    }));
+    EXPECT_EQ(server->snapshot().zones.size(), 2U);
+    point.submit(group(a, {}));
+    point.waitIdle();
+    EXPECT_TRUE(waitFor([&] { return server->snapshot().zones.size() == 3U; }));
+    EXPECT_EQ(point.snapshot().selectedZone, a);
     server->shutdown();
 }
 

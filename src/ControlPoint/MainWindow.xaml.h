@@ -440,9 +440,8 @@ private:
     winrt::fire_and_forget findOtherComputers();
     void showOtherComputers();
     void showZoneRows(const camel::server::Snapshot& snapshot);
-    void addReceiversRow(Microsoft::UI::Xaml::Controls::StackPanel const& content, const camel::server::Snapshot& snapshot,
-                         const std::vector<camel::server::OutputRow>& outputs);
     void fillZoneActions(Microsoft::UI::Xaml::Controls::MenuFlyout const& menu, const std::string& id);
+    winrt::fire_and_forget askGroupZones(std::string id);
     // Transfer to… (docs/Plan.md §5.12): the other zones, one of which takes `from`'s queue.
     void fillTransferMenu(Microsoft::UI::Xaml::Controls::MenuFlyoutSubItem const& menu, const std::string& from);
     winrt::fire_and_forget transferZone(std::string from, std::string to);

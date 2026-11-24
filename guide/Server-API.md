@@ -126,10 +126,10 @@ The snapshot holds every zone with its playback and its queue, the selected zone
 Several devices may control the Server at once, and each may follow a zone of its own; the selected zone is the Server's own window's. To tell its users what another device did:
 
 - each zone has `played`, the Server's count of starts when it last started playing, so the zone that started last has the most, and `change`, the last time a device paused it, stopped it or gave it another queue: `{"serial", "kind", "device", "name"}`, with `kind` one of `paused`, `stopped`, `replaced` and `transferred`, `device` the paired device's ID (empty for the Server's own window) and `name` its name;
-- `transfer` is the last Transfer to…, `{"serial", "from", "to"}`, which the devices that followed `from` follow to `to`;
+- `transfer` is the last Transfer to…, `{"serial", "from", "to"}`, which the devices that followed `from` follow to `to`; a device whose zone was grouped into another follows the group, the zone whose `playback.receivers` lists its receiver;
 - `notice` is the last change of no one zone, as `change` is with `kind` one of `deleted` (the output named in `zone`), `statisticsReset`, `libraryRebuilt` and `playbackReset`.
 
-A command's sender is the paired device of the connection it comes on; a command's own `device` is not read. An `ApplySettings` with `"reset": true` is Settings › Reset playback and output.
+A command's sender is the paired device of the connection it comes on; a command's own `device` is not read. An `ApplySettings` with `"reset": true` is Settings › Reset playback and output. A `groupZones` command names a zone and, in `zones`, the zones that play with it from then on, which an empty list ungroups; only AirPlay zones group, with each other, and a zone playing apart is refused, the snapshot's `commandError` saying `deviceInUse`.
 
 **Queues** are sent as what changed since the last event on the same connection:
 

@@ -787,7 +787,11 @@
   <data name="Zone_TransferHere" xml:space="preserve"><value>把佇列轉移到這裡</value></data>
   <data name="Zone_OutputSettings" xml:space="preserve"><value>輸出設定…</value></data>
   <data name="Zone_PlayName" xml:space="preserve"><value>{0} {1}</value></data>
-  <data name="Zone_GroupHeading" xml:space="preserve"><value>這個群組的接收器</value></data>
+  <data name="Zone_Group" xml:space="preserve"><value>組成群組…</value></data>
+  <data name="Zone_GroupTitle" xml:space="preserve"><value>與 {0} 組成群組</value></data>
+  <data name="Zone_GroupText" xml:space="preserve"><value>選擇要和 {0} 一起播放的 AirPlay 接收器。它們會像一個區域一樣同步播放 {0} 的佇列，各自保留自己的音量與立體聲、左聲道或右聲道。</value></data>
+  <data name="Zone_GroupSave" xml:space="preserve"><value>組成群組</value></data>
+  <data name="Zone_Ungroup" xml:space="preserve"><value>解散群組</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>全部暫停</value></data>
   <data name="Zone_Offline" xml:space="preserve"><value>未連線</value></data>
   <data name="Zone_InUseBy" xml:space="preserve"><value>{0} 正在使用</value></data>

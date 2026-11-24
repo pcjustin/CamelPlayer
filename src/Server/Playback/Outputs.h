@@ -66,6 +66,12 @@ void leaveAirPlayGroup(Settings& s, const std::string& owner, const std::string&
 // The group of `owner`, an AirPlay receiver not in use, goes on under the first receiver left, which takes the owner's
 // DSP, zone choices and volume; the owner is left alone (MZ-R08). Returns that receiver; empty when the owner was alone.
 std::string passAirPlayGroup(Settings& s, const std::string& owner);
+// The AirPlay zone of `first` plays as one group with `members` (MZ-R24), each taken out of the group it was in; a
+// receiver the group held and does not now is alone again, and no members ungroup it. A group a member was formed with
+// goes on under the next of its receivers (MZ-R08), which the moves name for its zone to follow. The receiver in use,
+// alone, joining makes `first` the one in use.
+std::vector<OutputMove> groupAirPlay(Settings& s, const std::string& first, const std::vector<std::string>& members,
+                                     const DeviceCatalog& devices);
 // A group receiver's channels: the one in use from Settings' fields, the others from their saved outputs.
 AirPlayChannels airplayChannels(const Settings& s, const std::string& id);
 // `s` as it would be with this output in use, for showing its parameters without leaving the one in use.

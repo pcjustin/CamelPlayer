@@ -1080,7 +1080,6 @@ void MainWindow::openZonePicker() {
         line.Children().Append(row.pause);
         content.Children().Append(line);
         zoneRows_.push_back(std::move(row));
-        if (selected) addReceiversRow(content, snapshot, outputs);
     }
     Border divider;
     divider.Height(1);
@@ -1199,60 +1198,6 @@ winrt::fire_and_forget MainWindow::findOtherComputers() {
     showOtherComputers();
 }
 
-// The selected AirPlay group's receivers, in a submenu under its row, which join and leave it; the last one stays. One
-// another group plays through is greyed and says which; one of a group that does not play moves from it into this one
-// (MZ-R08).
-void MainWindow::addReceiversRow(StackPanel const& content, const Snapshot& snapshot,
-                                 const std::vector<camel::server::OutputRow>& outputs) {
-    if (settings_.backend != Backend::AirPlay) return;
-    MenuFlyout receivers;
-    receivers.Placement(Primitives::FlyoutPlacementMode::RightEdgeAlignedTop);
-    const auto grouped = std::ranges::count_if(outputs, &camel::server::OutputRow::grouped);
-    for (const auto& output : outputs) {
-        if (!output.enabled || output.backend != Backend::AirPlay) continue;
-        const auto holder = std::ranges::find_if(snapshot.zones, [&](const ZoneSnapshot& z) {
-            return z.id != snapshot.selectedZone && z.backend == Backend::AirPlay &&
-                   (z.output == output.id ||
-                    std::ranges::find(z.playback.receivers, output.id, &ReceiverState::id) != z.playback.receivers.end());
-        });
-        const std::string from = holder == snapshot.zones.end() ? std::string() : holder->output;
-        const bool held = holder != snapshot.zones.end() && holder->playback.state == PlaybackState::Playing;
-        ToggleMenuFlyoutItem join;
-        join.Text(held ? ui::format(L"Zone_ReceiverInUse", {std::wstring(outputMenuText(output)), ui::utf8(holder->name).c_str()})
-                       : outputMenuText(output));
-        join.IsChecked(output.grouped);
-        join.IsEnabled(output.connected && !held && (!output.grouped || grouped >= 2));
-        join.Click([this, output, from](auto&&, auto&&) {
-            const auto change = [this, output, from] {
-                changeOutputs([&](camel::Settings& s, const DeviceCatalog& devices) {
-                    if (!output.grouped && from == output.id)
-                        camel::server::passAirPlayGroup(s, output.id);
-                    else if (!output.grouped && !from.empty())
-                        camel::server::leaveAirPlayGroup(s, from, output.id);
-                    camel::server::setInAirPlayGroup(s, output.id, !output.grouped, devices);
-                });
-                populateSettings();
-                if (zonePicker_) zonePicker_.Hide();
-            };
-            if (pairable(output) && !output.grouped)
-                askAirPlayPairing(output, outputLabel(output), change);
-            else
-                change();
-        });
-        receivers.Items().Append(join);
-    }
-    if (!receivers.Items().Size()) return;
-    FontIcon more;
-    more.Glyph(L"\xE76C");
-    more.FontSize(12);
-    TextBlock text;
-    text.Text(tr(L"Zone_GroupHeading"));
-    auto group = pickerRow(nullptr, text, more);
-    group.Padding(ThicknessHelper::FromLengths(15, 8, 11, 9)); // its text under the zone's name
-    group.Flyout(receivers);
-    content.Children().Append(group);
-}
-
 // A row's right-click menu: the zone the window follows sends its queue to another; another takes the queue here; and
 // each opens its output's settings.
 void MainWindow::fillZoneActions(MenuFlyout const& menu, const std::string& id) {
@@ -1282,6 +1227,20 @@ void MainWindow::fillZoneActions(MenuFlyout const& menu, const std::string& id) 
         menu.Items().Append(here);
     }
     const auto& output = row->output;
+    if (output.backend == Backend::AirPlay) {
+        const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
+        MenuFlyoutItem group;
+        group.Text(tr(L"Zone_Group"));
+        group.Icon(glyph(L"é02"));
+        group.IsEnabled(std::ranges::any_of(rows, [&](const camel::server::OutputRow& r) {
+            return r.backend == Backend::AirPlay && r.enabled && r.id != output.id;
+        }));
+        group.Click([this, id](auto&&, auto&&) {
+            if (zonePicker_) zonePicker_.Hide();
+            askGroupZones(id);
+        });
+        menu.Items().Append(group);
+    }
     if (output.backend == Backend::AirPlay && output.pair) return; // a stereo pair has nothing to set
     MenuFlyoutItem settings;
     settings.Text(tr(L"Zone_OutputSettings"));
@@ -1292,6 +1251,67 @@ void MainWindow::fillZoneActions(MenuFlyout const& menu, const std::string& id) 
                            output.backend == Backend::AirPlay ? outputMenuLabel(output) : outputLabel(output));
     });
     menu.Items().Append(settings);
+}
+
+// Zones grouped as in Roon (MZ-R24): the other AirPlay receivers, each a zone of its own or in a group, are ticked to
+// play with this zone's receiver, which keeps the queue. One a zone playing apart holds is greyed and says which; one of
+// a group that does not play moves from it.
+winrt::fire_and_forget MainWindow::askGroupZones(std::string id) {
+    auto strong = get_strong();
+    const auto snapshot = server_->snapshot();
+    const auto zone = std::ranges::find(snapshot.zones, id, &ZoneSnapshot::id);
+    if (zone == snapshot.zones.end()) co_return;
+    const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
+    const auto first = std::ranges::find_if(
+        rows, [&](const camel::server::OutputRow& r) { return r.backend == Backend::AirPlay && r.id == zone->output; });
+    if (first == rows.end()) co_return;
+    const std::wstring name(outputMenuLabel(*first));
+    const auto member = [](const ZoneSnapshot& z, const std::string& receiver) {
+        return z.output == receiver ||
+               std::ranges::find(z.playback.receivers, receiver, &ReceiverState::id) != z.playback.receivers.end();
+    };
+    ContentDialog dialog;
+    ui::placeDialog(dialog, ContentLayout().XamlRoot());
+    dialog.Title(box_value(ui::format(L"Zone_GroupTitle", {name})));
+    StackPanel content;
+    content.Spacing(8);
+    TextBlock explanation;
+    explanation.Text(ui::format(L"Zone_GroupText", {name}));
+    explanation.TextWrapping(TextWrapping::Wrap);
+    content.Children().Append(explanation);
+    std::vector<std::pair<std::string, CheckBox>> boxes;
+    for (const auto& row : rows) {
+        if (row.backend != Backend::AirPlay || !row.enabled || row.id == zone->output) continue;
+        const auto holder = std::ranges::find_if(snapshot.zones, [&](const ZoneSnapshot& z) {
+            return z.id != id && z.backend == Backend::AirPlay && z.playback.state == PlaybackState::Playing && member(z, row.id);
+        });
+        const bool held = holder != snapshot.zones.end();
+        CheckBox box;
+        box.Content(box_value(
+            held ? ui::format(L"Zone_ReceiverInUse", {std::wstring(outputMenuText(row)), std::wstring(ui::utf8(holder->name))})
+                 : outputMenuText(row)));
+        box.IsChecked(member(*zone, row.id));
+        box.IsEnabled(row.connected && row.unsupported.empty() && !held);
+        content.Children().Append(box);
+        boxes.emplace_back(row.id, box);
+    }
+    ScrollViewer scroll;
+    scroll.MaxHeight(420);
+    scroll.Content(content);
+    dialog.Content(scroll);
+    dialog.PrimaryButtonText(tr(L"Zone_GroupSave"));
+    if (zone->playback.receivers.size() > 1) dialog.SecondaryButtonText(tr(L"Zone_Ungroup"));
+    dialog.CloseButtonText(tr(L"Reset_Cancel"));
+    dialog.DefaultButton(ContentDialogButton::Primary);
+    const auto result = co_await ui::showDialog(dialog);
+    if (result == ContentDialogResult::None) co_return;
+    Command command;
+    command.kind = CommandKind::GroupZones;
+    command.zone = id;
+    if (result == ContentDialogResult::Primary)
+        for (const auto& [receiver, box] : boxes)
+            if (box.IsChecked().Value()) command.zones.push_back(zoneId(Backend::AirPlay, receiver));
+    submitCommand(std::move(command));
 }
 
 // What each row shows as the zones play: the zone the window follows marked, and for each its state or why it cannot

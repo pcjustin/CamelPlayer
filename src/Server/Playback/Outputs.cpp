@@ -466,6 +466,48 @@ std::string passAirPlayGroup(Settings& s, const std::string& owner) {
     return rest.front();
 }
 
+std::vector<OutputMove> groupAirPlay(Settings& s, const std::string& first, const std::vector<std::string>& members,
+                                     const DeviceCatalog& devices) {
+    std::vector<OutputMove> moves;
+    const auto inUse = [&](const std::string& id) { return s.backend == Backend::AirPlay && s.airplay.deviceId == id; };
+    const auto groupOf = [&](const std::string& id) {
+        if (inUse(id)) return s.airplayGroup;
+        const SavedOutput* saved = findOutput(s, Backend::AirPlay, id);
+        return saved ? saved->airplayGroup : std::vector<std::string>();
+    };
+    std::vector<std::string> group{first};
+    for (const auto& id : members)
+        if (!id.empty() && !holds(group, id)) group.push_back(id);
+    const auto before = groupOf(first);
+    bool joinedInUse = false;
+    for (size_t i = 1; i < group.size(); ++i) {
+        const std::string& id = group[i];
+        if (holds(before, id)) continue;
+        if (inUse(id) && s.airplayGroup.size() < 2)
+            joinedInUse = true;
+        else if (s.backend == Backend::AirPlay && holds(s.airplayGroup, id))
+            setInAirPlayGroup(s, id, false, devices);
+        for (const auto& saved : std::vector(s.outputs))
+            if (saved.backend == Backend::AirPlay && saved.id != first && holds(saved.airplayGroup, id)) {
+                if (saved.id != id)
+                    leaveAirPlayGroup(s, saved.id, id);
+                else if (const auto next = inUse(id) ? std::string() : passAirPlayGroup(s, id); !next.empty())
+                    moves.push_back({Backend::AirPlay, id, next});
+            }
+    }
+    for (const auto& id : group) savedOutput(s, Backend::AirPlay, id).enabled = true;
+    if (joinedInUse) {
+        selectOutput(s, Backend::AirPlay, first, devices);
+        s.airplayGroup = group;
+    } else if (inUse(first)) {
+        s.airplayGroup = group;
+    } else {
+        savedOutput(s, Backend::AirPlay, first).airplayGroup = group.size() > 1 ? group : std::vector<std::string>();
+    }
+    syncOutputs(s, devices);
+    return moves;
+}
+
 AirPlayChannels airplayChannels(const Settings& s, const std::string& id) {
     if (s.backend == Backend::AirPlay && s.airplay.deviceId == id) return s.airplay.channels;
     const SavedOutput* saved = findOutput(s, Backend::AirPlay, id);

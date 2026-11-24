@@ -127,13 +127,17 @@ struct RemoteServer::Impl {
     }
 
     // The zone a Control point follows (docs/Plan.md §17.8): its own choice while it is there, the queue it followed
-    // after a Transfer to…, else the zone playing that started last, else the one played last.
+    // after a Transfer to…, the group its zone joined, else the zone playing that started last, else the one played last.
     std::string chooseZone(const Snapshot& s) {
         if (s.transfer.serial != transfers) {
             if (transfers != UINT64_MAX && s.transfer.from == following) following = s.transfer.to;
             transfers = s.transfer.serial;
         }
         if (!following.empty() && zoneOf(s, following)) return following;
+        for (const auto& zone : s.zones)
+            if (std::ranges::any_of(zone.playback.receivers,
+                                    [&](const ReceiverState& r) { return zoneId(Backend::AirPlay, r.id) == following; }))
+                return zone.id;
         const ZoneSnapshot* best = nullptr;
         for (const auto& zone : s.zones) {
             const bool playing = zone.playback.state == PlaybackState::Playing;

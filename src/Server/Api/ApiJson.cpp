@@ -76,7 +76,7 @@ template <class E, size_t N> E enumFrom(const json& v, const Names<E, N>& names,
     invalid("unknown " + std::string(what) + " " + s);
 }
 
-constexpr Names<CommandKind, 36> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
+constexpr Names<CommandKind, 37> kCommandKinds = {{CommandKind::OpenAndPlay, "openAndPlay"},
                                                   {CommandKind::Load, "load"},
                                                   {CommandKind::Play, "play"},
                                                   {CommandKind::Pause, "pause"},
@@ -111,7 +111,8 @@ constexpr Names<CommandKind, 36> kCommandKinds = {{CommandKind::OpenAndPlay, "op
                                                   {CommandKind::PairAirPlay, "pairAirPlay"},
                                                   {CommandKind::DeleteOutput, "deleteOutput"},
                                                   {CommandKind::PauseAll, "pauseAll"},
-                                                  {CommandKind::Transfer, "transfer"}};
+                                                  {CommandKind::Transfer, "transfer"},
+                                                  {CommandKind::GroupZones, "groupZones"}};
 constexpr Names<AirPlayChannels, 3> kAirPlayChannels = {
     {AirPlayChannels::Stereo, "stereo"}, {AirPlayChannels::Left, "left"}, {AirPlayChannels::Right, "right"}};
 constexpr Names<LibraryGroupField, 2> kArtistFields = {{LibraryGroupField::Artist, "artist"},
@@ -517,6 +518,7 @@ json toJson(const Command& c) {
             {"code", c.code},
             {"zone", c.zone},
             {"target", c.target},
+            {"zones", c.zones},
             {"reset", c.reset}};
 }
 
@@ -559,6 +561,11 @@ Command commandFromJson(const json& j) {
     if (j.contains("code") || c.kind == CommandKind::PairAirPlay) c.code = value<std::string>(j, "code");
     if (j.contains("zone")) c.zone = value<std::string>(j, "zone");
     if (j.contains("target") || c.kind == CommandKind::Transfer) c.target = value<std::string>(j, "target");
+    if (j.contains("zones"))
+        for (const auto& zone : array(j, "zones")) {
+            if (!zone.is_string()) invalid("zones holds a non-string");
+            c.zones.push_back(zone.get<std::string>());
+        }
     if (j.contains("reset")) c.reset = value<bool>(j, "reset");
     return c;
 }

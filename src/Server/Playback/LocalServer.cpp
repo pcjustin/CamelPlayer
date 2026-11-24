@@ -81,7 +81,8 @@ bool changesQueue(CommandKind kind) {
     return replaces(kind) || kind == CommandKind::QueueReplace || kind == CommandKind::QueueReorder ||
            kind == CommandKind::QueueAdd || kind == CommandKind::QueuePlayNext || kind == CommandKind::QueueRemove ||
            kind == CommandKind::QueueClear || kind == CommandKind::SetShuffle || kind == CommandKind::SetRepeat ||
-           kind == CommandKind::RemoveLibraryRoot || kind == CommandKind::DeleteOutput || kind == CommandKind::Transfer;
+           kind == CommandKind::RemoveLibraryRoot || kind == CommandKind::DeleteOutput || kind == CommandKind::Transfer ||
+           kind == CommandKind::GroupZones;
 }
 
 // Problems of one track rather than of the device: report them and move on to the next eligible entry.
@@ -122,7 +123,7 @@ std::string partsReadBackOtherwise(const SettingsDto& sent, const SettingsDto& b
 }
 
 void validate(const Command& c) {
-    if (c.apiVersion < kApiOldest || c.apiVersion > kApiVersion || c.kind > CommandKind::Transfer)
+    if (c.apiVersion < kApiOldest || c.apiVersion > kApiVersion || c.kind > CommandKind::GroupZones)
         throw std::invalid_argument("unsupported Server command/version");
     const bool queueReplace = c.kind == CommandKind::QueueReplace;
     const bool queueSources = queueReplace || c.kind == CommandKind::QueueAdd || c.kind == CommandKind::QueuePlayNext;
@@ -146,8 +147,9 @@ void validate(const Command& c) {
         c.artists.empty() == (c.kind == CommandKind::SetArtistFavorite) ||
         (c.favorite && c.kind != CommandKind::SetFavorite && c.kind != CommandKind::SetAlbumFavorite &&
          c.kind != CommandKind::SetArtistFavorite) ||
-        (!c.zone.empty() && !actsOnZone(c.kind) && c.kind != CommandKind::DeleteOutput) ||
-        (c.kind == CommandKind::DeleteOutput && c.zone.empty()) || c.target.empty() == (c.kind == CommandKind::Transfer))
+        (!c.zone.empty() && !actsOnZone(c.kind) && c.kind != CommandKind::DeleteOutput && c.kind != CommandKind::GroupZones) ||
+        ((c.kind == CommandKind::DeleteOutput || c.kind == CommandKind::GroupZones) && c.zone.empty()) ||
+        c.target.empty() == (c.kind == CommandKind::Transfer) || (!c.zones.empty() && c.kind != CommandKind::GroupZones))
         throw std::invalid_argument("invalid Server command payload");
     if (std::ranges::any_of(c.artists, [](const LibraryGroupFilter& a) {
             return (a.field != LibraryGroupField::Artist && a.field != LibraryGroupField::Composer) || a.value.empty() ||
@@ -456,7 +458,8 @@ public:
         CommandStamp next = issued_;
         ++next.id;
         if (startsEntry(c.kind) || c.kind == CommandKind::Stop || c.kind == CommandKind::Seek ||
-            c.kind == CommandKind::ApplySettings || c.kind == CommandKind::DeleteOutput || c.kind == CommandKind::Transfer)
+            c.kind == CommandKind::ApplySettings || c.kind == CommandKind::DeleteOutput || c.kind == CommandKind::Transfer ||
+            c.kind == CommandKind::GroupZones)
             ++next.generation;
         if (changesQueue(c.kind)) ++next.queueRevision;
         queue_.push_back({std::move(c), next, restore});
@@ -1130,17 +1133,17 @@ private:
         if (moved) rememberQueueChoices(*moved);
     }
 
-    // An AirPlay zone is named by its receivers, the one it was formed with first (MZ-R08).
+    // An AirPlay group is named after the receiver it was formed with and the count of the others, "Living room + 2"
+    // (MZ-R24).
     void nameAirPlayZones() {
         const auto rows = outputRows(settings_, state_.devices);
         for (auto& zone : zones_) {
             if (zone->backend != Backend::AirPlay) continue;
-            std::string name;
-            for (const auto& id : airplayGroup(*zone)) {
-                const auto row =
-                    std::ranges::find_if(rows, [&](const OutputRow& r) { return r.backend == Backend::AirPlay && r.id == id; });
-                name += (name.empty() ? "" : " + ") + (row == rows.end() || row->name.empty() ? id : row->name);
-            }
+            const auto group = airplayGroup(*zone);
+            const auto row = std::ranges::find_if(
+                rows, [&](const OutputRow& r) { return r.backend == Backend::AirPlay && r.id == zone->output; });
+            std::string name = row == rows.end() || row->name.empty() ? zone->output : row->name;
+            if (group.size() > 1) name += " + " + std::to_string(group.size() - 1);
             if (zone->state.name != name) {
                 zone->state.name = std::move(name);
                 zonesChanged_ = true;
@@ -1159,6 +1162,39 @@ private:
             z.sessionRestored = &z == selected_; // a zone going is not saved again
         }
         if (library_) library_->write([zone](sqlite::Database& db) { deleteSession(db, zone); });
+    }
+
+    // The AirPlay zone `id` plays with `members` from now on, none ungrouping it (MZ-R24). Zones group only with zones of
+    // their kind, AirPlay receivers alone for now, and one playing apart is not taken.
+    void groupZones(const std::string& id, const std::vector<std::string>& members) {
+        Zone& z = zoneNamed(id);
+        if (z.backend != Backend::AirPlay) throw std::invalid_argument("zones of this kind are not grouped");
+        const auto rows = outputRows(settings_, state_.devices);
+        std::vector<std::string> receivers;
+        for (const auto& member : members) {
+            const auto colon = member.find(':');
+            Backend backend{};
+            if (colon == std::string::npos || !backendFromId(std::string_view(member).substr(0, colon), backend))
+                throw std::invalid_argument("no such zone: " + member);
+            if (backend != z.backend) throw std::invalid_argument("zones of different kinds are not grouped");
+            const std::string receiver = member.substr(colon + 1);
+            if (std::ranges::none_of(rows,
+                                     [&](const OutputRow& r) { return r.backend == backend && r.id == receiver && r.enabled; }))
+                throw std::invalid_argument("no such zone: " + member);
+            receivers.push_back(receiver);
+        }
+        for (const auto& other : zones_) {
+            if (other.get() == &z || other->engine->snapshot().state != audio::PlayState::Playing) continue;
+            const auto held = airplayGroup(*other);
+            if (std::ranges::any_of(receivers, [&](const std::string& r) { return std::ranges::find(held, r) != held.end(); })) {
+                state_.commandError = Failure{audio::ErrorCode::DeviceInUse,
+                                              "in use by " + (other->state.name.empty() ? other->id : other->state.name)};
+                return;
+            }
+        }
+        followMoves(groupAirPlay(settings_, z.output, receivers, state_.devices));
+        syncZones();
+        persist();
     }
 
     void deleteSavedOutput(const std::string& zone) {
@@ -1672,6 +1708,9 @@ private:
                 break;
             case CommandKind::Transfer:
                 transfer(z, zoneNamed(c.target));
+                break;
+            case CommandKind::GroupZones:
+                groupZones(c.zone, c.zones);
                 break;
             case CommandKind::PauseAll:
                 for (auto& zone : zones_)

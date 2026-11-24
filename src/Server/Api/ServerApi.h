@@ -142,7 +142,8 @@ enum class CommandKind : uint8_t {
     PairAirPlay,       // receiver + code: pairs with the password or code the user typed
     DeleteOutput,      // zone: the output it names, enabled or not; its zone's queue goes and a zone playing stops
     PauseAll,          // every zone playing pauses
-    Transfer           // zone + target: the zone's queue, current entry and position go to the target zone
+    Transfer,          // zone + target: the zone's queue, current entry and position go to the target zone
+    GroupZones         // zone + zones: the zones that play with it from now on, of its kind; none ungroups it
 };
 
 struct Command {
@@ -170,7 +171,8 @@ struct Command {
     // The zone a playback, queue or output command acts on, as ZoneSnapshot::id; empty for the selected zone. Other
     // commands name none.
     std::string zone;
-    std::string target; // Transfer: the zone that takes the queue
+    std::string target;             // Transfer: the zone that takes the queue
+    std::vector<std::string> zones; // GroupZones: the zones that play with `zone`
     // Who sent it, which the Server takes from the call (Caller.h), never from the command: a paired device, or nobody
     // for its own window.
     std::string device, deviceName;
