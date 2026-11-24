@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <thread>
 
 #include "FakeHQPlayer.h"
@@ -99,6 +100,29 @@ TEST(HQPlayerVolumeTest, MutingKeepsTheLevelThatUnmutingSetsAgain) {
     volume.setMuted(false);
     EXPECT_TRUE(eventually([&] { return fake.state().volume == -30.0; }));
     EXPECT_FALSE(volume.current()->muted);
+}
+
+// A Status HQPlayer pushed before it took the mute, which arrives before the mute's reply, is not taken for a change made
+// in HQPlayer's window: the level stays muted at the level unmuting sets again (OP-R64).
+TEST(HQPlayerVolumeTest, AStatusFromBeforeTheMuteLeavesItMuted) {
+    testutil::FakeHQPlayer fake;
+    enable(fake);
+    HQPlayerVolume volume(fake.address(), quick());
+    ASSERT_TRUE(eventually([&] { return volume.current().has_value(); }));
+    fake.replyTo("Volume", [](const auto& element) {
+        return std::string(R"(<?xml version="1.0" encoding="utf-8"?><Status active_bits="0" active_channels="2" )"
+                           R"(active_filter="0" active_mode="0" active_rate="0" active_shaper="0" length="0" position="0" )"
+                           R"(state="0" track="0" track_serial="0" transport_serial="0" volume="-30"/>)") +
+               "\n" + std::format(R"(<?xml version="1.0" encoding="utf-8"?><{} result="OK"/>)", element.name);
+    });
+    volume.setMuted(true);
+    EXPECT_TRUE(eventually([&] { return fake.state().volume == -60.0; }));
+    std::this_thread::sleep_for(600ms);
+    ASSERT_TRUE(volume.current());
+    EXPECT_TRUE(volume.current()->muted);
+    EXPECT_EQ(volume.current()->level, 50U);
+    volume.setMuted(false);
+    EXPECT_TRUE(eventually([&] { return fake.state().volume == -30.0; }));
 }
 
 TEST(HQPlayerVolumeTest, AVolumeTurnedOnInHQPlayerLaterIsOffered) {

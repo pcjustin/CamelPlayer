@@ -88,15 +88,25 @@ struct HQPlayerVolume::Impl {
             if (const auto last = client.status()) db = last->volume;
     }
 
+    // A Status that comes while the command is under way was sent before HQPlayer took it: it shows the level before, not
+    // one set in HQPlayer's window, so none counts until the reply and the settling after it (OP-R64).
     void write() {
         std::optional<double> value;
         {
             std::scoped_lock lock(mutex);
             value = std::exchange(toWrite, std::nullopt);
+            if (value) settledAt = Clock::time_point::max();
         }
         if (!value) return;
-        if (!client.ok(std::format(R"(<Volume value="{:.1f}"/>)", *value)))
-            log::warn("HQPlayer refused the volume %.1f dB", *value);
+        bool taken = false;
+        try {
+            taken = client.ok(std::format(R"(<Volume value="{:.1f}"/>)", *value));
+        } catch (const std::exception&) {
+            std::scoped_lock lock(mutex);
+            settledAt = Clock::now(); // the next connection's Status counts
+            throw;
+        }
+        if (!taken) log::warn("HQPlayer refused the volume %.1f dB", *value);
         std::scoped_lock lock(mutex);
         settledAt = Clock::now() + options.settling;
     }
