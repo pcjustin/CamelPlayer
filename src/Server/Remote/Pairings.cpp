@@ -91,6 +91,31 @@ bool Pairings::owned() const {
     return damaged_ || !stored_.empty();
 }
 
+Pairings::Answer Pairings::rename(const std::string& device, const std::string& name) {
+    std::lock_guard lock(mutex_);
+    Answer answer;
+    const auto taken = [&](const std::string& n) {
+        return std::ranges::any_of(stored_,
+                                   [&](const Stored& s) { return s.device.id != device && lower(s.device.name) == lower(n); });
+    };
+    const auto own = std::ranges::find(stored_, device, [](const Stored& s) { return s.device.id; });
+    if (own == stored_.end()) {
+        answer.error = "notPaired";
+        return answer;
+    }
+    if (name.empty() || taken(name)) {
+        answer.error = "nameTaken";
+        const std::string base = name.empty() ? own->device.name : name;
+        answer.suggestion = base;
+        for (int n = 2; taken(answer.suggestion); ++n) answer.suggestion = base + " (" + std::to_string(n) + ")";
+        return answer;
+    }
+    own->device.name = name;
+    answer.device = device;
+    save();
+    return answer;
+}
+
 Pairings::Answer Pairings::pair(const std::string& name, const std::string& code, int64_t now) {
     std::lock_guard lock(mutex_);
     Answer answer;

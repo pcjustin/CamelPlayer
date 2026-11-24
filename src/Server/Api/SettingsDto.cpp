@@ -48,6 +48,7 @@ SettingsDto settingsDto(const Settings& s) {
             .lastFileUtf8 = toUtf8(s.lastFile),
             .role = s.role,
             .controlled = s.controlled,
+            .followedZone = s.followedZone,
             .allowControl = s.allowControl,
             .startWithWindowsAsked = s.startWithWindowsAsked};
 }
@@ -94,6 +95,7 @@ Settings nativeSettings(const SettingsDto& s) {
             .lastFile = toWide(s.lastFileUtf8),
             .role = s.role,
             .controlled = s.controlled,
+            .followedZone = s.followedZone,
             .allowControl = s.allowControl,
             .startWithWindowsAsked = s.startWithWindowsAsked};
 }

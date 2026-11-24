@@ -64,6 +64,14 @@
         </TitleBar>
 
         <StackPanel Grid.Row="1">
+            <!-- Another computer's CamelPlayer this one controls, while it does not answer (docs/Plan.md §17.8). -->
+            <InfoBar x:Name="ConnectionBar" Severity="Warning" IsOpen="False" IsClosable="False">
+                <InfoBar.ActionButton>
+                    <Button x:Uid="Settings_PlayHere" Click="OnPlayHereClick" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <!-- What another device did to the music this one follows, as "Paused by Study PC". -->
+            <InfoBar x:Name="ChangeBar" Severity="Informational" IsOpen="False" IsClosable="True" />
             <!-- What opening the data at startup had to repair (a damaged settings file or library database). -->
             <InfoBar x:Name="RecoveryBar" Severity="Warning" IsOpen="False" IsClosable="True" />
             <!-- The installation check (docs/Plan.md §8.6): damaged or missing program files, repaired only after Repair. -->
@@ -661,6 +669,15 @@
                                         <Button x:Uid="Control_NetworkSettings" Click="OnNetworkSettingsClick" />
                                     </InfoBar.ActionButton>
                                 </InfoBar>
+                                <!-- A Control point's own name, as the paired devices list it. -->
+                                <StackPanel x:Name="RenamePanel" Spacing="4" Visibility="Collapsed">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBox x:Name="DeviceNameBox" x:Uid="Settings_DeviceName" Width="320" />
+                                        <Button x:Uid="Settings_RenameDevice" Click="OnRenameDeviceClick" VerticalAlignment="Bottom" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="RenameText" TextWrapping="Wrap" Visibility="Collapsed"
+                                               Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                </StackPanel>
                                 <StackPanel x:Name="PairedPanel" Spacing="8" Visibility="Collapsed">
                                     <TextBlock x:Uid="Settings_PairedDevices" Style="{StaticResource GroupHeaderStyle}" />
                                     <StackPanel x:Name="PairedDeviceRows" Spacing="4" />

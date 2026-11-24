@@ -57,6 +57,7 @@ public:
     RemoteServer& operator=(const RemoteServer&) = delete;
 
     bool connected() const;
+    Link link() const override;
     nlohmann::json hello() const; // what the Server said of itself as the connection opened
     std::string device() const;   // this device's ID, as the Server knows it
 
@@ -72,6 +73,8 @@ public:
     nlohmann::json pairedDevices() override;
     bool revokeDevice(const std::string& device) override;
     void resetOwner() override; // cuts this device off too
+    // This device's new name: {"name"} once taken, or {"error": "nameTaken", "suggestion"} when another device has it.
+    nlohmann::json renameDevice(const std::string& name);
     // Notices the Server sends, such as pairing having stopped after wrong codes; on the connection's thread.
     void setNoticeListener(std::function<void(const nlohmann::json&)> listener);
 

@@ -837,6 +837,7 @@ std::string toJson(const Settings& s) {
     j["role"] = s.role == Role::Control ? "control" : "play";
     j["controlled"] = {
         {"id", s.controlled.id}, {"name", s.controlled.name}, {"host", s.controlled.host}, {"port", s.controlled.port}};
+    j["followedZone"] = s.followedZone;
     j["allowControl"] = s.allowControl;
     j["startWithWindowsAsked"] = s.startWithWindowsAsked;
     if (s.adoptOutputSets) j["adoptOutputSets"] = true;
@@ -894,6 +895,7 @@ Settings fromJson(const std::string& text) {
             port != c->end() && port->is_number_unsigned() && port->get<uint64_t>() > 0 && port->get<uint64_t>() <= 65535)
             s.controlled.port = port->get<uint16_t>();
     }
+    s.followedZone = str(j, "followedZone", "");
     s.allowControl = boolean(j, "allowControl", false);
     s.startWithWindowsAsked = boolean(j, "startWithWindowsAsked", false);
     const auto speed = std::ranges::find(kScanSpeedIds, str(j, "scanSpeed", "low"));
@@ -1040,6 +1042,7 @@ Settings resetPlayback(const Settings& s) {
     reset.lastFile = s.lastFile;
     reset.role = s.role;
     reset.controlled = s.controlled;
+    reset.followedZone = s.followedZone;
     reset.allowControl = s.allowControl;
     reset.startWithWindowsAsked = s.startWithWindowsAsked;
     return reset;
@@ -1079,6 +1082,7 @@ void copyComputerSettings(const Settings& from, Settings& to) {
     to.lastFile = from.lastFile;
     to.role = from.role;
     to.controlled = from.controlled;
+    to.followedZone = from.followedZone;
 }
 
 bool inAnalysisWindow(const WaveformSettings& settings, int minute) {

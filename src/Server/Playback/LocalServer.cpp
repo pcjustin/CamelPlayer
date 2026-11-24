@@ -55,6 +55,7 @@
 #include "Server/Library/Playlists.h"
 #include "Server/Playback/QueueSession.h"
 #include "Server/Playback/ReplayGain.h"
+#include "Server/Api/Caller.h"
 #include "Server/Support/DiagnosticBundle.h"
 #include "Server/Support/ServerFolders.h"
 
@@ -600,8 +601,13 @@ public:
 
     void rereadLibrary() {
         requestMetadataReread(library());
-        std::shared_lock parts(partsMutex_);
-        if (libraryMonitor_) libraryMonitor_->rescanAll();
+        {
+            std::shared_lock parts(partsMutex_);
+            if (libraryMonitor_) libraryMonitor_->rescanAll();
+        }
+        std::lock_guard lock(mutex_);
+        rebuiltBy_ = currentCaller();
+        cv_.notify_all();
     }
 
     LibraryScanStart scanLibraryNow(std::optional<int64_t> folder) {
@@ -769,6 +775,52 @@ private:
         for (auto& zone : zones_)
             if (zone->id == id) return *zone;
         throw std::invalid_argument("no such zone: " + id);
+    }
+
+    // What a command is about to do to music someone may be listening to, for the devices it touches (docs/Plan.md
+    // §17.8): a zone paused, stopped or given another queue, a queue moved, an output deleted or the statistics reset.
+    void recordChange(const Command& c, Zone& z) {
+        const auto change = [&](const char* kind, const std::string& zone = {}) {
+            return ZoneChange{++changeSerial_, kind, c.device, c.deviceName, zone};
+        };
+        const auto state = [](const Zone& zone) { return zone.engine->snapshot().state; };
+        const bool sounding = state(z) == audio::PlayState::Playing;
+        switch (c.kind) {
+        case CommandKind::Pause:
+        case CommandKind::TogglePause:
+            if (sounding) z.state.change = change("paused");
+            break;
+        case CommandKind::Stop:
+            if (state(z) != audio::PlayState::Stopped) z.state.change = change("stopped");
+            break;
+        case CommandKind::QueueReplace:
+        case CommandKind::OpenAndPlay:
+            z.state.change = change("replaced");
+            break;
+        case CommandKind::Transfer:
+            z.state.change = change("transferred");
+            if (const auto to = std::ranges::find(zones_, c.target, [](const auto& zone) { return zone->id; });
+                to != zones_.end())
+                (*to)->state.change = change("replaced");
+            state_.transfer = {++changeSerial_, z.id, c.target};
+            break;
+        case CommandKind::PauseAll:
+            for (auto& zone : zones_)
+                if (state(*zone) == audio::PlayState::Playing) zone->state.change = change("paused");
+            break;
+        case CommandKind::DeleteOutput:
+            for (const auto& zone : zones_)
+                if (zone->id == c.zone) state_.notice = change("deleted", zone->state.name);
+            break;
+        case CommandKind::ResetAllPlayStatistics:
+            state_.notice = change("statisticsReset");
+            break;
+        case CommandKind::ApplySettings:
+            if (c.reset) state_.notice = change("playbackReset");
+            break;
+        default:
+            break;
+        }
     }
 
     // The queue, current entry and position of `from` go to `to`, replacing its own: it plays on from the audible
@@ -1384,6 +1436,7 @@ private:
         state_.controlPanelOpened.reset();
         // A command of no zone may add or remove zones, so it uses none after that.
         Zone& z = c.kind == CommandKind::DeleteOutput ? selected() : zoneFor(c);
+        recordChange(c, z);
         z.attempted = {}; // a command may restart the stream, so the upcoming entry may be queued again
         z.checked = {};
         if (pending.restore && !c.source) {
@@ -2311,6 +2364,7 @@ private:
             p.format = z.q.restored->format;
         }
         const auto& was = z.state.playback;
+        if (p.state == PlaybackState::Playing && was.state != PlaybackState::Playing) z.state.played = ++playSerial_;
         bool changed = z.queueChanged || p.revision != was.revision || p.position != was.position ||
                        p.underruns != was.underruns || p.playerVolume != was.playerVolume ||
                        p.playerVolumeDb != was.playerVolumeDb || p.playerMuted != was.playerMuted ||
@@ -2361,6 +2415,15 @@ private:
         bool changed = completed || std::exchange(zonesChanged_, false) ||
                        state_.devices.revision != published_.devices.revision || state_.finished != published_.finished;
         for (auto& zone : zones_) changed = refreshZoneState(*zone) || changed;
+        std::optional<Caller> rebuilt;
+        {
+            std::lock_guard lock(mutex_);
+            rebuilt = std::exchange(rebuiltBy_, std::nullopt);
+        }
+        if (rebuilt) {
+            state_.notice = {++changeSerial_, "libraryRebuilt", rebuilt->device, rebuilt->name, {}};
+            changed = true;
+        }
         if (!changed) return;
         collectZones();
         state_.settings = settingsDto(settings_);
@@ -3365,6 +3428,8 @@ private:
     std::promise<void> queueSaved_, backgroundStopped_;
     Snapshot published_, state_;
     uint64_t lastEntryId_ = 0; // queue entry IDs are unique across zones
+    uint64_t playSerial_ = 0, changeSerial_ = 0;
+    _Guarded_by_(mutex_) std::optional<Caller> rebuiltBy_; // a library rebuild asked for since the last publish
     static constexpr size_t kAutoplayKept = 100;
     static constexpr int kAutoplayFailuresInARow = 3;
     std::vector<std::pair<uint64_t, uint64_t>> loudnessShared_; // each zone's queue revision and entry last shared
@@ -3426,6 +3491,8 @@ BackgroundPace LocalServer::backgroundPace(const std::filesystem::path& storage)
     return impl_->backgroundPace(storage);
 }
 CommandStamp LocalServer::submit(Command command) {
+    command.device = currentCaller().device;
+    command.deviceName = currentCaller().name;
     return impl_->enqueue(std::move(command));
 }
 Snapshot LocalServer::snapshot() const {

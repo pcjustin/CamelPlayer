@@ -492,7 +492,8 @@ TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
                                               "followedDefault",
                                               "adoptOutputSets"};
     // A computer's role, the CamelPlayer it controls and whether others may control it stay through both resets.
-    const std::set<std::string> kept{"schema", "skippedVersion", "lastFile", "role", "controlled", "allowControl"};
+    const std::set<std::string> kept{"schema",     "skippedVersion", "lastFile",    "role",
+                                     "controlled", "followedZone",   "allowControl"};
     std::vector<std::string> unlisted;
     const auto file = nlohmann::json::parse(toJson(Settings{}));
     for (const auto& item : file.items())

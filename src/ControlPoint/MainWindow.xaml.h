@@ -139,6 +139,8 @@ struct MainWindow : MainWindowT<MainWindow> {
                                              Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnControlAnotherClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnPlayHereClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnRenameDeviceClick(Windows::Foundation::IInspectable const&,
+                                               Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnVolumeChanged(Windows::Foundation::IInspectable const&,
@@ -301,6 +303,19 @@ private:
     winrt::fire_and_forget restartInRole();
     // A music folder on the Server's computer, for a Control point (docs/Plan.md §17.8).
     winrt::fire_and_forget chooseServerFolder();
+    // Several Control points at once (docs/Plan.md §17.8): the link to another computer's Server, and what another
+    // device did to the zone this window follows or to them all.
+    void showLink();
+    void showChanges(const camel::server::Snapshot& snapshot);
+    std::string ownDevice() const;
+    std::optional<camel::server::IServer::Link> shownLink_;
+    std::string changesZone_;                   // the zone whose changes are shown, the one followed
+    uint64_t shownChange_ = 0;                  // its last change shown or passed over
+    uint64_t shownNotice_ = 0;                  // the last change of no one zone shown or passed over
+    uint64_t shownTransfer_ = 0;                // the last Transfer to… seen
+    bool changesKnown_ = false;                 // the first snapshot set where the changes start
+    uint64_t settingsStamp_ = 0;                // the last settings this window sent
+    camel::server::SettingsDto serverSettings_; // the Server's, as the last snapshot had them
     std::shared_ptr<camel::server::RemoteAccess> access_;
     uint64_t computersRefresh_ = 0;
     int computersTicks_ = 0;     // refresh ticks since the paired devices were last read

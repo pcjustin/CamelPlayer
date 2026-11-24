@@ -86,6 +86,7 @@ struct SettingsDto {
     std::string lastFileUtf8;
     Role role = Role::Play;
     ControlledServer controlled;
+    std::string followedZone;
     bool allowControl = false;
     bool startWithWindowsAsked = false;
     bool operator==(const SettingsDto&) const = default;
@@ -166,6 +167,10 @@ struct Command {
     // commands name none.
     std::string zone;
     std::string target; // Transfer: the zone that takes the queue
+    // Who sent it, which the Server takes from the call (Caller.h), never from the command: a paired device, or nobody
+    // for its own window.
+    std::string device, deviceName;
+    bool reset = false; // ApplySettings: Settings › Reset playback and output, which the other devices are told of
     bool operator==(const Command&) const = default;
 };
 
@@ -356,6 +361,24 @@ struct FinishedWork {
 };
 
 // A zone (docs/Plan.md §5.12): an enabled output, or the AirPlay group in use, with a queue and playback of its own.
+// What one device did to music others may be listening to (docs/Plan.md §17.8), shown on the devices it touches as
+// "Paused by Study PC".
+struct ZoneChange {
+    uint64_t serial = 0; // the Server's count of changes; 0 when there is none
+    // "paused", "stopped", "replaced", "transferred", "deleted", "statisticsReset", "libraryRebuilt", "playbackReset"
+    std::string kind;
+    std::string device, name; // a paired device; an empty device for the Server's own window
+    std::string zone;         // the zone's name, where it is gone
+    bool operator==(const ZoneChange&) const = default;
+};
+
+// The last Transfer to…: the devices that followed `from` follow `to` (docs/Plan.md §17.8).
+struct ZoneTransfer {
+    uint64_t serial = 0;
+    std::string from, to;
+    bool operator==(const ZoneTransfer&) const = default;
+};
+
 struct ZoneSnapshot {
     std::string id; // zoneId() of its output
     Backend backend = Backend::Wasapi;
@@ -367,6 +390,8 @@ struct ZoneSnapshot {
     PlaybackSnapshot playback;
     // The zone holding the device this zone plays to; Play here is refused with "in use by" that zone meanwhile.
     std::string inUseBy;
+    uint64_t played = 0; // the Server's count of starts when it last started playing: the zone started last has the most
+    ZoneChange change;   // the last pause, stop or new queue a device gave it
     bool operator==(const ZoneSnapshot&) const = default;
 };
 
@@ -389,6 +414,8 @@ struct Snapshot {
     std::optional<Failure> commandError;
     FinishedWork finished;
     std::optional<bool> controlPanelOpened;
+    ZoneTransfer transfer;
+    ZoneChange notice; // the last change of no one zone: an output deleted, the library rebuilt or a reset
     bool operator==(const Snapshot&) const = default;
 };
 
@@ -554,6 +581,9 @@ public:
     // Another computer's Server (docs/Plan.md §17.8): its files are not this computer's, so Explorer here cannot show
     // them, and a file chosen here is sent to it.
     virtual bool filesHere() const { return true; }
+    // Whether it answers: another computer's Server may be lost for a while, or no longer know this device.
+    enum class Link : uint8_t { Connected, Lost, Refused };
+    virtual Link link() const { return Link::Connected; }
     // The Server's drives for an empty path, the shares of `\\computer`, else the folders in `pathUtf8`, by name; throws
     // std::runtime_error for one that cannot be listed. Its Windows user's rights decide what it reaches.
     virtual std::vector<ServerFolder> serverFolders(const std::string& pathUtf8) const = 0;

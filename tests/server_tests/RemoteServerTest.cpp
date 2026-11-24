@@ -535,3 +535,15 @@ TEST_F(RemoteServerTest, FoldersAndFilesGoThroughTheServer) {
 
     EXPECT_EQ(remote->playerFirewallRule(), local->playerFirewallRule());
 }
+
+// A library rebuilt from a Control point is told to the others with its name (docs/Plan.md §17.8).
+TEST_F(RemoteServerTest, ALibraryRebuildNamesTheControlPointThatAskedForIt) {
+    remote->rereadLibrary();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (local->snapshot().notice.kind != "libraryRebuilt" && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const auto notice = local->snapshot().notice;
+    EXPECT_EQ(notice.kind, "libraryRebuilt");
+    EXPECT_EQ(notice.name, "Test Control");
+    EXPECT_EQ(notice.device, remote->device());
+}

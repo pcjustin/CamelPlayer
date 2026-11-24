@@ -548,16 +548,30 @@ std::vector<hstring> MainWindow::zonesPlaying() const {
 winrt::fire_and_forget MainWindow::requestExit() {
     auto strong = get_strong();
     if (exitAsking_) co_return;
-    if (const auto playing = zonesPlaying(); !playing.empty()) {
+    // A Control point leaves the Server's zones as they are; the Server's own window names the Control points it cuts
+    // off too (docs/Plan.md §17.8).
+    const auto playing = server_ && server_->filesHere() ? zonesPlaying() : std::vector<hstring>{};
+    std::vector<std::wstring> connected;
+    if (access_ && access_->port()) try {
+            for (const auto& device : access_->pairedDevices())
+                if (device.value("connected", false)) connected.push_back(camel::toWide(device.value("name", std::string())));
+        } catch (const std::exception& e) {
+            camel::log::warn("paired devices: %s", e.what());
+        }
+    if (!playing.empty() || !connected.empty()) {
         exitAsking_ = true;
         if (inTray_) showFromTray(); // the question needs the window
-        std::wstring list;
+        std::wstring list, cut;
         for (const auto& name : playing) list += (list.empty() ? L"" : L"\n") + std::wstring(name);
+        for (const auto& name : connected) cut += (cut.empty() ? L"" : L"\n") + name;
+        std::wstring text;
+        if (!list.empty()) text = std::wstring(ui::format(L"Exit_ZonesPlaying", {list}));
+        if (!cut.empty()) text += (text.empty() ? L"" : L"\n\n") + std::wstring(ui::format(L"Exit_ControlPoints", {cut}));
         ContentDialog dialog;
         ui::placeDialog(dialog, ContentLayout().XamlRoot());
         dialog.Title(box_value(tr(L"Exit_Title")));
         TextBlock explanation;
-        explanation.Text(ui::format(L"Exit_ZonesPlaying", {list}));
+        explanation.Text(text);
         explanation.TextWrapping(TextWrapping::Wrap);
         dialog.Content(explanation);
         dialog.PrimaryButtonText(tr(L"Exit_Confirm"));
@@ -575,7 +589,7 @@ void MainWindow::hideToTray() {
     inTray_ = true;
     AppWindow().Hide();
     setRefreshing(false);
-    if (server_ && server_->snapshot().playback.state == PlaybackState::Playing) {
+    if (server_ && server_->filesHere() && server_->snapshot().playback.state == PlaybackState::Playing) {
         Command pause;
         pause.kind = CommandKind::Pause;
         submitCommand(std::move(pause));
@@ -642,6 +656,7 @@ void MainWindow::setRefreshing(bool refreshing) {
 
 void MainWindow::refreshFromServer() {
     if (!server_) return;
+    showLink();
     applySnapshot(server_->snapshot());
     // Another computer's Server answers only while it is connected (docs/Plan.md §17.8).
     try {
@@ -694,7 +709,11 @@ void MainWindow::submitCommand(Command command) {
     } else {
         repeatedPlay_.other();
     }
-    if (const auto stamp = ui::submitChecked(*server_, std::move(command))) cursor_.expect(*stamp);
+    const bool settings = command.kind == CommandKind::ApplySettings;
+    if (const auto stamp = ui::submitChecked(*server_, std::move(command))) {
+        cursor_.expect(*stamp);
+        if (settings) settingsStamp_ = stamp->id;
+    }
 }
 
 bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
@@ -754,10 +773,15 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownDevicesRevision_ = snapshot.devices.revision;
         showOutputsOf(snapshot.settings);
     }
-    // Control by other computers may be turned off from one of them.
-    if (snapshot.settings.allowControl != settings_.allowControl) {
-        settings_.allowControl = snapshot.settings.allowControl;
-        populateComputers();
+    showChanges(snapshot);
+    // A setting changed on another computer shows on every page open (docs/Plan.md §17.8), once the Server has taken
+    // what this window sent; one being edited here is left to its page.
+    if (snapshot.settings != serverSettings_) {
+        serverSettings_ = snapshot.settings;
+        if (snapshot.settings != settings_ && snapshot.command.id >= settingsStamp_ && !editingOutput_ && !eqTimer_.IsRunning()) {
+            settings_ = snapshot.settings;
+            populateSettings();
+        }
     }
     if (snapshot.playback.receivers != receivers_) {
         receivers_ = snapshot.playback.receivers;
@@ -2103,7 +2127,12 @@ winrt::fire_and_forget MainWindow::OnResetClick(Windows::Foundation::IInspectabl
 
     if (kind == L"playback") {
         settings_ = settingsDto(camel::resetPlayback(nativeSettings(settings_)));
-        applySettingsNow();
+        Command command;
+        command.kind = CommandKind::ApplySettings;
+        command.settings = settings_;
+        command.reset = true; // the other devices are told who did it
+        submitCommand(std::move(command));
+        populateSettings();
     } else if (kind == L"interface") {
         camel::startup::disable();
         settings_ = settingsDto(camel::resetInterface(nativeSettings(settings_)));

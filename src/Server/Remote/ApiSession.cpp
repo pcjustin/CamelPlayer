@@ -32,10 +32,12 @@ std::string text(const json& message) {
 } // namespace
 
 struct ApiSession::State {
-    State(IServer& s, Send sending, Calls answers) : server(s), send(std::move(sending)), own(std::move(answers)) {}
+    State(IServer& s, Send sending, Calls answers, Caller who)
+        : server(s), send(std::move(sending)), own(std::move(answers)), caller(std::move(who)) {}
     IServer& server;
     Send send;
     Calls own; // the connection's own calls
+    Caller caller;
     std::mutex mutex;
     std::condition_variable_any changed;
     std::map<uint64_t, CancellationToken> calls; // under way, by their ids
@@ -54,8 +56,8 @@ struct ApiSession::State {
     }
 };
 
-ApiSession::ApiSession(IServer& server, Send send, json hello, Calls calls)
-    : state_(std::make_shared<State>(server, std::move(send), std::move(calls))) {
+ApiSession::ApiSession(IServer& server, Send send, json hello, Calls calls, Caller caller)
+    : state_(std::make_shared<State>(server, std::move(send), std::move(calls), std::move(caller))) {
     state_->sendQuietly({{"hello", std::move(hello)}});
     state_->pusher = std::jthread([s = state_.get()](const std::stop_token& stop) {
         for (;;) {
@@ -114,6 +116,12 @@ void ApiSession::receive(std::string_view message) {
         ++state_->running;
     }
     std::thread([s = state_, id, call = std::move(call), args = std::move(args), token] {
+        Caller who;
+        {
+            std::lock_guard lock(s->mutex);
+            who = s->caller;
+        }
+        const CallerScope as(std::move(who));
         json reply = {{"id", id}};
         std::function<void()> after;
         try {
@@ -135,6 +143,11 @@ void ApiSession::receive(std::string_view message) {
         --s->running;
         s->changed.notify_all();
     }).detach();
+}
+
+void ApiSession::setCallerName(const std::string& name) {
+    std::lock_guard lock(state_->mutex);
+    state_->caller.name = name;
 }
 
 void ApiSession::notify(const json& notice) {

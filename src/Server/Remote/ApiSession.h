@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 
+#include "Server/Api/Caller.h"
 #include "Server/Api/ServerApi.h"
 
 namespace camel::server {
@@ -33,7 +34,8 @@ public:
     using Calls = std::function<std::optional<Answer>(const std::string& call, const nlohmann::json& args)>;
     static constexpr size_t kMaxCalls = 32; // a connection's calls at once; one more is answered "busy"
 
-    ApiSession(IServer& server, Send send, nlohmann::json hello, Calls calls = {});
+    // Each call runs as `caller` (Caller.h), so the Server knows which device made a change.
+    ApiSession(IServer& server, Send send, nlohmann::json hello, Calls calls = {}, Caller caller = {});
     ~ApiSession(); // cancels the calls under way and waits for them
     ApiSession(const ApiSession&) = delete;
     ApiSession& operator=(const ApiSession&) = delete;
@@ -44,6 +46,8 @@ public:
     void push(const Event& event);
     // A notice for the connection, such as pairing having stopped: {"notice": notice}.
     void notify(const nlohmann::json& notice);
+    // The device's new name, for the changes its later calls make.
+    void setCallerName(const std::string& name);
 
 private:
     struct State;

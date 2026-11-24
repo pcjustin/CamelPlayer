@@ -511,6 +511,7 @@ struct Settings {
     std::wstring lastFile;
     Role role = Role::Play;
     ControlledServer controlled;
+    std::string followedZone;           // the zone this computer follows while it controls another
     bool allowControl = false;          // other computers may control this one, its Server API served on the LAN
     bool startWithWindowsAsked = false; // allowing control has asked once whether to start with Windows
     bool adoptOutputSets = false;       // from an earlier version: each backend's set still has to reach its device

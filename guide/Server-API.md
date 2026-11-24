@@ -54,9 +54,11 @@ A paired device may make these calls on the WebSocket:
 | Call | Arguments | Result |
 | --- | --- | --- |
 | `pairingCode` | | `{"code": "…", "validMs": 300000}`; a new code replaces the last |
-| `pairedDevices` | | each device's `id`, `name`, `paired` and whether it is `connected` now |
+| `pairedDevices` | | each device's `id`, `name`, `paired`, whether it is `connected` now and the `zone` it follows |
 | `revokeDevice` | device | `true` when it was paired; its connections close at once |
 | `resetOwner` | | `null`; every device is forgotten and cut off, the caller included, and the next to ask claims the Server |
+| `follow` | zone | `null`; the zone the caller follows, which `pairedDevices` shows |
+| `renameDevice` | name | `{"name": …}`, or `{"error": "nameTaken", "suggestion": …}` when another paired device has it |
 
 ## The WebSocket
 
@@ -115,6 +117,14 @@ A notice is pushed the same way, as `{"notice": {"kind": "pairingStopped", "unti
 The event is `commandCompleted` when a command has finished. When several changes come while an event is still being sent, only the latest is sent, and it is marked `commandCompleted` if any of the ones it replaces was.
 
 The snapshot holds every zone with its playback and its queue, the selected zone, the settings and the devices. It is the same JSON as the `snapshot` call answers, except for the queues.
+
+Several devices may control the Server at once, and each may follow a zone of its own; the selected zone is the Server's own window's. To tell its users what another device did:
+
+- each zone has `played`, the Server's count of starts when it last started playing, so the zone that started last has the most, and `change`, the last time a device paused it, stopped it or gave it another queue: `{"serial", "kind", "device", "name"}`, with `kind` one of `paused`, `stopped`, `replaced` and `transferred`, `device` the paired device's ID (empty for the Server's own window) and `name` its name;
+- `transfer` is the last Transfer to…, `{"serial", "from", "to"}`, which the devices that followed `from` follow to `to`;
+- `notice` is the last change of no one zone, as `change` is with `kind` one of `deleted` (the output named in `zone`), `statisticsReset`, `libraryRebuilt` and `playbackReset`.
+
+A command's sender is the paired device of the connection it comes on; a command's own `device` is not read. An `ApplySettings` with `"reset": true` is Settings › Reset playback and output.
 
 **Queues** are sent as what changed since the last event on the same connection:
 

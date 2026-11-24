@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -48,6 +49,7 @@ private:
     std::string buffer_;
     std::mutex sending_;
     bool closed_ = false;
+    std::atomic<bool> shut_{false}; // a read under way sees it within a quarter of a second, whatever the peer does
 };
 
 } // namespace camel::server::remote

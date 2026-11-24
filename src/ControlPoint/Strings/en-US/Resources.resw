@@ -1116,4 +1116,22 @@ The next computer to connect claims this CamelPlayer without a code.</value></da
   <data name="ServerFolder_List" xml:space="preserve"><value>Folders</value></data>
   <data name="ServerFolder_Add" xml:space="preserve"><value>Add this folder</value></data>
   <data name="ServerFolder_Unreadable" xml:space="preserve"><value>{0} cannot be listed: it is not there, or the computer that plays is not allowed in.</value></data>
+  <data name="Link_LostTitle" xml:space="preserve"><value>CamelPlayer on {0} does not answer</value></data>
+  <data name="Link_LostText" xml:space="preserve"><value>It may be switched off, asleep or cut off from the network. This computer connects again by itself once it is back.</value></data>
+  <data name="Link_RefusedTitle" xml:space="preserve"><value>This computer is no longer paired with CamelPlayer on {0}</value></data>
+  <data name="Link_RefusedText" xml:space="preserve"><value>A paired device revoked it, or reset the owner. Pair again in Settings › This computer and others, or play music here.</value></data>
+  <data name="Change_paused" xml:space="preserve"><value>Paused by {0}.</value></data>
+  <data name="Change_stopped" xml:space="preserve"><value>Stopped by {0}.</value></data>
+  <data name="Change_replaced" xml:space="preserve"><value>{0} started other music in this zone.</value></data>
+  <data name="Change_transferred" xml:space="preserve"><value>{0} moved this zone’s queue to another zone.</value></data>
+  <data name="Change_moved" xml:space="preserve"><value>{0} moved the queue to {1}, and this window follows it there.</value></data>
+  <data name="Change_deleted" xml:space="preserve"><value>{0} deleted the output {1}.</value></data>
+  <data name="Change_statisticsReset" xml:space="preserve"><value>{0} reset the listening statistics.</value></data>
+  <data name="Change_libraryRebuilt" xml:space="preserve"><value>{0} is rebuilding the library.</value></data>
+  <data name="Change_playbackReset" xml:space="preserve"><value>{0} reset the playback and output settings.</value></data>
+  <data name="Exit_ControlPoints" xml:space="preserve"><value>These computers controlling this one are cut off:
+{0}</value></data>
+  <data name="Paired_ConnectedZone" xml:space="preserve"><value>{0} · connected now · follows {1}</value></data>
+  <data name="Settings_DeviceName.Header" xml:space="preserve"><value>This computer’s name, as the paired devices list it</value></data>
+  <data name="Settings_RenameDevice.Content" xml:space="preserve"><value>Rename</value></data>
 </root>

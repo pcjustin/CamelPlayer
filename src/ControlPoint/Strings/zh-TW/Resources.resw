@@ -1116,4 +1116,22 @@
   <data name="ServerFolder_List" xml:space="preserve"><value>資料夾</value></data>
   <data name="ServerFolder_Add" xml:space="preserve"><value>加入這個資料夾</value></data>
   <data name="ServerFolder_Unreadable" xml:space="preserve"><value>無法列出 {0}：它不存在，或播放的電腦沒有權限存取。</value></data>
+  <data name="Link_LostTitle" xml:space="preserve"><value>{0} 上的 CamelPlayer 沒有回應</value></data>
+  <data name="Link_LostText" xml:space="preserve"><value>它可能已關機、在睡眠中或網路中斷。它回來後，這台電腦會自動重新連線。</value></data>
+  <data name="Link_RefusedTitle" xml:space="preserve"><value>這台電腦已不再與 {0} 上的 CamelPlayer 配對</value></data>
+  <data name="Link_RefusedText" xml:space="preserve"><value>已配對的裝置撤銷了它，或重設了擁有者。請到「設定 › 這台電腦與其他電腦」重新配對，或在這台電腦播放音樂。</value></data>
+  <data name="Change_paused" xml:space="preserve"><value>{0} 暫停了播放。</value></data>
+  <data name="Change_stopped" xml:space="preserve"><value>{0} 停止了播放。</value></data>
+  <data name="Change_replaced" xml:space="preserve"><value>{0} 在這個區域播放了其他音樂。</value></data>
+  <data name="Change_transferred" xml:space="preserve"><value>{0} 把這個區域的佇列移到了另一個區域。</value></data>
+  <data name="Change_moved" xml:space="preserve"><value>{0} 把佇列移到了 {1}，這個視窗也跟著過去。</value></data>
+  <data name="Change_deleted" xml:space="preserve"><value>{0} 刪除了輸出 {1}。</value></data>
+  <data name="Change_statisticsReset" xml:space="preserve"><value>{0} 重設了聆聽統計。</value></data>
+  <data name="Change_libraryRebuilt" xml:space="preserve"><value>{0} 正在重建媒體庫。</value></data>
+  <data name="Change_playbackReset" xml:space="preserve"><value>{0} 重設了播放與輸出設定。</value></data>
+  <data name="Exit_ControlPoints" xml:space="preserve"><value>這些正在控制這台電腦的電腦會中斷：
+{0}</value></data>
+  <data name="Paired_ConnectedZone" xml:space="preserve"><value>{0} · 目前已連線 · 跟隨 {1}</value></data>
+  <data name="Settings_DeviceName.Header" xml:space="preserve"><value>這台電腦的名稱（已配對的裝置會這樣列出它）</value></data>
+  <data name="Settings_RenameDevice.Content" xml:space="preserve"><value>重新命名</value></data>
 </root>

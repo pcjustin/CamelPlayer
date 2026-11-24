@@ -21,7 +21,9 @@
 #include "Server/Api/ApiJson.h"
 #include "Server/Api/ApiTypesJson.h"
 #include "Server/Network/SocketWait.h"
+#include "Server/Playback/Outputs.h"
 #include "Server/Remote/Connection.h"
+#include "Server/Remote/Discovery.h"
 
 namespace camel::server {
 
@@ -60,26 +62,33 @@ struct RemoteServer::Impl {
         std::string body;
     };
 
-    explicit Impl(Options o) : options(std::move(o)) {
+    explicit Impl(Options o) : options(std::move(o)), host(options.host), port(options.port) {
         if (!options.ownSettings.empty()) own = loadSettings(options.ownSettings);
     }
 
     Options options;
     WinsockScope winsock;
-    std::unique_ptr<Connection> connection;
     std::thread reader;
     mutable std::mutex mutex;
     std::condition_variable changed;
+    std::shared_ptr<Connection> connection; // replaced when the connection is made again
+    uint64_t generation = 0;                // connections made so far; a call answers only on its own
+    std::string host;                       // where the Server was last reached, which mDNS may find anew
+    uint16_t port = 0;
     std::map<uint64_t, Reply> pending;
     uint64_t lastCall = 0;
-    bool connected = false;
-    std::optional<Snapshot> current;
+    bool connected = false, refused = false, stopping = false;
+    std::optional<Snapshot> current, raw; // as shown, and as the Server sent it
     std::function<void(const Event&)> listener;
     std::function<void(const json&)> noticeListener;
     json hello;
     api::QueueDecoder decoder;         // the reader's alone
     std::optional<Settings> own;       // a Control point's own settings, with options.ownSettings
     std::optional<SettingsDto> theirs; // the Server's, as it last sent them
+    std::string following;             // the zone this Control point follows
+    uint64_t followSerial = 0;         // follow calls sent, for the Server to keep the last
+    bool told = false;                 // this connection's Server knows the zone followed
+    uint64_t transfers = UINT64_MAX;   // the last Transfer to… taken into account; none before the first snapshot
 
     // The settings shown: the Server's, with what belongs to this computer from its own.
     SettingsDto shown(const SettingsDto& server) const {
@@ -88,24 +97,130 @@ struct RemoteServer::Impl {
         return settingsDto(settings);
     }
 
+    static const ZoneSnapshot* zoneOf(const Snapshot& s, const std::string& id) {
+        const auto found = std::ranges::find(s.zones, id, &ZoneSnapshot::id);
+        return found == s.zones.end() ? nullptr : &*found;
+    }
+
+    // The zone a Control point follows (docs/Plan.md §17.8): its own choice while it is there, the queue it followed
+    // after a Transfer to…, else the zone playing that started last, else the one played last.
+    std::string chooseZone(const Snapshot& s) {
+        if (s.transfer.serial != transfers) {
+            if (transfers != UINT64_MAX && s.transfer.from == following) following = s.transfer.to;
+            transfers = s.transfer.serial;
+        }
+        if (!following.empty() && zoneOf(s, following)) return following;
+        const ZoneSnapshot* best = nullptr;
+        for (const auto& zone : s.zones) {
+            const bool playing = zone.playback.state == PlaybackState::Playing;
+            const bool bestPlaying = best && best->playback.state == PlaybackState::Playing;
+            if (!best || playing > bestPlaying || (playing == bestPlaying && zone.played > best->played)) best = &zone;
+        }
+        return best && best->played ? best->id : s.selectedZone;
+    }
+
+    // The Server's state as this Control point shows it: its own settings, and the zone it follows as the selected
+    // one, its output the one in use. Under the mutex.
+    Snapshot project(Snapshot s) {
+        if (!own) return s;
+        Settings& mine = *own;
+        const auto chosen = chooseZone(s);
+        if (chosen != following || !told) {
+            following = chosen;
+            if (mine.followedZone != chosen) {
+                mine.followedZone = chosen;
+                saveQuietly();
+            }
+            tellFollowing();
+            told = true;
+        }
+        if (const ZoneSnapshot* zone = zoneOf(s, following); zone && following != s.selectedZone) {
+            s.selectedZone = zone->id;
+            s.queueEntryId = zone->queueEntryId;
+            s.track = zone->track;
+            s.queue = zone->queue;
+            s.playback = zone->playback;
+            auto settings = nativeSettings(s.settings);
+            selectOutput(settings, zone->backend, zone->output, s.devices);
+            s.settings = settingsDto(settings);
+        }
+        s.settings = shown(s.settings);
+        return s;
+    }
+
+    // A Control point's settings on their way to the Server (docs/Plan.md §17.8): what belongs to this computer kept
+    // here, a zone chosen in them followed, and the Server's own output in use put back. Under the mutex.
+    void toServer(Command& command) {
+        if (!own || !command.settings) return;
+        Settings& mine = *own;
+        auto wanted = nativeSettings(*command.settings);
+        copyComputerSettings(wanted, mine);
+        if (raw) {
+            const Snapshot& server = *raw;
+            const auto chosen = zoneId(wanted.backend, outputInUse(wanted));
+            const ZoneSnapshot* serverZone = zoneOf(server, server.selectedZone);
+            if (zoneOf(server, chosen)) {
+                if (chosen != following) {
+                    following = chosen;
+                    mine.followedZone = chosen;
+                    tellFollowing();
+                }
+                if (serverZone && chosen != server.selectedZone) {
+                    selectOutput(wanted, serverZone->backend, serverZone->output, server.devices);
+                    wanted.airplayGroup = nativeSettings(server.settings).airplayGroup;
+                }
+            }
+        }
+        saveQuietly();
+        if (theirs) copyComputerSettings(nativeSettings(*theirs), wanted);
+        command.settings = settingsDto(wanted);
+        if (raw) current = project(*raw);
+    }
+
+    void saveQuietly() const {
+        if (!own) return;
+        try {
+            saveSettings(*own, options.ownSettings);
+        } catch (const std::exception& e) {
+            log::warn("Server API: this computer's settings: %s", e.what());
+        }
+    }
+
+    // Tells the Server which zone this Control point follows, for its list of paired devices; not waited for.
+    void tellFollowing() {
+        if (!connected || !connection) return;
+        try {
+            connection->send(
+                json{{"id", ++lastCall}, {"call", "follow"}, {"args", json::array({following, ++followSerial})}}.dump());
+        } catch (const std::exception&) {
+            // The connection is gone; it says so again once it is back.
+        }
+    }
+
     std::string authorization() const {
         return options.token.empty() ? std::string() : "Authorization: Bearer " + options.token + "\r\n";
     }
 
+    std::pair<std::string, uint16_t> address() const {
+        std::lock_guard lock(mutex);
+        return {host, port};
+    }
+
     SOCKET connect() const {
+        const auto [to, at] = address();
         addrinfo hints{};
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
         addrinfo* found = nullptr;
-        if (getaddrinfo(options.host.c_str(), std::to_string(options.port).c_str(), &hints, &found) != 0 || !found)
-            throw std::runtime_error("Server API: " + options.host + " is not found");
+        if (getaddrinfo(to.c_str(), std::to_string(at).c_str(), &hints, &found) != 0 || !found)
+            throw std::runtime_error("Server API: " + to + " is not found");
         const SOCKET s = socket(found->ai_family, found->ai_socktype, found->ai_protocol);
         const auto reach =
             s == kNoSocket ? Reach::Failed : connectWithin(s, found->ai_addr, int(found->ai_addrlen), options.timeout);
         freeaddrinfo(found);
         if (reach != Reach::Connected) {
             if (s != kNoSocket) closesocket(s);
-            throw std::runtime_error("Server API: " + options.host + " does not answer");
+            throw std::runtime_error("Server API: " + to + " does not answer");
         }
         u_long blocking = 0;
         ioctlsocket(s, FIONBIO, &blocking);
@@ -114,12 +229,13 @@ struct RemoteServer::Impl {
 
     void open() {
         const SOCKET s = connect();
+        const auto [to, at] = address();
         std::array<uint8_t, 16> nonce{};
         std::mt19937 generator{std::random_device{}()};
         for (auto& byte : nonce) byte = uint8_t(generator());
         const auto key = websocket::base64(nonce);
         std::string rest;
-        const bool sent = sendAll(s, "GET /api HTTP/1.1\r\nHost: " + options.host + ":" + std::to_string(options.port) +
+        const bool sent = sendAll(s, "GET /api HTTP/1.1\r\nHost: " + to + ":" + std::to_string(at) +
                                          "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " + key +
                                          "\r\nSec-WebSocket-Version: 13\r\n" + authorization() + "\r\n");
         const auto head = sent ? readHead(s, rest, kMaxHead, options.timeout) : std::nullopt;
@@ -136,16 +252,81 @@ struct RemoteServer::Impl {
             closesocket(s);
             throw std::runtime_error("Server API: the Server refused the connection (" + answer.second + ")");
         }
-        connection = std::make_unique<Connection>(s, true, std::move(rest));
+        auto made = std::make_shared<Connection>(s, true, std::move(rest));
+        std::lock_guard lock(mutex);
+        connection = std::move(made);
+        ++generation;
         connected = true;
+        told = false;
+        decoder = {};
+    }
+
+    // Reads the connection until it ends, then makes it again until the Server answers (docs/Plan.md §17.8): every two
+    // seconds at the address it had, and through mDNS by its ID from time to time; never again once it refuses this
+    // device.
+    void run() {
+        for (int attempt = 0;; ++attempt) {
+            if (attempt == 0 || reconnect(attempt)) readAll();
+            std::unique_lock lock(mutex);
+            if (stopping || refused) return;
+            changed.wait_for(lock, std::chrono::seconds(2), [this] { return stopping; });
+            if (stopping) return;
+        }
+    }
+
+    bool reconnect(int attempt) {
+        try {
+            open();
+            std::lock_guard lock(mutex);
+            if (stopping) {
+                connection->shut();
+                return false;
+            }
+            log::info("Server API: connected to the Server again");
+            return true;
+        } catch (const NotPaired&) {
+            log::warn("Server API: the Server no longer knows this device");
+            std::lock_guard lock(mutex);
+            refused = true;
+        } catch (const std::exception&) {
+            if (attempt % 5 == 0) findAgain();
+        }
+        changed.notify_all();
+        return false;
+    }
+
+    void findAgain() {
+        std::string id;
+        {
+            std::lock_guard lock(mutex);
+            id = hello.contains("server") ? hello["server"].value("id", std::string()) : std::string();
+        }
+        if (id.empty()) return;
+        for (const auto& found : findServers(std::chrono::milliseconds(1500)))
+            if (found.announced.id == id) {
+                std::lock_guard lock(mutex);
+                host = found.address;
+                port = found.announced.port;
+                if (own) {
+                    own->controlled.host = host;
+                    own->controlled.port = port;
+                    saveQuietly();
+                }
+            }
     }
 
     void readAll() {
+        std::shared_ptr<Connection> reading;
+        {
+            std::lock_guard lock(mutex);
+            reading = connection;
+        }
         try {
-            while (const auto message = connection->read(kMaxMessage)) handle(*message);
+            while (const auto message = reading->read(kMaxMessage)) handle(*message);
         } catch (const std::exception& e) {
             log::warn("Server API: the connection ended: %s", e.what());
         }
+        reading->shut(); // the Server's side waits for this one to close
         {
             std::lock_guard lock(mutex);
             connected = false;
@@ -177,7 +358,8 @@ struct RemoteServer::Impl {
             {
                 std::lock_guard lock(mutex);
                 theirs = snapshot.settings;
-                if (own) snapshot.settings = shown(snapshot.settings);
+                raw = snapshot;
+                snapshot = project(std::move(snapshot));
                 current = snapshot;
                 tell = listener;
             }
@@ -200,16 +382,19 @@ struct RemoteServer::Impl {
     }
 
     json call(const std::string& name, json arguments, const CancellationToken& token) {
-        uint64_t id = 0;
+        uint64_t id = 0, made = 0;
+        std::shared_ptr<Connection> sending;
         {
             std::lock_guard lock(mutex);
             if (!connected) throw std::runtime_error("Server API: not connected to the Server");
             id = ++lastCall;
+            made = generation;
+            sending = connection;
             pending[id];
         }
         try {
-            connection->send(json{{"id", id}, {"call", name}, {"args", std::move(arguments)}}.dump(
-                -1, ' ', false, json::error_handler_t::replace));
+            sending->send(json{{"id", id}, {"call", name}, {"args", std::move(arguments)}}.dump(-1, ' ', false,
+                                                                                                json::error_handler_t::replace));
         } catch (const std::exception&) {
             std::lock_guard lock(mutex);
             pending.erase(id);
@@ -226,7 +411,7 @@ struct RemoteServer::Impl {
                 if (!done.error.is_null()) api::rethrow(done.error);
                 return done.result;
             }
-            if (!connected) {
+            if (!connected || generation != made) {
                 pending.erase(id);
                 throw std::runtime_error("Server API: the connection to the Server was lost");
             }
@@ -234,7 +419,7 @@ struct RemoteServer::Impl {
                 cancelSent = true;
                 lock.unlock();
                 try {
-                    connection->send(json{{"cancel", id}}.dump());
+                    sending->send(json{{"cancel", id}}.dump());
                 } catch (const std::exception&) {
                 }
                 lock.lock();
@@ -252,7 +437,7 @@ struct RemoteServer::Impl {
         const SOCKET s = connect();
         HttpReply reply;
         std::string rest;
-        const bool sent = sendAll(s, method + " " + target + " HTTP/1.1\r\nHost: " + options.host +
+        const bool sent = sendAll(s, method + " " + target + " HTTP/1.1\r\nHost: " + address().first +
                                          "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n" + authorization() +
                                          "Connection: close\r\n\r\n" + body);
         const auto head = sent ? readHead(s, rest, kMaxHead, kTransferTimeout) : std::nullopt;
@@ -283,8 +468,9 @@ struct RemoteServer::Impl {
 };
 
 RemoteServer::RemoteServer(Options options) : impl_(std::make_shared<Impl>(std::move(options))) {
+    if (impl_->own) impl_->following = impl_->own->followedZone;
     impl_->open();
-    impl_->reader = std::thread([impl = impl_.get()] { impl->readAll(); });
+    impl_->reader = std::thread([impl = impl_.get()] { impl->run(); });
     std::unique_lock lock(impl_->mutex);
     if (!impl_->changed.wait_for(lock, impl_->options.timeout, [this] { return impl_->current || !impl_->connected; }) ||
         !impl_->current) {
@@ -301,6 +487,11 @@ RemoteServer::~RemoteServer() {
 bool RemoteServer::connected() const {
     std::lock_guard lock(impl_->mutex);
     return impl_->connected;
+}
+
+IServer::Link RemoteServer::link() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->connected ? Link::Connected : impl_->refused ? Link::Refused : Link::Lost;
 }
 
 json RemoteServer::hello() const {
@@ -356,6 +547,10 @@ bool RemoteServer::revokeDevice(const std::string& device) {
     return as<bool>(impl_->call("revokeDevice", args(device), {}));
 }
 
+json RemoteServer::renameDevice(const std::string& name) {
+    return impl_->call("renameDevice", args(name), {});
+}
+
 void RemoteServer::resetOwner() {
     impl_->call("resetOwner", json::array(), {});
 }
@@ -366,20 +561,25 @@ void RemoteServer::setNoticeListener(std::function<void(const json&)> listener) 
 }
 
 void RemoteServer::shutdown() {
-    if (impl_->connection) impl_->connection->shut();
+    std::shared_ptr<Connection> closing;
+    {
+        std::lock_guard lock(impl_->mutex);
+        impl_->stopping = true;
+        closing = impl_->connection;
+    }
+    impl_->changed.notify_all();
+    if (closing) closing->shut();
     if (impl_->reader.joinable()) impl_->reader.join();
 }
 
 CommandStamp RemoteServer::submit(Command command) {
-    if (command.kind == CommandKind::ApplySettings && command.settings) {
+    {
         std::lock_guard lock(impl_->mutex);
         if (impl_->own) {
-            auto wanted = nativeSettings(*command.settings);
-            copyComputerSettings(wanted, *impl_->own);
-            saveSettings(*impl_->own, impl_->options.ownSettings);
-            if (impl_->theirs) copyComputerSettings(nativeSettings(*impl_->theirs), wanted);
-            command.settings = settingsDto(wanted);
-            if (impl_->current && impl_->theirs) impl_->current->settings = impl_->shown(*impl_->theirs);
+            if (command.kind == CommandKind::ApplySettings && command.settings)
+                impl_->toServer(command);
+            else if (actsOnZone(command.kind) && command.zone.empty())
+                command.zone = impl_->following;
         }
     }
     return commandStampFromJson(impl_->call("submit", args(toJson(command)), {}));

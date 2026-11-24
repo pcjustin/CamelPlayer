@@ -4,6 +4,8 @@
 
 #include "Server/Remote/Connection.h"
 
+#include "Server/Network/SocketWait.h"
+
 #include <array>
 #include <random>
 #include <stdexcept>
@@ -92,6 +94,15 @@ std::optional<std::string> Connection::read(size_t limit) {
     for (;;) {
         const auto frame = websocket::decodeFrame(buffer_, !client_, limit);
         if (!frame) {
+            // A peer that never closes its side would otherwise hold the read until Windows gives up on it.
+            fd_set readable;
+            FD_ZERO(&readable);
+            FD_SET(socket_, &readable);
+            if (!waitReadable(readable, std::chrono::milliseconds(250))) {
+                if (shut_) return std::nullopt;
+                continue;
+            }
+            if (shut_) return std::nullopt;
             char chunk[65536];
             const int got = recv(socket_, chunk, int(sizeof(chunk)), 0);
             if (got <= 0) return std::nullopt;
@@ -130,14 +141,14 @@ std::optional<std::string> Connection::read(size_t limit) {
     }
 }
 
+// The close frame goes only when no send is under way, as one held by a peer that stopped reading would hold this too.
 void Connection::shut(uint16_t code) {
-    try {
+    shut_ = true;
+    if (std::unique_lock lock(sending_, std::try_to_lock); lock && !closed_) {
         const char reason[2] = {char(code >> 8), char(code & 0xFF)};
-        sendFrame(websocket::Opcode::Close, std::string_view(reason, 2));
-    } catch (const std::runtime_error&) {
-    }
-    {
-        std::lock_guard lock(sending_);
+        const std::string_view payload(reason, 2);
+        sendAll(socket_, client_ ? websocket::encodeFrame(websocket::Opcode::Close, payload, randomMask())
+                                 : websocket::encodeFrame(websocket::Opcode::Close, payload));
         closed_ = true;
     }
     shutdown(socket_, SD_BOTH);

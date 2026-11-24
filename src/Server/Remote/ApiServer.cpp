@@ -18,6 +18,7 @@
 #include "Server/Api/ApiCalls.h"
 #include "Server/Api/ApiTypesJson.h"
 #include "Server/Network/SocketWait.h"
+#include "Server/Api/Caller.h"
 #include "Server/Remote/ApiSession.h"
 #include "Server/Remote/Connection.h"
 #include "Server/Remote/Pairings.h"
@@ -101,6 +102,11 @@ struct ApiServer::Impl {
     uint16_t port = 0;
     mutable std::mutex mutex;
     std::map<uint64_t, Client> clients;
+    struct Following {
+        std::string zone;
+        uint64_t serial = 0; // its connection's count, as calls are answered in no fixed order
+    };
+    std::map<uint64_t, Following> followed; // the zone each connection's Control point follows
     uint64_t lastClient = 0;
     bool stopping = false;
     std::atomic<size_t> sessions{0};
@@ -238,7 +244,33 @@ struct ApiServer::Impl {
             pairings.resetOwner();
             return ApiSession::Answer{nullptr, [this] { close({}); }};
         }
+        // The zone the calling Control point follows, which the paired devices list shows (docs/Plan.md §17.8).
+        if (call == "follow") {
+            const auto serial = args.size() > 1 ? args.at(1).get<uint64_t>() : 0;
+            std::lock_guard lock(mutex);
+            auto& following = followed[currentCaller().connection];
+            if (serial >= following.serial) following = {args.at(0).get<std::string>(), serial};
+            return ApiSession::Answer{nullptr, {}};
+        }
+        if (call == "renameDevice") {
+            const auto device = currentCaller().device;
+            const auto name = args.at(0).get<std::string>();
+            const auto renamed = pairings.rename(device, name);
+            if (renamed.error.empty()) {
+                std::lock_guard lock(mutex);
+                for (auto& [id, client] : clients)
+                    if (client.session && client.device == device) client.session->setCallerName(name);
+                return ApiSession::Answer{json{{"name", name}}, {}};
+            }
+            return ApiSession::Answer{json{{"error", renamed.error}, {"suggestion", renamed.suggestion}}, {}};
+        }
         return std::nullopt;
+    }
+
+    std::string deviceName(const std::string& device) const {
+        for (const auto& paired : pairings.devices())
+            if (paired.id == device) return paired.name;
+        return {};
     }
 
     json devicesJson() const {
@@ -247,7 +279,12 @@ struct ApiServer::Impl {
         for (const auto& device : pairings.devices()) {
             const bool connected =
                 std::ranges::any_of(clients, [&](const auto& c) { return c.second.session && c.second.device == device.id; });
-            out.push_back({{"id", device.id}, {"name", device.name}, {"paired", device.paired}, {"connected", connected}});
+            std::string zone;
+            for (const auto& [id, client] : clients)
+                if (client.session && client.device == device.id)
+                    if (const auto found = followed.find(id); found != followed.end()) zone = found->second.zone;
+            out.push_back(
+                {{"id", device.id}, {"name", device.name}, {"paired", device.paired}, {"connected", connected}, {"zone", zone}});
         }
         return out;
     }
@@ -275,7 +312,8 @@ struct ApiServer::Impl {
             json{{"api", {{"min", 2}, {"max", 2}}},
                  {"server", {{"id", options.serverId}, {"name", options.serverName}}},
                  {"device", device}},
-            [this](const std::string& call, const json& args) { return pairingCall(call, args); });
+            [this](const std::string& call, const json& args) { return pairingCall(call, args); },
+            Caller{device, deviceName(device), id});
         {
             std::lock_guard lock(mutex);
             clients[id].session = session;
@@ -296,6 +334,7 @@ struct ApiServer::Impl {
             clients[id].connection.reset();
             clients[id].done = true;
             clients[id].socket = INVALID_SOCKET;
+            followed.erase(id);
         }
         session.reset(); // waits for its calls, which send through the connection
         connection.reset();
@@ -412,7 +451,10 @@ ApiServer::~ApiServer() {
         impl_->stopping = true;
         closesocket(impl_->listener);
         for (auto& [id, client] : impl_->clients)
-            if (client.socket != kNoSocket) shutdown(client.socket, SD_BOTH);
+            if (client.connection)
+                client.connection->shut(1001);
+            else if (client.socket != kNoSocket)
+                shutdown(client.socket, SD_BOTH);
     }
     impl_->acceptor.join();
     for (auto& [id, client] : impl_->clients) client.thread.join();

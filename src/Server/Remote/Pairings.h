@@ -45,6 +45,8 @@ public:
     std::optional<PairedDevice> deviceOf(const std::string& token) const;
     std::vector<PairedDevice> devices() const;
     bool revoke(const std::string& device);
+    // A paired device's new name; "nameTaken" with a free one in `suggestion` when another device has it.
+    Answer rename(const std::string& device, const std::string& name);
     void resetOwner(); // every device forgotten: the next to ask claims the Server
     bool owned() const;
 

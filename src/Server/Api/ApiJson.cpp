@@ -516,7 +516,8 @@ json toJson(const Command& c) {
             {"receiver", c.receiver},
             {"code", c.code},
             {"zone", c.zone},
-            {"target", c.target}};
+            {"target", c.target},
+            {"reset", c.reset}};
 }
 
 Command commandFromJson(const json& j) {
@@ -558,10 +559,20 @@ Command commandFromJson(const json& j) {
     if (j.contains("code") || c.kind == CommandKind::PairAirPlay) c.code = value<std::string>(j, "code");
     if (j.contains("zone")) c.zone = value<std::string>(j, "zone");
     if (j.contains("target") || c.kind == CommandKind::Transfer) c.target = value<std::string>(j, "target");
+    if (j.contains("reset")) c.reset = value<bool>(j, "reset");
     return c;
 }
 
 namespace {
+
+json toJson(const ZoneChange& c) {
+    return {{"serial", c.serial}, {"kind", c.kind}, {"device", c.device}, {"name", c.name}, {"zone", c.zone}};
+}
+
+ZoneChange changeFrom(const json& j) {
+    return {value<uint64_t>(j, "serial"), value<std::string>(j, "kind"), value<std::string>(j, "device"),
+            value<std::string>(j, "name"), value<std::string>(j, "zone")};
+}
 
 json toJson(const ZoneSnapshot& z) {
     return {{"id", z.id},
@@ -572,7 +583,9 @@ json toJson(const ZoneSnapshot& z) {
             {"track", optionalJson(z.track)},
             {"queue", toJson(z.queue)},
             {"playback", toJson(z.playback)},
-            {"inUseBy", z.inUseBy}};
+            {"inUseBy", z.inUseBy},
+            {"played", z.played},
+            {"change", toJson(z.change)}};
 }
 
 ZoneSnapshot zoneFrom(const json& j) {
@@ -586,6 +599,8 @@ ZoneSnapshot zoneFrom(const json& j) {
     z.queue = queueFrom(field(j, "queue"));
     z.playback = playbackFrom(field(j, "playback"));
     z.inUseBy = value<std::string>(j, "inUseBy");
+    if (j.contains("played")) z.played = value<uint64_t>(j, "played");
+    if (j.contains("change")) z.change = changeFrom(j["change"]);
     return z;
 }
 
@@ -617,7 +632,9 @@ json toJson(const Snapshot& s) {
                 {"defaultWasapi", s.devices.defaultWasapi}}},
               {"commandError", optionalJson(s.commandError)},
               {"finished", {{"command", s.finished.command}, {"failure", optionalJson(s.finished.failure)}}},
-              {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)}};
+              {"controlPanelOpened", s.controlPanelOpened ? json(*s.controlPanelOpened) : json(nullptr)},
+              {"transfer", {{"serial", s.transfer.serial}, {"from", s.transfer.from}, {"to", s.transfer.to}}},
+              {"notice", toJson(s.notice)}};
     const ZoneSnapshot* shown = selectedZone(s);
     if (shown && shown->queueEntryId == s.queueEntryId && shown->track == s.track && shown->queue == s.queue &&
         shown->playback == s.playback)
@@ -664,6 +681,12 @@ Snapshot snapshotFromJson(const json& j) {
         if (!v.is_boolean()) invalid("controlPanelOpened is not a boolean");
         return v.get<bool>();
     });
+    if (j.contains("transfer")) {
+        const json& transfer = j["transfer"];
+        s.transfer = {value<uint64_t>(transfer, "serial"), value<std::string>(transfer, "from"),
+                      value<std::string>(transfer, "to")};
+    }
+    if (j.contains("notice")) s.notice = changeFrom(j["notice"]);
     return s;
 }
 

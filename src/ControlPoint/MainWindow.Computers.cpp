@@ -297,6 +297,60 @@ std::shared_ptr<DevicePairing> MainWindow::devicePairing() const {
     return std::dynamic_pointer_cast<RemoteServer>(server_);
 }
 
+std::string MainWindow::ownDevice() const {
+    const auto remote = std::dynamic_pointer_cast<RemoteServer>(server_);
+    return remote ? remote->device() : std::string();
+}
+
+// Another computer's Server that does not answer is shown as such until it is back, which RemoteServer waits for.
+void MainWindow::showLink() {
+    const auto link = server_->link();
+    if (shownLink_ == link) return;
+    shownLink_ = link;
+    const auto name = toWide(settings_.controlled.name);
+    const bool refused = link == IServer::Link::Refused;
+    ConnectionBar().Title(ui::format(refused ? L"Link_RefusedTitle" : L"Link_LostTitle", {name}));
+    ConnectionBar().Message(tr(refused ? L"Link_RefusedText" : L"Link_LostText"));
+    ConnectionBar().IsOpen(link != IServer::Link::Connected);
+}
+
+// What another device did to the music this window follows, or to all of it, as "Paused by Study PC" (docs/Plan.md
+// §17.8). The changes made before the window opened, or before it followed its zone, are passed over.
+void MainWindow::showChanges(const Snapshot& snapshot) {
+    const auto zoneNamed = [&](const std::string& id) {
+        const auto zone = std::ranges::find(snapshot.zones, id, &ZoneSnapshot::id);
+        return zone == snapshot.zones.end() ? nullptr : &*zone;
+    };
+    const ZoneSnapshot* followed = zoneNamed(snapshot.selectedZone);
+    const uint64_t latest = followed ? followed->change.serial : 0;
+    const auto nameOf = [&](const ZoneChange& change) {
+        return toWide(change.name.empty() ? settings_.controlled.name : change.name);
+    };
+    std::optional<hstring> said;
+    if (!changesKnown_) {
+        changesKnown_ = true;
+        shownNotice_ = snapshot.notice.serial;
+    } else if (snapshot.selectedZone != changesZone_ && snapshot.transfer.serial != shownTransfer_ &&
+               snapshot.transfer.from == changesZone_ && snapshot.transfer.to == snapshot.selectedZone) {
+        // The queue this window followed went to another zone, and the window with it.
+        const ZoneSnapshot* from = zoneNamed(snapshot.transfer.from);
+        if (from && from->change.device != ownDevice())
+            said = ui::format(L"Change_moved", {nameOf(from->change), followed ? toWide(followed->name) : std::wstring()});
+    } else if (snapshot.selectedZone == changesZone_ && latest > shownChange_ && followed->change.device != ownDevice()) {
+        said = ui::format((L"Change_" + toWide(followed->change.kind)).c_str(), {nameOf(followed->change)});
+    }
+    if (snapshot.notice.serial > shownNotice_ && snapshot.notice.device != ownDevice())
+        said = ui::format((L"Change_" + toWide(snapshot.notice.kind)).c_str(),
+                          {nameOf(snapshot.notice), toWide(snapshot.notice.zone)});
+    changesZone_ = snapshot.selectedZone;
+    shownChange_ = latest;
+    shownTransfer_ = snapshot.transfer.serial;
+    shownNotice_ = snapshot.notice.serial;
+    if (!said) return;
+    ChangeBar().Message(*said);
+    ChangeBar().IsOpen(true);
+}
+
 void MainWindow::useRemoteAccess(std::shared_ptr<RemoteAccess> access) {
     access_ = std::move(access);
     populateComputers();
@@ -357,6 +411,9 @@ winrt::fire_and_forget MainWindow::refreshComputers() {
         log::warn("paired devices: %s", e.what());
     }
     const auto self = remote ? remote->device() : std::string();
+    std::string ownName;
+    for (const auto& device : devices)
+        if (!self.empty() && device.value("id", std::string()) == self) ownName = device.value("name", std::string());
     const auto addresses = lanAddresses();
     co_await foreground;
     if (serial != computersRefresh_ || !settings_.allowControl) co_return;
@@ -369,6 +426,10 @@ winrt::fire_and_forget MainWindow::refreshComputers() {
     }
     if (access) firewallRule_ = rule;
     ControlFirewallNotice().IsOpen(access && !rule);
+    RenamePanel().Visibility(ownName.empty() ? Visibility::Collapsed : Visibility::Visible);
+    if (const auto root = Content().XamlRoot();
+        !ownName.empty() && (!root || Input::FocusManager::GetFocusedElement(root) != DeviceNameBox()))
+        DeviceNameBox().Text(toWide(ownName));
     PublicNetworkNotice().IsOpen(onPublic);
     auto rows = PairedDeviceRows().Children();
     rows.Clear();
@@ -379,11 +440,13 @@ winrt::fire_and_forget MainWindow::refreshComputers() {
         none.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
         rows.Append(none);
     }
+    const auto snapshot = server_->snapshot();
     for (const auto& device : devices) {
         const auto id = device.value("id", std::string());
         auto name = toWide(device.value("name", std::string()));
         if (!self.empty() && id == self) name = std::wstring(ui::format(L"Paired_This", {name}));
         const bool connected = device.value("connected", false);
+        const auto followed = std::ranges::find(snapshot.zones, device.value("zone", std::string()), &ZoneSnapshot::id);
         Grid row;
         row.ColumnSpacing(12);
         row.ColumnDefinitions().Append(ColumnDefinition());
@@ -393,8 +456,9 @@ winrt::fire_and_forget MainWindow::refreshComputers() {
         TextBlock text;
         text.VerticalAlignment(VerticalAlignment::Center);
         text.TextWrapping(TextWrapping::Wrap);
-        text.Text(connected ? ui::format(L"Paired_Connected", {name})
-                            : ui::format(L"Paired_Since", {name, dateOf(device.value("paired", int64_t{0}))}));
+        text.Text(!connected ? ui::format(L"Paired_Since", {name, dateOf(device.value("paired", int64_t{0}))})
+                  : followed != snapshot.zones.end() ? ui::format(L"Paired_ConnectedZone", {name, toWide(followed->name)})
+                                                     : ui::format(L"Paired_Connected", {name}));
         row.Children().Append(text);
         Button revoke;
         revoke.Content(box_value(tr(L"Paired_Revoke")));
@@ -590,6 +654,31 @@ winrt::fire_and_forget MainWindow::revokeDevice(std::string id, std::wstring nam
         log::warn("revoke: %s", e.what());
     }
     co_await foreground;
+    refreshComputers();
+}
+
+// A Control point's name, which no other paired device may have (docs/Plan.md §17.8).
+winrt::fire_and_forget MainWindow::OnRenameDeviceClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    auto strong = get_strong();
+    const auto remote = std::dynamic_pointer_cast<RemoteServer>(server_);
+    const auto name = toUtf8(trimmed(DeviceNameBox().Text()));
+    if (!remote || name.empty()) co_return;
+    winrt::apartment_context foreground;
+    co_await winrt::resume_background();
+    nlohmann::json answer;
+    try {
+        answer = remote->renameDevice(name);
+    } catch (const std::exception& e) {
+        log::warn("rename: %s", e.what());
+    }
+    co_await foreground;
+    if (answer.contains("error")) {
+        DeviceNameBox().Text(toWide(answer.value("suggestion", std::string())));
+        RenameText().Text(ui::format(L"Pair_NameTaken", {toWide(name)}));
+        RenameText().Visibility(Visibility::Visible);
+        co_return;
+    }
+    RenameText().Visibility(Visibility::Collapsed);
     refreshComputers();
 }
 
