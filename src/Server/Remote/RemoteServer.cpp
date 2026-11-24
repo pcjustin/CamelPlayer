@@ -20,6 +20,8 @@
 #include "Server/Api/ApiCalls.h"
 #include "Server/Api/ApiJson.h"
 #include "Server/Api/ApiTypesJson.h"
+#include "Server/Artwork/ArtworkCache.h"
+#include "Server/Integration/DiscordPresence.h"
 #include "Server/Network/SocketWait.h"
 #include "Server/Playback/Outputs.h"
 #include "Server/Remote/Connection.h"
@@ -92,6 +94,25 @@ struct RemoteServer::Impl {
     uint64_t followSerial = 0;         // follow calls sent, for the Server to keep the last
     bool told = false;                 // this connection's Server knows the zone followed
     uint64_t transfers = UINT64_MAX;   // the last Transfer to… taken into account; none before the first snapshot
+    // A Control point's own Discord, from the zone it follows; last, so it goes first, its cover loads with it.
+    std::unique_ptr<DiscordPresence> discord;
+
+    // The Control point's Discord shows on its own computer: the zone it follows, its own settings and its own cover
+    // tunnel, the covers coming from the Server (docs/Plan.md §17.8).
+    void startDiscord() {
+        if (!own) return;
+        discord = std::make_unique<DiscordPresence>(
+            options.ownSettings.parent_path() / L"tools" / L"cloudflared.exe",
+            [this](const std::string& path, const CancellationToken& token) -> std::vector<uint8_t> {
+                if (token.cancelled()) return {};
+                const auto reply = http("GET", "/artwork?kind=" + json(ArtworkKind::Track).get<std::string>() +
+                                                   "&id=0&path=" + websocket::percentEncode(path) + "&name=&pixels=512");
+                if (reply.status != 200 || reply.body.empty()) return {};
+                return squarePicture(std::vector<uint8_t>(reply.body.begin(), reply.body.end()), 512);
+            },
+            options.discord);
+        discord->configure(own->discord);
+    }
 
     // The settings shown: the Server's, with what belongs to this computer from its own.
     SettingsDto shown(const SettingsDto& server) const {
@@ -175,6 +196,7 @@ struct RemoteServer::Impl {
             }
         }
         saveQuietly();
+        if (discord) discord->configure(mine.discord);
         if (theirs) copyComputerSettings(nativeSettings(*theirs), wanted);
         command.settings = settingsDto(wanted);
         if (raw) current = project(*raw);
@@ -377,6 +399,7 @@ struct RemoteServer::Impl {
                 tell = listener;
             }
             changed.notify_all();
+            if (discord) discord->observe(snapshot);
             if (tell) tell(Event{kind, std::move(snapshot)});
             return;
         }
@@ -482,6 +505,7 @@ struct RemoteServer::Impl {
 
 RemoteServer::RemoteServer(Options options) : impl_(std::make_shared<Impl>(std::move(options))) {
     if (impl_->own) impl_->following = impl_->own->followedZone;
+    impl_->startDiscord();
     impl_->open();
     impl_->reader = std::thread([impl = impl_.get()] { impl->run(); });
     std::unique_lock lock(impl_->mutex);
@@ -925,6 +949,7 @@ DataRecovery RemoteServer::dataRecovery() const {
 }
 
 DiscordStatus RemoteServer::discordStatus() const {
+    if (impl_->discord) return impl_->discord->status();
     return as<DiscordStatus>(impl_->call("discordStatus", json::array(), {}));
 }
 
@@ -941,7 +966,10 @@ std::optional<std::vector<uint8_t>> RemoteServer::waveform(const std::string& pa
 }
 
 void RemoteServer::setDiscordTexts(const DiscordTexts& texts) {
-    impl_->call("setDiscordTexts", args(texts), {});
+    if (impl_->discord)
+        impl_->discord->setTexts(texts);
+    else
+        impl_->call("setDiscordTexts", args(texts), {});
 }
 
 } // namespace camel::server

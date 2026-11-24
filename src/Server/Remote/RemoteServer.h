@@ -14,6 +14,7 @@
 #include <string>
 
 #include "Server/Api/ServerApi.h"
+#include "Server/Integration/DiscordRpc.h"
 #include "Server/Remote/DevicePairing.h"
 
 namespace camel::server {
@@ -60,6 +61,8 @@ public:
         // saved to it, never to the Server, whose settings show for the rest. Empty shows the Server's alone.
         std::filesystem::path ownSettings;
         uint32_t apiVersion = kApiVersion; // the version spoken, another only in tests
+        // With ownSettings, the Control point's own Discord Rich Presence (docs/Plan.md §17.8); tests name a stand-in.
+        DiscordClientOptions discord;
     };
     // Connects and waits for the Server's first snapshot; throws NotPaired without a token the Server knows, and
     // std::runtime_error when it cannot connect.

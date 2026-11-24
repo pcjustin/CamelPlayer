@@ -23,9 +23,13 @@
 #include <nlohmann/json.hpp>
 
 #include "Common/util/Text.h"
+#include "OutputBridge/CaptureOutput.h"
 #include "Server/Integration/CoverTunnel.h"
 #include "Server/Integration/DiscordPresence.h"
 #include "Server/Integration/DiscordRpc.h"
+#include "Server/Playback/LocalServer.h"
+#include "Server/Remote/ApiServer.h"
+#include "Server/Remote/RemoteServer.h"
 #include "Server/Support/Http.h"
 #include "Server/Support/Updates.h"
 #include "TestUtil.h"
@@ -561,4 +565,83 @@ TEST(CoverTunnel, DownloadsCloudflaredOnlyWhenItsChecksumMatches) {
         EXPECT_NE(tunnel.status().error.find("did not start"), std::string::npos);
     }
     EXPECT_EQ(update::sha256File(right.executable), right.sha256);
+}
+
+// A Control point runs Discord of its own (docs/Plan.md §17.8): what the zone it follows plays, with its own settings
+// and its own texts, while the Server's Discord stays as the Server's settings have it.
+TEST(DiscordPresence, AControlPointShowsTheZoneItFollowsOnItsOwnDiscord) {
+    const auto dir = testutil::tempDir() / "discord-control-point" /
+                     (std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
+    std::filesystem::create_directories(dir);
+    Settings server;
+    server.autoplay = false;
+    server.wasapi.deviceId = "zone-1";
+    for (int i = 1; i <= 2; ++i) {
+        SavedOutput output;
+        output.backend = Backend::Wasapi;
+        output.id = output.wasapi.deviceId = "zone-" + std::to_string(i);
+        output.name = "Zone " + std::to_string(i);
+        output.enabled = true;
+        output.zone.autoplay = false;
+        server.outputs.push_back(output);
+    }
+    LocalServer local(fromJson(toJson(server)), {}, [&](const Settings& settings) {
+        audio::CaptureOptions options;
+        options.file = dir / (settings.wasapi.deviceId + ".raw");
+        options.accepts = [](const audio::DeviceFormat& f) { return f.type == audio::SampleType::Int32; };
+        options.realtime = true;
+        return audio::createCaptureOutput(options);
+    });
+    local.waitIdle();
+    ApiServer::Options served;
+    served.port = 0;
+    served.portsToTry = 1;
+    served.loopbackOnly = true;
+    served.serverId = "test-server";
+    served.serverName = "Test PC";
+    served.pairings = dir / "pairings.json";
+    ApiServer api(local, served);
+
+    Settings own;
+    own.discord.enabled = true;
+    saveSettings(own, dir / "control-point.json");
+    FakeDiscord discord(pipePrefix("control-point"));
+    RemoteServer::Options options;
+    options.host = "127.0.0.1";
+    options.port = api.port();
+    options.cache = dir / "cache";
+    options.token = RemoteServer::pair("127.0.0.1", api.port(), "Laptop", "").token;
+    options.ownSettings = dir / "control-point.json";
+    options.discord = fastOptions("control-point");
+    RemoteServer point(options);
+    point.setDiscordTexts({"Bit-perfect here", "Lossless here", "Processed here", "Lossy here"});
+    ASSERT_TRUE(waitFor([&] { return point.discordStatus().connection == DiscordConnection::Connected; }));
+    EXPECT_EQ(local.discordStatus().connection, DiscordConnection::Off);
+
+    Command play;
+    play.kind = CommandKind::QueueReplace;
+    play.sources.emplace_back(toUtf8(testutil::testFile("16-44.1k").wstring()));
+    point.submit(play);
+    ASSERT_TRUE(waitFor([&] {
+        const auto activities = discord.activities();
+        return !activities.empty() && activities.back().is_object();
+    }));
+    const auto shown = discord.activities().back();
+    EXPECT_NE(shown.dump().find(" here"), std::string::npos) << shown.dump();
+    const auto followed = point.snapshot().selectedZone;
+    const auto& zones = local.snapshot().zones;
+    const auto zone = std::ranges::find(zones, followed, &ZoneSnapshot::id);
+    ASSERT_NE(zone, zones.end());
+    EXPECT_EQ(zone->playback.state, PlaybackState::Playing);
+
+    auto off = point.snapshot().settings;
+    off.discord.enabled = false;
+    Command apply;
+    apply.kind = CommandKind::ApplySettings;
+    apply.settings = off;
+    point.submit(apply);
+    EXPECT_TRUE(waitFor([&] { return point.discordStatus().connection == DiscordConnection::Off; }));
+    EXPECT_FALSE(loadSettings(dir / "control-point.json").discord.enabled);
+    point.shutdown();
+    local.shutdown();
 }
