@@ -7,6 +7,7 @@
 // raw DSD bit-exact with the switch off and with nothing acting; a muted DSD source sending only silence.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -126,14 +127,21 @@ std::vector<uint8_t> leftDsd(const std::string& bytes, bool dop) {
     return left;
 }
 
-// The amplitude of the 1 kHz tone in DSD at `byteRate`, decoded as playback decodes it, over its middle.
+// The amplitude of the 1 kHz tone in DSD at `byteRate`, decoded as playback decodes it, over the middle of the track:
+// the idle pattern the device gets before and after it, which lasts longer on a busy machine, is left out.
 double toneAmplitude(const std::vector<uint8_t>& dsd, uint32_t byteRate) {
+    constexpr uint8_t kIdle = 0x69;
+    const auto first = std::ranges::find_if(dsd, [](uint8_t b) { return b != kIdle; });
+    const auto last = std::find_if(dsd.rbegin(), dsd.rend(), [](uint8_t b) { return b != kIdle; }).base();
+    if (first >= last) return 0.0;
+    const std::vector<uint8_t> track(first, last);
     CamelDsdToPcm* converter = camel_dsd_to_pcm_create_v1(byteRate * 8, 1);
     EXPECT_NE(converter, nullptr);
     if (!converter) return 0.0;
-    std::vector<float> pcm(dsd.size());
+    std::vector<float> pcm(track.size());
     size_t produced = 0;
-    EXPECT_EQ(camel_dsd_to_pcm_process_v1(converter, dsd.data(), dsd.size(), pcm.data(), pcm.size(), &produced), CAMEL_ENGINE_OK);
+    EXPECT_EQ(camel_dsd_to_pcm_process_v1(converter, track.data(), track.size(), pcm.data(), pcm.size(), &produced),
+              CAMEL_ENGINE_OK);
     camel_dsd_to_pcm_destroy_v1(converter);
     constexpr size_t kPeriods = 1764; // five periods of 1 kHz at 352.8 kHz
     const size_t from = produced / 4, count = (produced / 2) / kPeriods * kPeriods;
@@ -287,6 +295,19 @@ TEST(DspOnDsd, EachStepReachesDsdOverNativeDopAndDsf) {
                 }
             }
         }
+    }
+}
+
+// The tone is measured over the track alone: the idle pattern the device gets after it, until playback has stopped,
+// grows on a busy machine and must not dilute the level (the full suite of 2026-11-24 read 0.61 for 0.5 once).
+TEST(DspOnDsd, TheToneIsMeasuredOverTheTrackHoweverLongTheIdleAfterIt) {
+    for (const uint32_t multiple : {1u, 4u}) {
+        const uint32_t byteRate = multiple * kDsd64Bytes;
+        auto left = leftDsd(play(dsdTone(multiple), withSwitch(Backend::Asio, false), false).bytes, false);
+        const double level = toneAmplitude(left, byteRate);
+        ASSERT_GT(level, 0.2) << byteRate;
+        left.insert(left.end(), size_t(byteRate) * 3 / 10, uint8_t(0x69));
+        EXPECT_NEAR(toneAmplitude(left, byteRate) / level, 1.0, 0.01) << byteRate;
     }
 }
 
