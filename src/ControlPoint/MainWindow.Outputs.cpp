@@ -1231,7 +1231,7 @@ void MainWindow::fillZoneActions(MenuFlyout const& menu, const std::string& id) 
         const auto rows = camel::server::outputRows(nativeSettings(settings_), snapshot.devices);
         MenuFlyoutItem group;
         group.Text(tr(L"Zone_Group"));
-        group.Icon(glyph(L"é02"));
+        group.Icon(glyph(L"\xE902"));
         group.IsEnabled(std::ranges::any_of(rows, [&](const camel::server::OutputRow& r) {
             return r.backend == Backend::AirPlay && r.enabled && r.id != output.id;
         }));
