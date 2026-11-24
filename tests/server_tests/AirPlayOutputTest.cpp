@@ -99,7 +99,9 @@ protected:
         AirPlayOutputOptions options;
         options.details = sampleDetails;
         options.volumeDb = std::move(volume);
-        options.requestTimeoutMs = 500 * testutil::kPairingSlowdown;
+        // Long enough that a computer with every processor busy answers in time (OP-R63); a receiver that stops
+        // answering is still found within the tests' waits.
+        options.requestTimeoutMs = 2000 * testutil::kPairingSlowdown;
         options.heartbeat = 50ms;
         options.closeSessionAfter = 300ms;
         options.closedVerdictAfter = 300ms;
@@ -151,8 +153,9 @@ TEST_F(AirPlayOutputTest, TakesOnlyCdFormat) {
     EXPECT_FALSE(out->supports({44100, 1, SampleType::Int16}));
 }
 
+// The source outlasts the packets checked, however late a busy computer closes the output.
 TEST_F(AirPlayOutputTest, FramesArriveBitForBitInOrder) {
-    CountingSource source(44100);
+    CountingSource source(kSecond * 10);
     auto out = output();
     out->open(kCd, &source);
     out->start();

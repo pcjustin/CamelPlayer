@@ -445,7 +445,8 @@ private:
         std::string request("\x80\xD2\x00\x07", 4);
         request.resize(32, '\0');
         askTiming(request);
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+        // Time a sender with every processor busy takes to answer, inside its own wait for this SETUP (OP-R63).
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
         while (timingReplies().empty() && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         return !timingReplies().empty();
