@@ -449,9 +449,19 @@ TEST(SettingsBoundary, AToolReadsTheSettingsWithoutWritingThem) {
 // Every setting belongs to a reset group or is kept on purpose: the waveform's hours go with Reset interface, the scan
 // speed with Reset playback, and the update a user skipped stays through both (the owner's choice, 2026-11-11).
 TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
-    const std::set<std::string> interfaceGroup{"language",     "closeAction", "theme",        "trayNoticeShown",
-                                               "firstRunDone", "hotkeys",     "checkUpdates", "artistPictures",
-                                               "folderTree",   "waveform",    "trackColumns", "discord"};
+    const std::set<std::string> interfaceGroup{"language",
+                                               "closeAction",
+                                               "theme",
+                                               "trayNoticeShown",
+                                               "firstRunDone",
+                                               "hotkeys",
+                                               "checkUpdates",
+                                               "artistPictures",
+                                               "folderTree",
+                                               "waveform",
+                                               "trackColumns",
+                                               "discord",
+                                               "startWithWindowsAsked"};
     const std::set<std::string> playbackGroup{"backend",
                                               "wasapi",
                                               "asio",
@@ -481,7 +491,8 @@ TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
                                               "scanSpeed",
                                               "followedDefault",
                                               "adoptOutputSets"};
-    const std::set<std::string> kept{"schema", "skippedVersion", "lastFile"};
+    // A computer's role, the CamelPlayer it controls and whether others may control it stay through both resets.
+    const std::set<std::string> kept{"schema", "skippedVersion", "lastFile", "role", "controlled", "allowControl"};
     std::vector<std::string> unlisted;
     const auto file = nlohmann::json::parse(toJson(Settings{}));
     for (const auto& item : file.items())
@@ -504,6 +515,56 @@ TEST(SettingsBoundary, EverySettingIsInAResetGroupOrKeptOnPurpose) {
     EXPECT_EQ(afterPlayback.scanSpeed, defaults.scanSpeed);
     EXPECT_EQ(afterPlayback.waveform, changed.waveform);
     EXPECT_EQ(afterPlayback.skippedVersion, "0.9.9");
+}
+
+TEST(SettingsBoundary, TheRoleAndControlByOtherComputersAreReadBackAndKeptThroughResets) {
+    const Settings defaults;
+    EXPECT_EQ(defaults.role, Role::Play);
+    EXPECT_FALSE(defaults.allowControl);
+    Settings settings;
+    settings.role = Role::Control;
+    settings.controlled = {"a1b2", "Study PC", "192.168.0.20", 9441};
+    settings.allowControl = true;
+    settings.startWithWindowsAsked = true;
+    const auto read = fromJson(toJson(settings));
+    EXPECT_EQ(read.role, Role::Control);
+    EXPECT_EQ(read.controlled, settings.controlled);
+    EXPECT_TRUE(read.allowControl);
+    EXPECT_TRUE(read.startWithWindowsAsked);
+    EXPECT_EQ(fromJson(R"({"controlled":{"port":70000}})").controlled.port, 9440);
+    EXPECT_EQ(fromJson(R"({"role":"remote"})").role, Role::Play);
+
+    for (const auto& reset : {resetPlayback(settings), resetInterface(settings)}) {
+        EXPECT_EQ(reset.role, Role::Control);
+        EXPECT_EQ(reset.controlled, settings.controlled);
+        EXPECT_TRUE(reset.allowControl);
+    }
+    EXPECT_FALSE(resetInterface(settings).startWithWindowsAsked);
+}
+
+// A Control point keeps its own interface, hotkeys, Discord and role, and shows the Server's settings for the rest.
+TEST(SettingsBoundary, ComputerSettingsAreCopiedAndTheServersAreLeft) {
+    Settings own;
+    own.language = "zh-TW";
+    own.theme = Theme::Black;
+    own.hotkeys.playPause = {2, 'P'};
+    own.discord.enabled = true;
+    own.role = Role::Control;
+    own.controlled.id = "server";
+    own.autoplay = false;
+    Settings server;
+    server.allowControl = true;
+    server.backend = Backend::Asio;
+    copyComputerSettings(own, server);
+    EXPECT_EQ(server.language, "zh-TW");
+    EXPECT_EQ(server.theme, Theme::Black);
+    EXPECT_EQ(server.hotkeys.playPause, own.hotkeys.playPause);
+    EXPECT_TRUE(server.discord.enabled);
+    EXPECT_EQ(server.role, Role::Control);
+    EXPECT_EQ(server.controlled.id, "server");
+    EXPECT_TRUE(server.autoplay);
+    EXPECT_TRUE(server.allowControl);
+    EXPECT_EQ(server.backend, Backend::Asio);
 }
 
 TEST(SettingsBoundary, TheEqIsOffWithFiveFlatBandsAndKeepsItsPresetsThroughAPlaybackReset) {

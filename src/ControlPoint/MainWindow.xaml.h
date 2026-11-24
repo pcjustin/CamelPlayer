@@ -12,6 +12,7 @@
 #include "QueueCollection.h"
 #include "Server/Api/ServerApi.h"
 #include "Server/Playback/Outputs.h"
+#include "Server/Remote/RemoteAccess.h"
 #include "Server/Support/Updates.h"
 #include "TrayIcon.h"
 #include "GlobalHotkeys.h"
@@ -127,6 +128,17 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnStartWithWindowsToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnLyricsScrollerSizeChanged(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
     void OnAddFirewallRuleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    // This computer and others (docs/Plan.md §17.8).
+    void useRemoteAccess(std::shared_ptr<camel::server::RemoteAccess> access);
+    void OnAllowControlToggled(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnAddControlFirewallRuleClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnNetworkSettingsClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnShowPairingCodeClick(Windows::Foundation::IInspectable const&,
+                                                  Microsoft::UI::Xaml::RoutedEventArgs const&);
+    winrt::fire_and_forget OnResetOwnerClick(Windows::Foundation::IInspectable const&,
+                                             Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnControlAnotherClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+    void OnPlayHereClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnVolumeModeChanged(Windows::Foundation::IInspectable const&,
                              Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
     void OnVolumeChanged(Windows::Foundation::IInspectable const&,
@@ -273,6 +285,23 @@ private:
     // First-run guide (docs/Plan.md release section): folders, then output; finishing or skipping records it.
     winrt::fire_and_forget showFirstRunGuide();
     winrt::fire_and_forget showFirstRunGuideIfDue();
+    // This computer and others: the Server's own window serves the API through access_, a Control point pairs through
+    // its RemoteServer.
+    std::shared_ptr<camel::server::DevicePairing> devicePairing() const;
+    void populateComputers();
+    winrt::fire_and_forget refreshComputers();
+    winrt::fire_and_forget allowControl();
+    winrt::fire_and_forget stopControl();
+    Windows::Foundation::IAsyncAction addControlFirewallRule();
+    winrt::fire_and_forget revokeDevice(std::string id, std::wstring name, bool mine);
+    winrt::fire_and_forget chooseServerToControl();
+    winrt::fire_and_forget switchToControl(camel::ControlledServer target);
+    winrt::fire_and_forget playHere();
+    winrt::fire_and_forget restartInRole();
+    std::shared_ptr<camel::server::RemoteAccess> access_;
+    uint64_t computersRefresh_ = 0;
+    int computersTicks_ = 0;     // refresh ticks since the paired devices were last read
+    bool refreshFailed_ = false; // the Server did not answer the last refresh, which the log said once
     Microsoft::UI::Xaml::Controls::ListView guideFolders_{nullptr};
     // Shows the running library scan in Settings; reads counters, not the database.
     void showScanProgress();

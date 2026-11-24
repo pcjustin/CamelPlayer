@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -23,6 +24,7 @@
 #include "Server/Support/Http.h"
 
 #include <windows.h>
+#include <netfw.h>
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 
@@ -331,6 +333,22 @@ TEST(FirewallTest, TheRuleIsForThisProgramOnPrivateNetworksOnly) {
     EXPECT_NE(arguments.find(L"profile=private"), std::wstring::npos);
     EXPECT_NE(arguments.find(L"program=\"C:\\Program Files\\Camel\\CamelPlayer.exe\""), std::wstring::npos);
     EXPECT_EQ(arguments.find(L"profile=public"), std::wstring::npos);
+}
+
+// The rule as Windows keeps it for the built CamelPlayer, which this PC has: any remote address, so a Control point on
+// another subnet or over a VPN reaches it by a typed address, and the private profile alone (docs/Plan.md §17.8).
+TEST(FirewallTest, TheRuleReadBackTakesAnyAddressOnPrivateNetworksOnly) {
+    wchar_t self[MAX_PATH];
+    ASSERT_GT(GetModuleFileNameW(nullptr, self, MAX_PATH), 0U);
+    const auto program = std::filesystem::path(self).parent_path().parent_path() / L"App" / L"CamelPlayer.exe";
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const auto rule = firewallRuleFor(program.wstring());
+    const auto missing = firewallRuleFor(L"C:\\nowhere\\CamelPlayer.exe");
+    if (SUCCEEDED(com)) CoUninitialize();
+    EXPECT_FALSE(missing);
+    if (!rule) GTEST_SKIP() << "no rule for " << program.string() << " on this PC";
+    EXPECT_EQ(rule->profiles, NET_FW_PROFILE2_PRIVATE);
+    EXPECT_EQ(rule->remoteAddresses, L"*");
 }
 
 // Started elevated, so it is never looked for where others could have put one of that name, the current directory first.

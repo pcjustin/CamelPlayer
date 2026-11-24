@@ -354,6 +354,7 @@ void MainWindow::populateSettings() {
     fill(LanguageCombo(), {tr(L"Lang_System"), L"繁體中文", L"English"}, lang);
     fill(CloseActionCombo(), {tr(L"Close_Tray"), tr(L"Close_Exit")}, settings_.closeAction == CloseAction::Exit ? 1 : 0);
     showStartWithWindows();
+    populateComputers();
     fill(ThemeCombo(), {tr(L"Theme_System"), tr(L"Theme_Light"), tr(L"Theme_Dark"), tr(L"Theme_Black")}, int(settings_.theme));
     populateOutputs();
     populating_ = false;

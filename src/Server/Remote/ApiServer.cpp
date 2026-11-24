@@ -272,7 +272,9 @@ struct ApiServer::Impl {
         auto connection = std::make_shared<Connection>(s, false, std::move(rest));
         auto session = std::make_shared<ApiSession>(
             server, [connection](const std::string& message) { connection->send(message); },
-            json{{"api", {{"min", 2}, {"max", 2}}}, {"server", {{"id", options.serverId}, {"name", options.serverName}}}},
+            json{{"api", {{"min", 2}, {"max", 2}}},
+                 {"server", {{"id", options.serverId}, {"name", options.serverName}}},
+                 {"device", device}},
             [this](const std::string& call, const json& args) { return pairingCall(call, args); });
         {
             std::lock_guard lock(mutex);

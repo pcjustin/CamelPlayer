@@ -15,8 +15,8 @@ using namespace Microsoft::UI::Xaml;
 
 namespace winrt::CamelPlayer::implementation {
 
-App::App(std::shared_ptr<camel::server::IServer> server, bool startHidden)
-    : server_(std::move(server)), startHidden_(startHidden) {
+App::App(std::shared_ptr<camel::server::IServer> server, bool startHidden, std::shared_ptr<camel::server::RemoteAccess> access)
+    : server_(std::move(server)), access_(std::move(access)), startHidden_(startHidden) {
     if (!server_) server_ = camel::server::createLocalServer();
     // Colors set from code come from the theme dictionaries, of which only the application's own is loaded at the start.
     const auto theme = server_->snapshot().settings.theme;
@@ -47,7 +47,9 @@ void App::OnLaunched(LaunchActivatedEventArgs const&) {
 
 void App::openWindow(std::shared_ptr<camel::server::IServer> server) {
     window_ = make<MainWindow>(std::move(server));
-    get_self<MainWindow>(window_.as<CamelPlayer::MainWindow>())->onReplace([this](auto next) { replaceWindow(std::move(next)); });
+    const auto window = get_self<MainWindow>(window_.as<CamelPlayer::MainWindow>());
+    window->onReplace([this](auto next) { replaceWindow(std::move(next)); });
+    window->useRemoteAccess(access_);
 }
 
 void App::replaceWindow(std::shared_ptr<camel::server::IServer> server) {

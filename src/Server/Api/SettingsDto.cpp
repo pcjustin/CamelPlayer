@@ -45,7 +45,11 @@ SettingsDto settingsDto(const Settings& s) {
             .outputs = s.outputs,
             .airplayGroup = s.airplayGroup,
             .followedDefault = s.followedDefault,
-            .lastFileUtf8 = toUtf8(s.lastFile)};
+            .lastFileUtf8 = toUtf8(s.lastFile),
+            .role = s.role,
+            .controlled = s.controlled,
+            .allowControl = s.allowControl,
+            .startWithWindowsAsked = s.startWithWindowsAsked};
 }
 
 // airplayLevels and adoptOutputSets, which only the Server keeps, start at their defaults.
@@ -87,7 +91,11 @@ Settings nativeSettings(const SettingsDto& s) {
             .outputs = s.outputs,
             .airplayGroup = s.airplayGroup,
             .followedDefault = s.followedDefault,
-            .lastFile = toWide(s.lastFileUtf8)};
+            .lastFile = toWide(s.lastFileUtf8),
+            .role = s.role,
+            .controlled = s.controlled,
+            .allowControl = s.allowControl,
+            .startWithWindowsAsked = s.startWithWindowsAsked};
 }
 
 } // namespace camel::server

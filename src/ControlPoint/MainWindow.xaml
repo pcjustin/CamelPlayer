@@ -634,6 +634,44 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- This computer's role, and other computers controlling it (docs/Plan.md §17.8). -->
+                        <Border x:Name="ComputersCard" Style="{StaticResource SettingsCardStyle}">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <FontIcon Glyph="&#xE977;" FontSize="20" />
+                                    <TextBlock x:Uid="Settings_Computers" Style="{StaticResource CardHeaderStyle}" />
+                                </StackPanel>
+                                <TextBlock x:Name="RoleText" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Uid="Settings_ControlAnother" Click="OnControlAnotherClick" />
+                                    <Button x:Name="PlayHereButton" x:Uid="Settings_PlayHere" Click="OnPlayHereClick" Visibility="Collapsed" />
+                                </StackPanel>
+                                <StackPanel Spacing="4">
+                                    <ToggleSwitch x:Name="AllowControlSwitch" x:Uid="Settings_AllowControl" Toggled="OnAllowControlToggled" />
+                                    <TextBlock x:Name="AllowControlText" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                                </StackPanel>
+                                <InfoBar x:Name="ControlFirewallNotice" x:Uid="Control_FirewallNotice" Severity="Warning" IsClosable="False">
+                                    <InfoBar.ActionButton>
+                                        <Button x:Uid="Firewall_AddButton" Click="OnAddControlFirewallRuleClick" />
+                                    </InfoBar.ActionButton>
+                                </InfoBar>
+                                <InfoBar x:Name="PublicNetworkNotice" x:Uid="Control_PublicNotice" Severity="Warning" IsClosable="False">
+                                    <InfoBar.ActionButton>
+                                        <Button x:Uid="Control_NetworkSettings" Click="OnNetworkSettingsClick" />
+                                    </InfoBar.ActionButton>
+                                </InfoBar>
+                                <StackPanel x:Name="PairedPanel" Spacing="8" Visibility="Collapsed">
+                                    <TextBlock x:Uid="Settings_PairedDevices" Style="{StaticResource GroupHeaderStyle}" />
+                                    <StackPanel x:Name="PairedDeviceRows" Spacing="4" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button x:Uid="Settings_ShowPairingCode" Click="OnShowPairingCodeClick" />
+                                        <Button x:Uid="Settings_ResetOwner" Click="OnResetOwnerClick" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
                         <Border x:Name="ResetCard" Style="{StaticResource SettingsCardStyle}">
                             <StackPanel Spacing="12">
                                 <StackPanel Orientation="Horizontal" Spacing="12">

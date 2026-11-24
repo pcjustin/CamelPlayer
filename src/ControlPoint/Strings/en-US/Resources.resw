@@ -293,7 +293,7 @@
   <data name="Home_DaysHours" xml:space="preserve"><value>{0} d {1} h</value></data>
   <data name="Settings_Guide.Content" xml:space="preserve"><value>Open the first-run guide</value></data>
   <data name="Guide_WelcomeTitle" xml:space="preserve"><value>Welcome to CamelPlayer</value></data>
-  <data name="Guide_Welcome" xml:space="preserve"><value>Three quick steps: choose how CamelPlayer looks, where your music is, and how it plays. You can skip and change all of it later in Settings.</value></data>
+  <data name="Guide_Welcome" xml:space="preserve"><value>A few quick steps: how this computer uses CamelPlayer, how it looks, where your music is and how it plays. You can skip and change all of it later in Settings.</value></data>
   <data name="Guide_ThemeTitle" xml:space="preserve"><value>Choose the look</value></data>
   <data name="Guide_Theme" xml:space="preserve"><value>Light, dark, or the same as Windows. The window changes as you choose.</value></data>
   <data name="Guide_FoldersTitle" xml:space="preserve"><value>Add your music folders</value></data>
@@ -1015,4 +1015,94 @@ Details: {0}</value></data>
   <data name="Settings_AnalysisFrom.Header" xml:space="preserve"><value>From</value></data>
   <data name="Settings_AnalysisTo.Header" xml:space="preserve"><value>To</value></data>
   <data name="Settings_AnalysisNote.Text" xml:space="preserve"><value>Waveforms for the whole library are made in the background once the library is scanned, only in this window (01:00 to 05:00 by default), at the scan speed. A track that plays without one gets it at once, and ReplayGain analysis makes the waveforms of the tracks it reads.</value></data>
+  <data name="Settings_Computers.Text" xml:space="preserve"><value>This computer and others</value></data>
+  <data name="Settings_ControlAnother.Content" xml:space="preserve"><value>Control another CamelPlayer…</value></data>
+  <data name="Settings_PlayHere.Content" xml:space="preserve"><value>Play music on this computer</value></data>
+  <data name="Role_Play" xml:space="preserve"><value>This computer plays music, with its own library and outputs.</value></data>
+  <data name="Role_Control" xml:space="preserve"><value>This computer controls CamelPlayer on {0} ({1}). The music, the library and the outputs are that computer’s.</value></data>
+  <data name="Control_Allow" xml:space="preserve"><value>Let other computers control this CamelPlayer</value></data>
+  <data name="Control_AllowOn" xml:space="preserve"><value>Let other computers control CamelPlayer on {0}</value></data>
+  <data name="Control_Address" xml:space="preserve"><value>Other computers find it on this network, or reach it at {0}.</value></data>
+  <data name="Control_NotServed" xml:space="preserve"><value>Other computers cannot reach it yet: no port from 9440 on is free. The log says more.</value></data>
+  <data name="Control_FirewallNotice.Title" xml:space="preserve"><value>Windows Firewall lets no other computer in</value></data>
+  <data name="Control_FirewallNotice.Message" xml:space="preserve"><value>CamelPlayer adds one rule, for this program on private networks only; network players use the same rule.</value></data>
+  <data name="Control_PublicNotice.Title" xml:space="preserve"><value>Other computers cannot reach CamelPlayer on this network</value></data>
+  <data name="Control_PublicNotice.Message" xml:space="preserve"><value>Windows calls a network this computer is on public, where the rule lets nothing in. If it is your own network, make it private in Windows’ network settings.</value></data>
+  <data name="Control_NetworkSettings.Content" xml:space="preserve"><value>Open network settings</value></data>
+  <data name="Control_FirewallTitle" xml:space="preserve"><value>Let other computers through Windows Firewall?</value></data>
+  <data name="Control_FirewallText" xml:space="preserve"><value>Other computers reach CamelPlayer only when Windows Firewall lets them in. CamelPlayer adds one rule, for this program on private networks only, which network players use too. Windows asks for an administrator to do that.</value></data>
+  <data name="Control_StartTitle" xml:space="preserve"><value>Start CamelPlayer with Windows?</value></data>
+  <data name="Control_StartText" xml:space="preserve"><value>Other computers can control CamelPlayer only while it runs. Started with Windows, it starts once someone signs in, so after a restart, such as one for Windows Update, it is back only after sign-in. Windows’ sign-in options can sign in by themselves after an update’s restart: “Use my sign-in info to automatically finish setting up after an update”.</value></data>
+  <data name="Control_StartButton" xml:space="preserve"><value>Start with Windows</value></data>
+  <data name="Control_SignInOptions" xml:space="preserve"><value>Open sign-in options</value></data>
+  <data name="Control_NotNow" xml:space="preserve"><value>Not now</value></data>
+  <data name="Control_StopTitle" xml:space="preserve"><value>Stop letting other computers control this CamelPlayer?</value></data>
+  <data name="Control_StopCut" xml:space="preserve"><value>These are cut off now:
+{0}</value></data>
+  <data name="Control_StopNone" xml:space="preserve"><value>No other computer is connected now.</value></data>
+  <data name="Control_StopButton" xml:space="preserve"><value>Stop</value></data>
+  <data name="Control_PlayHere" xml:space="preserve"><value>Play music on this computer</value></data>
+  <data name="Control_UnreachedTitle" xml:space="preserve"><value>CamelPlayer on {0} cannot be reached</value></data>
+  <data name="Control_UnreachedText" xml:space="preserve"><value>It may be switched off, asleep or cut off from the network, or no longer let other computers control it.</value></data>
+  <data name="Control_NotPairedTitle" xml:space="preserve"><value>This computer is no longer paired with CamelPlayer on {0}</value></data>
+  <data name="Control_NotPairedText" xml:space="preserve"><value>A paired device revoked it, or reset the owner. Play music here, then pair again in Settings › This computer and others.</value></data>
+  <data name="Settings_PairedDevices.Text" xml:space="preserve"><value>Paired devices</value></data>
+  <data name="Settings_ShowPairingCode.Content" xml:space="preserve"><value>Show a pairing code</value></data>
+  <data name="Settings_ResetOwner.Content" xml:space="preserve"><value>Reset owner…</value></data>
+  <data name="Paired_Connected" xml:space="preserve"><value>{0} · connected now</value></data>
+  <data name="Paired_Since" xml:space="preserve"><value>{0} · paired {1}</value></data>
+  <data name="Paired_This" xml:space="preserve"><value>{0} (this computer)</value></data>
+  <data name="Paired_None" xml:space="preserve"><value>No other computer has paired yet. The first one to connect claims this CamelPlayer without a code.</value></data>
+  <data name="Paired_Revoke" xml:space="preserve"><value>Revoke</value></data>
+  <data name="Paired_RevokeTitle" xml:space="preserve"><value>Revoke {0}?</value></data>
+  <data name="Paired_RevokeText" xml:space="preserve"><value>{0} is cut off now, and has to pair again with a code to control this CamelPlayer.</value></data>
+  <data name="Paired_RevokeSelfText" xml:space="preserve"><value>This computer is cut off now, and has to pair again with a code.</value></data>
+  <data name="Paired_ResetTitle" xml:space="preserve"><value>Reset the owner?</value></data>
+  <data name="Paired_ResetText" xml:space="preserve"><value>Every paired device is forgotten and cut off:
+{0}
+
+The next computer to connect claims this CamelPlayer without a code.</value></data>
+  <data name="Paired_ResetEmpty" xml:space="preserve"><value>The next computer to connect claims this CamelPlayer without a code.</value></data>
+  <data name="Paired_Reset" xml:space="preserve"><value>Reset owner</value></data>
+  <data name="Pairing_CodeTitle" xml:space="preserve"><value>Pairing code</value></data>
+  <data name="Pairing_CodeText" xml:space="preserve"><value>Enter it on the other computer within five minutes. It pairs one computer, once.</value></data>
+  <data name="Pairing_Failed" xml:space="preserve"><value>No pairing code can be shown: {0}</value></data>
+  <data name="Pairing_Done" xml:space="preserve"><value>Done</value></data>
+  <data name="Pair_Title" xml:space="preserve"><value>Control another CamelPlayer</value></data>
+  <data name="Pair_Found" xml:space="preserve"><value>CamelPlayers found on this network</value></data>
+  <data name="Pair_Looking" xml:space="preserve"><value>Looking…</value></data>
+  <data name="Pair_NoneFound" xml:space="preserve"><value>None found. The other computer has to let other computers control it, in its Settings; on another subnet or over a VPN, type its address.</value></data>
+  <data name="Pair_LookAgain" xml:space="preserve"><value>Look again</value></data>
+  <data name="Pair_Address" xml:space="preserve"><value>Or type its address</value></data>
+  <data name="Pair_AddressPlaceholder" xml:space="preserve"><value>192.168.1.20 or 192.168.1.20:9440</value></data>
+  <data name="Pair_Name" xml:space="preserve"><value>This computer’s name, as the other one lists it</value></data>
+  <data name="Pair_Code" xml:space="preserve"><value>Pairing code</value></data>
+  <data name="Pair_CodeNeeded" xml:space="preserve"><value>Enter the code a computer already paired with it shows, in Settings › This computer and others › Show a pairing code.</value></data>
+  <data name="Pair_WrongCode" xml:space="preserve"><value>That code is wrong, or more than five minutes old.</value></data>
+  <data name="Pair_Stopped" xml:space="preserve"><value>Pairing has stopped after five wrong codes. Try again after {0}.</value></data>
+  <data name="Pair_NameTaken" xml:space="preserve"><value>A paired device is already called {0}. Choose another name, such as the one offered.</value></data>
+  <data name="Pair_Unreached" xml:space="preserve"><value>{0} does not answer. Check the address, and that the other computer lets other computers control it.</value></data>
+  <data name="Pair_Self" xml:space="preserve"><value>That is this computer’s own CamelPlayer.</value></data>
+  <data name="Pair_ChooseOne" xml:space="preserve"><value>Choose a CamelPlayer found, or type an address.</value></data>
+  <data name="Pair_Connect" xml:space="preserve"><value>Pair and connect</value></data>
+  <data name="Pair_Working" xml:space="preserve"><value>Pairing…</value></data>
+  <data name="Pair_SwitchTitle" xml:space="preserve"><value>Control CamelPlayer on {0}?</value></data>
+  <data name="Pair_SwitchText" xml:space="preserve"><value>CamelPlayer restarts to control it. This computer’s own library, queues and outputs stay as they are, and come back when it plays music here again.</value></data>
+  <data name="Pair_SwitchPlaying" xml:space="preserve"><value>Music playing here stops:
+{0}</value></data>
+  <data name="Pair_SwitchConnected" xml:space="preserve"><value>Other computers controlling this one are cut off:
+{0}</value></data>
+  <data name="Pair_SwitchButton" xml:space="preserve"><value>Restart and control it</value></data>
+  <data name="PlayHere_Title" xml:space="preserve"><value>Play music on this computer?</value></data>
+  <data name="PlayHere_Text" xml:space="preserve"><value>CamelPlayer restarts and stops controlling CamelPlayer on {0}. This computer’s own library, queues (paused) and outputs come back as they were.</value></data>
+  <data name="PlayHere_Button" xml:space="preserve"><value>Restart and play here</value></data>
+  <data name="Guide_Role" xml:space="preserve"><value>How does this computer use CamelPlayer?</value></data>
+  <data name="Guide_RolePlay" xml:space="preserve"><value>Play music on this computer</value></data>
+  <data name="Guide_RoleControl" xml:space="preserve"><value>Control another CamelPlayer</value></data>
+  <data name="Guide_RoleNote" xml:space="preserve"><value>Controlling another one, this computer is only a remote: the music, the library and the outputs are that computer’s.</value></data>
+  <data name="Guide_ControlTitle" xml:space="preserve"><value>Other computers</value></data>
+  <data name="Guide_Control" xml:space="preserve"><value>May other computers on your network control this CamelPlayer? You can change it later in Settings.</value></data>
+  <data name="Guide_ControlNo" xml:space="preserve"><value>No, only this computer</value></data>
+  <data name="Guide_ControlYes" xml:space="preserve"><value>Yes, let other computers control it</value></data>
+  <data name="Settings_AllowControl.Header" xml:space="preserve"><value>Other computers</value></data>
 </root>

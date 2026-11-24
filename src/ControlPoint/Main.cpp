@@ -19,6 +19,10 @@
 #include "TrayIcon.h"
 #include "UiText.h"
 #include "Server/Api/ServerApi.h"
+#include "Server/Remote/Discovery.h"
+#include "Server/Remote/RemoteAccess.h"
+#include "Server/Remote/RemoteServer.h"
+#include "Server/Remote/ServerTokens.h"
 #include "Server/Support/Updates.h"
 #include "Common/util/CrashDump.h"
 #include "Common/util/FolderWalk.h"
@@ -97,6 +101,103 @@ bool askToRetry(const wchar_t* titleKey, const wchar_t* textKey, const std::wstr
     return SUCCEEDED(TaskDialogIndirect(&config, &chosen, nullptr, nullptr)) && chosen == IDRETRY;
 }
 
+// One instance per data folder: the user's own, or each folder CAMELPLAYER_DATA names, so two copies with folders of
+// their own run side by side (docs/Plan.md §17.8).
+std::wstring instanceName() {
+    std::wstring name = L"Local\\CamelPlayer.Instance";
+    if (GetEnvironmentVariableW(L"CAMELPLAYER_DATA", nullptr, 0) == 0) return name;
+    uint64_t hash = 1469598103934665603ULL;
+    for (const wchar_t c : camel::dataDirectory().wstring()) {
+        hash ^= uint64_t(towlower(c));
+        hash *= 1099511628211ULL;
+    }
+    wchar_t suffix[24];
+    swprintf(suffix, std::size(suffix), L".%016llx", static_cast<unsigned long long>(hash));
+    return name + suffix;
+}
+
+enum class Unreached : uint8_t { Retry, PlayHere, Close };
+
+// A Server that cannot be reached, or no longer knows this computer, at the start of a Control point.
+Unreached askUnreached(bool notPaired, const std::string& server) {
+    const auto title = ui::format(notPaired ? L"Control_NotPairedTitle" : L"Control_UnreachedTitle", {camel::toWide(server)});
+    const auto text = ui::tr(notPaired ? L"Control_NotPairedText" : L"Control_UnreachedText");
+    const auto retry = ui::tr(L"Error_LibraryRetry");
+    const auto play = ui::tr(L"Control_PlayHere");
+    const auto close = ui::tr(L"Error_LibraryClose");
+    std::vector<TASKDIALOG_BUTTON> buttons;
+    if (!notPaired) buttons.push_back({IDRETRY, retry.c_str()});
+    buttons.push_back({IDYES, play.c_str()});
+    buttons.push_back({IDCLOSE, close.c_str()});
+    TASKDIALOGCONFIG config{.cbSize = sizeof(TASKDIALOGCONFIG)};
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+    config.pszWindowTitle = L"CamelPlayer";
+    config.pszMainIcon = TD_WARNING_ICON;
+    config.pszMainInstruction = title.c_str();
+    config.pszContent = text.c_str();
+    config.cButtons = UINT(buttons.size());
+    config.pButtons = buttons.data();
+    config.nDefaultButton = notPaired ? IDYES : IDRETRY;
+    int chosen = IDCLOSE;
+    if (FAILED(TaskDialogIndirect(&config, &chosen, nullptr, nullptr))) return Unreached::Close;
+    return chosen == IDRETRY ? Unreached::Retry : chosen == IDYES ? Unreached::PlayHere : Unreached::Close;
+}
+
+// The CamelPlayer this Control point controls, looked for by its ID when it no longer answers at its address.
+std::shared_ptr<camel::server::IServer> reachControlled(camel::Settings& own, const std::string& token) {
+    camel::server::RemoteServer::Options options;
+    options.host = own.controlled.host;
+    options.port = own.controlled.port;
+    options.cache = camel::dataDirectory() / L"remote-cache";
+    options.token = token;
+    options.ownSettings = camel::settingsPath();
+    try {
+        return std::make_shared<camel::server::RemoteServer>(options);
+    } catch (const camel::server::NotPaired&) {
+        throw;
+    } catch (const std::exception& e) {
+        camel::log::warn("control: %s:%u not reached: %s", own.controlled.host.c_str(), unsigned(own.controlled.port), e.what());
+        for (const auto& found : camel::server::findServers(std::chrono::milliseconds(1500))) {
+            if (found.announced.id != own.controlled.id) continue;
+            options.host = found.address;
+            options.port = found.announced.port;
+            auto server = std::make_shared<camel::server::RemoteServer>(options);
+            own.controlled.host = options.host;
+            own.controlled.port = options.port;
+            camel::saveSettings(own);
+            return server;
+        }
+        throw;
+    }
+}
+
+// Nothing when the user chose to play here instead, `closing` when they chose to close.
+std::shared_ptr<camel::server::IServer> openControlled(camel::Settings& own, bool& closing) {
+    const camel::server::ServerTokens tokens(camel::dataDirectory() / L"server-tokens");
+    for (;;) {
+        bool notPaired = false;
+        try {
+            return reachControlled(own, tokens.token(own.controlled.id).value_or(""));
+        } catch (const camel::server::NotPaired&) {
+            camel::log::warn("control: no longer paired with %s", own.controlled.name.c_str());
+            notPaired = true;
+        } catch (const std::exception& e) {
+            camel::log::warn("control: %s", e.what());
+        }
+        switch (askUnreached(notPaired, own.controlled.name)) {
+        case Unreached::Retry:
+            continue;
+        case Unreached::PlayHere:
+            own.role = camel::Role::Play;
+            camel::saveSettings(own);
+            return nullptr;
+        case Unreached::Close:
+            closing = true;
+            return nullptr;
+        }
+    }
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
@@ -109,13 +210,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     const bool background = camel::startup::isBackgroundStart(commandLine);
     // One instance per Windows user (docs/Plan.md §8.4), decided before the Server opens the library: a second launch
     // shows the running instance's window, even from the notification area, and exits; a background start just exits.
-    HANDLE instance = CreateMutexW(nullptr, FALSE, L"Local\\CamelPlayer.Instance");
-    // After a full reset the previous instance is still exiting; wait for it rather than activating it.
-    if (instance && GetLastError() == ERROR_ALREADY_EXISTS && wcsstr(commandLine, L"--after-reset")) {
+    const auto instanceMutex = instanceName();
+    HANDLE instance = CreateMutexW(nullptr, FALSE, instanceMutex.c_str());
+    // After a full reset or a change of role the previous instance is still exiting; wait for it rather than activating it.
+    if (instance && GetLastError() == ERROR_ALREADY_EXISTS &&
+        (wcsstr(commandLine, L"--after-reset") || wcsstr(commandLine, L"--restart"))) {
         for (int attempt = 0; attempt < 150 && instance && GetLastError() == ERROR_ALREADY_EXISTS; ++attempt) {
             CloseHandle(instance);
             Sleep(200);
-            instance = CreateMutexW(nullptr, FALSE, L"Local\\CamelPlayer.Instance");
+            instance = CreateMutexW(nullptr, FALSE, instanceMutex.c_str());
         }
     }
     if (instance && GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -151,8 +254,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
         camel::log::info("measure: opening the server %.0f ms after process start", camel::measure::sinceProcessStart());
     // Data that cannot be opened is left as it is, and the user learns why instead of the program vanishing.
     std::shared_ptr<camel::server::IServer> server;
+    std::shared_ptr<camel::server::RemoteAccess> access;
     while (!server) {
         try {
+            // A Control point runs no library, output or background work of its own (docs/Plan.md §17.8).
+            if (auto own = camel::readSettingsForTool(camel::settingsPath());
+                own.role == camel::Role::Control && !own.controlled.id.empty()) {
+                applySavedLanguage();
+                bool closing = false;
+                server = openControlled(own, closing);
+                if (closing) return 0;
+                if (server) break;
+            }
             server = camel::server::createLocalServer();
         } catch (const camel::server::LibraryUnavailableError& e) {
             // Often a moment's hold by another program: the user can let it go and try again without restarting.
@@ -175,6 +288,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     }
     if (camel::measure::measuring())
         camel::log::info("measure: server opened %.0f ms after process start", camel::measure::sinceProcessStart());
+    if (const auto local = std::dynamic_pointer_cast<camel::server::LocalServer>(server)) {
+        camel::server::RemoteAccess::Options options;
+        options.data = camel::dataDirectory();
+        options.name = camel::server::computerName();
+        access = std::make_shared<camel::server::RemoteAccess>(*local, options);
+    }
     try {
         const auto s = server->snapshot().settings;
         if (!s.language.empty()) // "" = follow Windows (docs/Plan.md §8.5)
@@ -183,8 +302,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR commandLine, int) {
     } catch (const winrt::hresult_error& e) {
         camel::log::warn("language override failed: 0x%08X", static_cast<unsigned>(e.code()));
     }
-    ::winrt::Microsoft::UI::Xaml::Application::Start(
-        [server, background](auto&&) { ::winrt::make<::winrt::CamelPlayer::implementation::App>(server, background); });
+    ::winrt::Microsoft::UI::Xaml::Application::Start([server, background, access](auto&&) {
+        ::winrt::make<::winrt::CamelPlayer::implementation::App>(server, background, access);
+    });
+    if (access) access->stop();
     // Parts of the UI, such as artwork loads waiting for the stopped UI thread, may still hold the Server, so it is shut
     // down explicitly: the queue is saved and the library closed cleanly. The next start waits for this process, so
     // background work a busy machine leaves no CPU for is abandoned; the library recovers at that start.

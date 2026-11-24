@@ -293,7 +293,7 @@
   <data name="Home_DaysHours" xml:space="preserve"><value>{0} 天 {1} 小時</value></data>
   <data name="Settings_Guide.Content" xml:space="preserve"><value>重新開啟入門引導</value></data>
   <data name="Guide_WelcomeTitle" xml:space="preserve"><value>歡迎使用 CamelPlayer</value></data>
-  <data name="Guide_Welcome" xml:space="preserve"><value>只要三步：選擇外觀、音樂所在的資料夾，再選擇播放的輸出方式。也可以略過，之後在「設定」修改。</value></data>
+  <data name="Guide_Welcome" xml:space="preserve"><value>幾個簡單步驟：這台電腦怎麼使用 CamelPlayer、外觀、音樂所在的資料夾，以及播放的輸出方式。也可以略過，之後在「設定」修改。</value></data>
   <data name="Guide_ThemeTitle" xml:space="preserve"><value>選擇外觀</value></data>
   <data name="Guide_Theme" xml:space="preserve"><value>淺色、深色，或跟 Windows 設定一樣。選擇後視窗會立即改變。</value></data>
   <data name="Guide_FoldersTitle" xml:space="preserve"><value>加入音樂資料夾</value></data>
@@ -1015,4 +1015,94 @@
   <data name="Settings_AnalysisFrom.Header" xml:space="preserve"><value>開始</value></data>
   <data name="Settings_AnalysisTo.Header" xml:space="preserve"><value>結束</value></data>
   <data name="Settings_AnalysisNote.Text" xml:space="preserve"><value>整個媒體庫的波形會在媒體庫掃描完成後於背景產生，只在這個時段（預設 01:00 到 05:00）進行，速度依照掃描速度。播放還沒有波形的歌時會當下產生，ReplayGain 分析讀到的歌也會同時產生波形。</value></data>
+  <data name="Settings_Computers.Text" xml:space="preserve"><value>這台電腦與其他電腦</value></data>
+  <data name="Settings_ControlAnother.Content" xml:space="preserve"><value>控制另一台 CamelPlayer…</value></data>
+  <data name="Settings_PlayHere.Content" xml:space="preserve"><value>在這台電腦播放音樂</value></data>
+  <data name="Role_Play" xml:space="preserve"><value>這台電腦播放音樂，使用它自己的媒體庫與輸出。</value></data>
+  <data name="Role_Control" xml:space="preserve"><value>這台電腦正在控制 {0} 上的 CamelPlayer（{1}）。音樂、媒體庫與輸出都在那台電腦上。</value></data>
+  <data name="Control_Allow" xml:space="preserve"><value>讓其他電腦控制這台 CamelPlayer</value></data>
+  <data name="Control_AllowOn" xml:space="preserve"><value>讓其他電腦控制 {0} 上的 CamelPlayer</value></data>
+  <data name="Control_Address" xml:space="preserve"><value>其他電腦可以在這個網路上找到它，或輸入位址 {0} 連線。</value></data>
+  <data name="Control_NotServed" xml:space="preserve"><value>其他電腦暫時無法連線：從 9440 起沒有可用的連接埠，詳情見記錄檔。</value></data>
+  <data name="Control_FirewallNotice.Title" xml:space="preserve"><value>Windows 防火牆不讓其他電腦連入</value></data>
+  <data name="Control_FirewallNotice.Message" xml:space="preserve"><value>CamelPlayer 會加入一條規則，只允許這個程式在私人網路上連入；網路播放器也使用這條規則。</value></data>
+  <data name="Control_PublicNotice.Title" xml:space="preserve"><value>其他電腦無法在這個網路上連到 CamelPlayer</value></data>
+  <data name="Control_PublicNotice.Message" xml:space="preserve"><value>Windows 把這台電腦連上的網路設為公用網路，這條規則在公用網路上不允許任何連線。如果這是你自己的網路，請在 Windows 的網路設定中把它改為私人網路。</value></data>
+  <data name="Control_NetworkSettings.Content" xml:space="preserve"><value>開啟網路設定</value></data>
+  <data name="Control_FirewallTitle" xml:space="preserve"><value>讓其他電腦通過 Windows 防火牆？</value></data>
+  <data name="Control_FirewallText" xml:space="preserve"><value>只有 Windows 防火牆允許時，其他電腦才能連到 CamelPlayer。CamelPlayer 會加入一條規則，只允許這個程式在私人網路上連入，網路播放器也使用這條規則。Windows 會要求系統管理員權限。</value></data>
+  <data name="Control_StartTitle" xml:space="preserve"><value>讓 CamelPlayer 隨 Windows 啟動？</value></data>
+  <data name="Control_StartText" xml:space="preserve"><value>CamelPlayer 必須在執行中，其他電腦才能控制它。隨 Windows 啟動後，它會在有人登入時啟動，所以像 Windows Update 這類重新開機之後，要等到登入後才會回來。Windows 的登入選項中有一項可以在更新重新開機後，自動用你的登入資訊登入並完成設定。</value></data>
+  <data name="Control_StartButton" xml:space="preserve"><value>隨 Windows 啟動</value></data>
+  <data name="Control_SignInOptions" xml:space="preserve"><value>開啟登入選項</value></data>
+  <data name="Control_NotNow" xml:space="preserve"><value>現在不要</value></data>
+  <data name="Control_StopTitle" xml:space="preserve"><value>不再讓其他電腦控制這台 CamelPlayer？</value></data>
+  <data name="Control_StopCut" xml:space="preserve"><value>以下裝置會立即中斷：
+{0}</value></data>
+  <data name="Control_StopNone" xml:space="preserve"><value>目前沒有其他電腦連線。</value></data>
+  <data name="Control_StopButton" xml:space="preserve"><value>停止</value></data>
+  <data name="Control_PlayHere" xml:space="preserve"><value>在這台電腦播放音樂</value></data>
+  <data name="Control_UnreachedTitle" xml:space="preserve"><value>無法連到 {0} 上的 CamelPlayer</value></data>
+  <data name="Control_UnreachedText" xml:space="preserve"><value>它可能已關機、在睡眠中、網路中斷，或已不再允許其他電腦控制。</value></data>
+  <data name="Control_NotPairedTitle" xml:space="preserve"><value>這台電腦已不再與 {0} 上的 CamelPlayer 配對</value></data>
+  <data name="Control_NotPairedText" xml:space="preserve"><value>已配對的裝置撤銷了它，或重設了擁有者。請先在這台電腦播放，再到「設定 › 這台電腦與其他電腦」重新配對。</value></data>
+  <data name="Settings_PairedDevices.Text" xml:space="preserve"><value>已配對的裝置</value></data>
+  <data name="Settings_ShowPairingCode.Content" xml:space="preserve"><value>顯示配對碼</value></data>
+  <data name="Settings_ResetOwner.Content" xml:space="preserve"><value>重設擁有者…</value></data>
+  <data name="Paired_Connected" xml:space="preserve"><value>{0} · 目前已連線</value></data>
+  <data name="Paired_Since" xml:space="preserve"><value>{0} · 配對於 {1}</value></data>
+  <data name="Paired_This" xml:space="preserve"><value>{0}（這台電腦）</value></data>
+  <data name="Paired_None" xml:space="preserve"><value>還沒有其他電腦配對。第一台連線的電腦不需要配對碼，就會成為這台 CamelPlayer 的擁有者。</value></data>
+  <data name="Paired_Revoke" xml:space="preserve"><value>撤銷</value></data>
+  <data name="Paired_RevokeTitle" xml:space="preserve"><value>撤銷 {0}？</value></data>
+  <data name="Paired_RevokeText" xml:space="preserve"><value>{0} 會立即中斷，之後要再用配對碼配對，才能控制這台 CamelPlayer。</value></data>
+  <data name="Paired_RevokeSelfText" xml:space="preserve"><value>這台電腦會立即中斷，之後要再用配對碼配對。</value></data>
+  <data name="Paired_ResetTitle" xml:space="preserve"><value>重設擁有者？</value></data>
+  <data name="Paired_ResetText" xml:space="preserve"><value>所有已配對的裝置都會被忘記並中斷：
+{0}
+
+下一台連線的電腦不需要配對碼，就會成為這台 CamelPlayer 的擁有者。</value></data>
+  <data name="Paired_ResetEmpty" xml:space="preserve"><value>下一台連線的電腦不需要配對碼，就會成為這台 CamelPlayer 的擁有者。</value></data>
+  <data name="Paired_Reset" xml:space="preserve"><value>重設擁有者</value></data>
+  <data name="Pairing_CodeTitle" xml:space="preserve"><value>配對碼</value></data>
+  <data name="Pairing_CodeText" xml:space="preserve"><value>請在五分鐘內在另一台電腦輸入。這組配對碼只能配對一台電腦一次。</value></data>
+  <data name="Pairing_Failed" xml:space="preserve"><value>無法顯示配對碼：{0}</value></data>
+  <data name="Pairing_Done" xml:space="preserve"><value>完成</value></data>
+  <data name="Pair_Title" xml:space="preserve"><value>控制另一台 CamelPlayer</value></data>
+  <data name="Pair_Found" xml:space="preserve"><value>在這個網路上找到的 CamelPlayer</value></data>
+  <data name="Pair_Looking" xml:space="preserve"><value>搜尋中…</value></data>
+  <data name="Pair_NoneFound" xml:space="preserve"><value>找不到。另一台電腦需要在它的「設定」中允許其他電腦控制；如果在其他網段或透過 VPN，請輸入它的位址。</value></data>
+  <data name="Pair_LookAgain" xml:space="preserve"><value>重新搜尋</value></data>
+  <data name="Pair_Address" xml:space="preserve"><value>或輸入它的位址</value></data>
+  <data name="Pair_AddressPlaceholder" xml:space="preserve"><value>192.168.1.20 或 192.168.1.20:9440</value></data>
+  <data name="Pair_Name" xml:space="preserve"><value>這台電腦的名稱（另一台電腦會這樣列出它）</value></data>
+  <data name="Pair_Code" xml:space="preserve"><value>配對碼</value></data>
+  <data name="Pair_CodeNeeded" xml:space="preserve"><value>請輸入已配對的電腦顯示的配對碼：「設定 › 這台電腦與其他電腦 › 顯示配對碼」。</value></data>
+  <data name="Pair_WrongCode" xml:space="preserve"><value>配對碼錯誤，或已超過五分鐘。</value></data>
+  <data name="Pair_Stopped" xml:space="preserve"><value>連續五次配對碼錯誤，配對已暫停，請在 {0} 之後再試。</value></data>
+  <data name="Pair_NameTaken" xml:space="preserve"><value>已經有配對裝置叫做 {0}，請改用其他名稱，例如建議的名稱。</value></data>
+  <data name="Pair_Unreached" xml:space="preserve"><value>{0} 沒有回應。請確認位址，以及另一台電腦已允許其他電腦控制。</value></data>
+  <data name="Pair_Self" xml:space="preserve"><value>那是這台電腦自己的 CamelPlayer。</value></data>
+  <data name="Pair_ChooseOne" xml:space="preserve"><value>請選擇找到的 CamelPlayer，或輸入位址。</value></data>
+  <data name="Pair_Connect" xml:space="preserve"><value>配對並連線</value></data>
+  <data name="Pair_Working" xml:space="preserve"><value>配對中…</value></data>
+  <data name="Pair_SwitchTitle" xml:space="preserve"><value>控制 {0} 上的 CamelPlayer？</value></data>
+  <data name="Pair_SwitchText" xml:space="preserve"><value>CamelPlayer 會重新啟動並控制它。這台電腦自己的媒體庫、佇列與輸出都會保留，再次在這台電腦播放時就會回來。</value></data>
+  <data name="Pair_SwitchPlaying" xml:space="preserve"><value>這台電腦正在播放的音樂會停止：
+{0}</value></data>
+  <data name="Pair_SwitchConnected" xml:space="preserve"><value>正在控制這台電腦的其他電腦會中斷：
+{0}</value></data>
+  <data name="Pair_SwitchButton" xml:space="preserve"><value>重新啟動並控制</value></data>
+  <data name="PlayHere_Title" xml:space="preserve"><value>在這台電腦播放音樂？</value></data>
+  <data name="PlayHere_Text" xml:space="preserve"><value>CamelPlayer 會重新啟動，不再控制 {0} 上的 CamelPlayer。這台電腦自己的媒體庫、佇列（暫停中）與輸出會恢復原狀。</value></data>
+  <data name="PlayHere_Button" xml:space="preserve"><value>重新啟動並在這裡播放</value></data>
+  <data name="Guide_Role" xml:space="preserve"><value>這台電腦要怎麼使用 CamelPlayer？</value></data>
+  <data name="Guide_RolePlay" xml:space="preserve"><value>在這台電腦播放音樂</value></data>
+  <data name="Guide_RoleControl" xml:space="preserve"><value>控制另一台 CamelPlayer</value></data>
+  <data name="Guide_RoleNote" xml:space="preserve"><value>控制另一台時，這台電腦只是遙控器：音樂、媒體庫與輸出都在那台電腦上。</value></data>
+  <data name="Guide_ControlTitle" xml:space="preserve"><value>其他電腦</value></data>
+  <data name="Guide_Control" xml:space="preserve"><value>要讓網路上的其他電腦控制這台 CamelPlayer 嗎？之後可以在「設定」修改。</value></data>
+  <data name="Guide_ControlNo" xml:space="preserve"><value>不要，只用這台電腦</value></data>
+  <data name="Guide_ControlYes" xml:space="preserve"><value>要，讓其他電腦控制它</value></data>
+  <data name="Settings_AllowControl.Header" xml:space="preserve"><value>其他電腦</value></data>
 </root>

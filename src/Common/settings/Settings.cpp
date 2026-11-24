@@ -834,6 +834,11 @@ std::string toJson(const Settings& s) {
         for (const auto& [id, level] : s.airplayLevels) j["airplayLevels"][id] = {{"level", level.level}, {"muted", level.muted}};
     }
     j["followedDefault"] = s.followedDefault;
+    j["role"] = s.role == Role::Control ? "control" : "play";
+    j["controlled"] = {
+        {"id", s.controlled.id}, {"name", s.controlled.name}, {"host", s.controlled.host}, {"port", s.controlled.port}};
+    j["allowControl"] = s.allowControl;
+    j["startWithWindowsAsked"] = s.startWithWindowsAsked;
     if (s.adoptOutputSets) j["adoptOutputSets"] = true;
     // Any text that is not UTF-8 is replaced rather than stopping every later save.
     return j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
@@ -880,6 +885,17 @@ Settings fromJson(const std::string& text) {
                        : pictures == "refused" ? OnlineLookup::Refused
                                                : OnlineLookup::Ask;
     s.folderTree = boolean(j, "folderTree", false);
+    s.role = str(j, "role", "play") == "control" ? Role::Control : Role::Play;
+    if (const auto c = j.find("controlled"); c != j.end() && c->is_object()) {
+        s.controlled.id = str(*c, "id", "");
+        s.controlled.name = str(*c, "name", "");
+        s.controlled.host = str(*c, "host", "");
+        if (const auto port = c->find("port");
+            port != c->end() && port->is_number_unsigned() && port->get<uint64_t>() > 0 && port->get<uint64_t>() <= 65535)
+            s.controlled.port = port->get<uint16_t>();
+    }
+    s.allowControl = boolean(j, "allowControl", false);
+    s.startWithWindowsAsked = boolean(j, "startWithWindowsAsked", false);
     const auto speed = std::ranges::find(kScanSpeedIds, str(j, "scanSpeed", "low"));
     s.scanSpeed = speed == std::end(kScanSpeedIds) ? ScanSpeed::Low : ScanSpeed(speed - std::begin(kScanSpeedIds));
     if (const auto w = j.find("waveform"); w != j.end() && w->is_object()) {
@@ -1022,6 +1038,10 @@ Settings resetPlayback(const Settings& s) {
     reset.skippedVersion = s.skippedVersion;
     reset.eq.presets = s.eq.presets;
     reset.lastFile = s.lastFile;
+    reset.role = s.role;
+    reset.controlled = s.controlled;
+    reset.allowControl = s.allowControl;
+    reset.startWithWindowsAsked = s.startWithWindowsAsked;
     return reset;
 }
 
@@ -1040,7 +1060,25 @@ Settings resetInterface(const Settings& s) {
     reset.waveform = defaults.waveform;
     reset.trackColumns = defaults.trackColumns;
     reset.discord = defaults.discord;
+    reset.startWithWindowsAsked = defaults.startWithWindowsAsked;
     return reset;
+}
+
+void copyComputerSettings(const Settings& from, Settings& to) {
+    to.language = from.language;
+    to.closeAction = from.closeAction;
+    to.theme = from.theme;
+    to.trayNoticeShown = from.trayNoticeShown;
+    to.firstRunDone = from.firstRunDone;
+    to.checkUpdates = from.checkUpdates;
+    to.folderTree = from.folderTree;
+    to.trackColumns = from.trackColumns;
+    to.discord = from.discord;
+    to.skippedVersion = from.skippedVersion;
+    to.hotkeys = from.hotkeys;
+    to.lastFile = from.lastFile;
+    to.role = from.role;
+    to.controlled = from.controlled;
 }
 
 bool inAnalysisWindow(const WaveformSettings& settings, int minute) {

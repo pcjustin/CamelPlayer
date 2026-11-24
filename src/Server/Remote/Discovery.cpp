@@ -110,16 +110,6 @@ std::string hostName() {
     return host.empty() ? std::string("camelplayer") : host.substr(0, host.find('.'));
 }
 
-std::vector<std::string> addressTexts() {
-    std::vector<std::string> out;
-    for (const auto& address : localAddresses()) {
-        char text[INET_ADDRSTRLEN] = {};
-        inet_ntop(AF_INET, &address, text, sizeof(text));
-        out.emplace_back(text);
-    }
-    return out;
-}
-
 sockaddr_in groupAddress() {
     sockaddr_in group{};
     group.sin_family = AF_INET;
@@ -138,6 +128,16 @@ void sendToGroup(SOCKET s, const std::string& message) {
 }
 
 } // namespace
+
+std::vector<std::string> lanAddresses() {
+    std::vector<std::string> out;
+    for (const auto& address : localAddresses()) {
+        char text[INET_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET, &address, text, sizeof(text));
+        out.emplace_back(text);
+    }
+    return out;
+}
 
 namespace discovery {
 
@@ -256,7 +256,7 @@ struct ServerAnnouncer::Impl {
     std::jthread thread;
 
     std::string response(uint32_t ttl, uint16_t id = 0, std::string_view question = {}) const {
-        return discovery::responseMessage(announcement, host, addressTexts(), ttl, id, question);
+        return discovery::responseMessage(announcement, host, lanAddresses(), ttl, id, question);
     }
 
     void run(const std::stop_token& stop) {

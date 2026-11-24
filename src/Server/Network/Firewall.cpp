@@ -7,6 +7,7 @@
 #include <windows.h>
 // windows.h comes first
 #include <netfw.h>
+#include <netlistmgr.h>
 #include <shellapi.h>
 #include <wil/com.h>
 #include <wil/resource.h>
@@ -29,30 +30,50 @@ std::wstring programPath() {
 
 } // namespace
 
-// Each copy of CamelPlayer has its own rule under one name, so every rule of that name is looked at.
 bool firewallRuleExists() {
+    return firewallRuleFor(programPath()).has_value();
+}
+
+// Each copy of CamelPlayer has its own rule under one name, so every rule of that name is looked at.
+std::optional<FirewallRuleState> firewallRuleFor(const std::wstring& program) {
     const auto policy = wil::CoCreateInstanceNoThrow<NetFwPolicy2, INetFwPolicy2>();
     wil::com_ptr<INetFwRules> rules;
-    if (!policy || FAILED(policy->get_Rules(&rules))) return false;
+    if (!policy || FAILED(policy->get_Rules(&rules))) return std::nullopt;
     wil::com_ptr<IUnknown> enumerable;
-    if (FAILED(rules->get__NewEnum(&enumerable))) return false;
+    if (FAILED(rules->get__NewEnum(&enumerable))) return std::nullopt;
     const auto items = enumerable.try_query<IEnumVARIANT>();
-    if (!items) return false;
-    const std::wstring program = programPath();
+    if (!items) return std::nullopt;
     for (;;) {
         wil::unique_variant item;
         ULONG fetched = 0;
-        if (items->Next(1, &item, &fetched) != S_OK || fetched == 0) return false;
+        if (items->Next(1, &item, &fetched) != S_OK || fetched == 0) return std::nullopt;
         if (item.vt != VT_DISPATCH || !item.pdispVal) continue;
         wil::com_ptr<INetFwRule> rule;
         if (FAILED(item.pdispVal->QueryInterface(IID_PPV_ARGS(&rule)))) continue;
         wil::unique_bstr name, application;
         VARIANT_BOOL enabled = VARIANT_FALSE;
         if (FAILED(rule->get_Name(&name)) || !name || wcscmp(name.get(), kRuleName) != 0) continue;
-        if (SUCCEEDED(rule->get_Enabled(&enabled)) && enabled != VARIANT_FALSE &&
-            SUCCEEDED(rule->get_ApplicationName(&application)) && application &&
-            _wcsicmp(application.get(), program.c_str()) == 0)
-            return true;
+        if (FAILED(rule->get_Enabled(&enabled)) || enabled == VARIANT_FALSE || FAILED(rule->get_ApplicationName(&application)) ||
+            !application || _wcsicmp(application.get(), program.c_str()) != 0)
+            continue;
+        FirewallRuleState state;
+        rule->get_Profiles(&state.profiles);
+        if (wil::unique_bstr remote; SUCCEEDED(rule->get_RemoteAddresses(&remote)) && remote)
+            state.remoteAddresses = remote.get();
+        return state;
+    }
+}
+
+bool publicNetworkConnected() {
+    const auto manager = wil::CoCreateInstanceNoThrow<NetworkListManager, INetworkListManager>();
+    wil::com_ptr<IEnumNetworks> networks;
+    if (!manager || FAILED(manager->GetNetworks(NLM_ENUM_NETWORK_CONNECTED, &networks))) return false;
+    for (;;) {
+        wil::com_ptr<INetwork> network;
+        ULONG fetched = 0;
+        if (networks->Next(1, &network, &fetched) != S_OK || fetched == 0) return false;
+        NLM_NETWORK_CATEGORY category = NLM_NETWORK_CATEGORY_PRIVATE;
+        if (SUCCEEDED(network->GetCategory(&category)) && category == NLM_NETWORK_CATEGORY_PUBLIC) return true;
     }
 }
 

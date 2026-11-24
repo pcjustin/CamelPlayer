@@ -60,7 +60,9 @@ struct RemoteServer::Impl {
         std::string body;
     };
 
-    explicit Impl(Options o) : options(std::move(o)) {}
+    explicit Impl(Options o) : options(std::move(o)) {
+        if (!options.ownSettings.empty()) own = loadSettings(options.ownSettings);
+    }
 
     Options options;
     WinsockScope winsock;
@@ -75,7 +77,16 @@ struct RemoteServer::Impl {
     std::function<void(const Event&)> listener;
     std::function<void(const json&)> noticeListener;
     json hello;
-    api::QueueDecoder decoder; // the reader's alone
+    api::QueueDecoder decoder;         // the reader's alone
+    std::optional<Settings> own;       // a Control point's own settings, with options.ownSettings
+    std::optional<SettingsDto> theirs; // the Server's, as it last sent them
+
+    // The settings shown: the Server's, with what belongs to this computer from its own.
+    SettingsDto shown(const SettingsDto& server) const {
+        auto settings = nativeSettings(server);
+        copyComputerSettings(*own, settings);
+        return settingsDto(settings);
+    }
 
     std::string authorization() const {
         return options.token.empty() ? std::string() : "Authorization: Bearer " + options.token + "\r\n";
@@ -165,6 +176,8 @@ struct RemoteServer::Impl {
             std::function<void(const Event&)> tell;
             {
                 std::lock_guard lock(mutex);
+                theirs = snapshot.settings;
+                if (own) snapshot.settings = shown(snapshot.settings);
                 current = snapshot;
                 tell = listener;
             }
@@ -291,6 +304,11 @@ json RemoteServer::hello() const {
     return impl_->hello;
 }
 
+std::string RemoteServer::device() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->hello.value("device", std::string());
+}
+
 RemoteServer::Paired RemoteServer::pair(const std::string& host, uint16_t port, const std::string& name, const std::string& code,
                                         std::chrono::milliseconds timeout) {
     Options options;
@@ -349,6 +367,17 @@ void RemoteServer::shutdown() {
 }
 
 CommandStamp RemoteServer::submit(Command command) {
+    if (command.kind == CommandKind::ApplySettings && command.settings) {
+        std::lock_guard lock(impl_->mutex);
+        if (impl_->own) {
+            auto wanted = nativeSettings(*command.settings);
+            copyComputerSettings(wanted, *impl_->own);
+            saveSettings(*impl_->own, impl_->options.ownSettings);
+            if (impl_->theirs) copyComputerSettings(nativeSettings(*impl_->theirs), wanted);
+            command.settings = settingsDto(wanted);
+            if (impl_->current && impl_->theirs) impl_->current->settings = impl_->shown(*impl_->theirs);
+        }
+    }
     return commandStampFromJson(impl_->call("submit", args(toJson(command)), {}));
 }
 

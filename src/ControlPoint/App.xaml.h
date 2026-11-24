@@ -6,12 +6,14 @@
 
 #include "App.xaml.g.h"
 #include "Server/Api/ServerApi.h"
+#include "Server/Remote/RemoteAccess.h"
 #include "Common/util/CrashDump.h"
 
 namespace winrt::CamelPlayer::implementation {
 
 struct App : AppT<App> {
-    explicit App(std::shared_ptr<camel::server::IServer> server = {}, bool startHidden = false);
+    explicit App(std::shared_ptr<camel::server::IServer> server = {}, bool startHidden = false,
+                 std::shared_ptr<camel::server::RemoteAccess> access = {});
     void OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&);
 
 private:
@@ -19,7 +21,8 @@ private:
     void replaceWindow(std::shared_ptr<camel::server::IServer> server);
 
     std::shared_ptr<camel::server::IServer> server_;
-    bool startHidden_ = false; // started with Windows: the window waits in the notification area
+    std::shared_ptr<camel::server::RemoteAccess> access_; // while this computer plays: other computers controlling it
+    bool startHidden_ = false;                            // started with Windows: the window waits in the notification area
     Microsoft::UI::Xaml::Window window_{nullptr};
     std::optional<camel::HangWatch> hangWatch_;
 };

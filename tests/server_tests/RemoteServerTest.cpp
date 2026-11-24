@@ -443,3 +443,51 @@ TEST_F(RemoteServerTest, FiveWrongCodesStopPairingAndThePairedDevicesAreTold) {
     ASSERT_TRUE(told.wait_for(lock, std::chrono::seconds(5), [&] { return notice.has_value(); }));
     EXPECT_EQ((*notice)["kind"], "pairingStopped");
 }
+
+// A Control point keeps its own interface, hotkeys and role in its own settings.json, and the Server keeps its own;
+// every other setting is the Server's (docs/Plan.md §17.8).
+TEST_F(RemoteServerTest, AControlPointKeepsItsOwnInterfaceSettings) {
+    const auto own = dir / "control" / "settings.json";
+    std::filesystem::create_directories(own.parent_path());
+    camel::Settings mine;
+    mine.language = "zh-TW";
+    mine.theme = camel::Theme::Black;
+    mine.role = camel::Role::Control;
+    mine.backend = camel::Backend::Asio; // this computer's own, left untouched
+    camel::saveSettings(mine, own);
+    RemoteServer::Options options;
+    options.host = "127.0.0.1";
+    options.port = api->port();
+    options.cache = dir / "cache";
+    options.token = token;
+    options.ownSettings = own;
+    const auto controlPoint = std::make_unique<RemoteServer>(options);
+
+    auto shown = controlPoint->snapshot().settings;
+    EXPECT_EQ(shown.language, "zh-TW");
+    EXPECT_EQ(shown.theme, camel::Theme::Black);
+    EXPECT_EQ(shown.role, camel::Role::Control);
+    EXPECT_EQ(shown.backend, camel::Backend::Wasapi);
+
+    shown.theme = camel::Theme::Light;
+    shown.autoplay = false;
+    Command command;
+    command.kind = CommandKind::ApplySettings;
+    command.settings = shown;
+    controlPoint->submit(command);
+    controlPoint->waitIdle();
+    const auto server = local->snapshot().settings;
+    EXPECT_EQ(server.theme, camel::Theme::System);
+    EXPECT_EQ(server.language, "");
+    EXPECT_EQ(server.role, camel::Role::Play);
+    EXPECT_FALSE(server.autoplay);
+    const auto kept = camel::loadSettings(own);
+    EXPECT_EQ(kept.theme, camel::Theme::Light);
+    EXPECT_EQ(kept.backend, camel::Backend::Asio);
+    EXPECT_TRUE(kept.autoplay);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (controlPoint->snapshot().settings.autoplay && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(controlPoint->snapshot().settings.autoplay);
+    EXPECT_EQ(controlPoint->snapshot().settings.theme, camel::Theme::Light);
+}

@@ -244,6 +244,15 @@ enum class CloseAction : uint8_t { Tray, Exit };
 enum class Theme : uint8_t { System, Light, Dark, Black };
 // A lookup on the internet the user is asked about once, where it is first needed.
 enum class OnlineLookup : uint8_t { Ask, Allowed, Refused };
+// What this computer does (docs/Plan.md §17.8): plays with its own library and outputs, or controls another CamelPlayer.
+enum class Role : uint8_t { Play, Control };
+
+// The CamelPlayer a Control point controls, known by its ID; the address is where it was last reached.
+struct ControlledServer {
+    std::string id, name, host;
+    uint16_t port = 9440;
+    bool operator==(const ControlledServer&) const = default;
+};
 
 // A global hotkey as RegisterHotKey takes it: MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8 and a virtual-key code;
 // key 0 leaves the action without a hotkey.
@@ -500,7 +509,11 @@ struct Settings {
     std::map<std::string, AirPlayLevel> airplayLevels; // by receiver, only the Server's
     std::string followedDefault; // the endpoint whose parameters are in `wasapi` while it follows the Windows default
     std::wstring lastFile;
-    bool adoptOutputSets = false; // from an earlier version: each backend's set still has to reach its device
+    Role role = Role::Play;
+    ControlledServer controlled;
+    bool allowControl = false;          // other computers may control this one, its Server API served on the LAN
+    bool startWithWindowsAsked = false; // allowing control has asked once whether to start with Windows
+    bool adoptOutputSets = false;       // from an earlier version: each backend's set still has to reach its device
     // Read from a version before zones: the saved queue's shuffle and repeat still have to become every zone's. Never
     // written, as the start that reads them restores the queue.
     bool adoptQueueChoices = false;
@@ -520,6 +533,11 @@ void setZoneChoices(Settings& s, const ZoneChoices& choices);
 // Each keeps the other group, and both keep the release a user skipped and the last file opened.
 Settings resetPlayback(const Settings& s);
 Settings resetInterface(const Settings& s);
+
+// What belongs to a computer rather than to the Server it plays on (docs/Plan.md §17.8), copied from `from` into `to`:
+// the interface settings, the hotkeys, Discord, the update check, the role and the CamelPlayer it controls. A Control
+// point keeps these of its own and shows the Server's settings for the rest.
+void copyComputerSettings(const Settings& from, Settings& to);
 
 // The selected backend's fixed rate (0: follow the file) and timing.
 uint32_t fixedRate(const Settings& s);

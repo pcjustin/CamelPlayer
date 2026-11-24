@@ -65,8 +65,10 @@ Open a WebSocket at `ws://<host>:<port>/api` (RFC 6455, version 13). Every messa
 Once the connection is open, the Server sends a `hello` message and then its first snapshot:
 
 ```json
-{"hello": {"api": {"min": 2, "max": 2}, "server": {"id": "…", "name": "Study PC"}}}
+{"hello": {"api": {"min": 2, "max": 2}, "server": {"id": "…", "name": "Study PC"}, "device": "…"}}
 ```
+
+`device` is the ID the Server gave the connecting device when it paired, as `pairedDevices` lists it.
 
 ### Calls
 

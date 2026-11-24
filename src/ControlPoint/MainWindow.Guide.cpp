@@ -58,8 +58,27 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
         return block;
     };
 
+    // The role first (docs/Plan.md §17.8): playing here, the default, or controlling another CamelPlayer.
     StackPanel welcome;
+    welcome.Spacing(12);
     welcome.Children().Append(text(L"Guide_Welcome"));
+    RadioButtons role;
+    role.Header(box_value(tr(L"Guide_Role")));
+    role.Items().Append(box_value(tr(L"Guide_RolePlay")));
+    role.Items().Append(box_value(tr(L"Guide_RoleControl")));
+    role.SelectedIndex(0);
+    welcome.Children().Append(role);
+    welcome.Children().Append(text(L"Guide_RoleNote"));
+
+    // Playing here asks once whether other computers may control this one, off by default.
+    StackPanel others;
+    others.Spacing(12);
+    others.Children().Append(text(L"Guide_Control"));
+    RadioButtons allow;
+    allow.Items().Append(box_value(tr(L"Guide_ControlNo")));
+    allow.Items().Append(box_value(tr(L"Guide_ControlYes")));
+    allow.SelectedIndex(settings_.allowControl ? 1 : 0);
+    others.Children().Append(allow);
 
     // Appearance: applied and saved at once, so the guide itself already shows the choice.
     ContentDialog dialog;
@@ -142,7 +161,8 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     StackPanel done;
     done.Children().Append(text(L"Guide_Done"));
 
-    const std::array<std::pair<const wchar_t*, UIElement>, 5> steps{{{L"Guide_WelcomeTitle", welcome},
+    const std::array<std::pair<const wchar_t*, UIElement>, 6> steps{{{L"Guide_WelcomeTitle", welcome},
+                                                                     {L"Guide_ControlTitle", others},
                                                                      {L"Guide_ThemeTitle", appearance},
                                                                      {L"Guide_FoldersTitle", folders},
                                                                      {L"Guide_OutputTitle", output},
@@ -150,6 +170,7 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.DefaultButton(ContentDialogButton::Primary);
     size_t step = 0;
+    bool control = false; // Control another CamelPlayer was chosen: the guide ends, and pairing follows
     const auto show = [&] {
         dialog.Title(box_value(tr(steps[step].first)));
         dialog.Content(steps[step].second);
@@ -160,6 +181,10 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     };
     dialog.PrimaryButtonClick([&](auto&&, ContentDialogButtonClickEventArgs const& e) {
         if (step + 1 == steps.size()) return;
+        if (step == 0 && role.SelectedIndex() == 1) {
+            control = true;
+            return;
+        }
         e.Cancel(true);
         ++step;
         show();
@@ -174,7 +199,7 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     guideFolders_ = nullptr;
 
     // Finishing applies the chosen output; skipping keeps the defaults. Either way the guide is done.
-    if (result == ContentDialogResult::Primary) {
+    if (result == ContentDialogResult::Primary && !control) {
         const auto index = device.SelectedIndex();
         if (index >= 0 && size_t(index) < devices->size())
             changeOutputs([&](camel::Settings& s, const DeviceCatalog& catalog) {
@@ -187,6 +212,10 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
     command.settings = settings_;
     submitCommand(std::move(command));
     populateSettings();
+    if (control)
+        chooseServerToControl();
+    else if (result == ContentDialogResult::Primary && allow.SelectedIndex() == 1 && !settings_.allowControl)
+        allowControl();
 }
 
 } // namespace winrt::CamelPlayer::implementation

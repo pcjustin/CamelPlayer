@@ -640,9 +640,21 @@ void MainWindow::setRefreshing(bool refreshing) {
 void MainWindow::refreshFromServer() {
     if (!server_) return;
     applySnapshot(server_->snapshot());
-    showScanProgress();
-    showLoudnessProgress();
-    showDiscordStatus();
+    // Another computer's Server answers only while it is connected (docs/Plan.md §17.8).
+    try {
+        showScanProgress();
+        showLoudnessProgress();
+        showDiscordStatus();
+    } catch (const std::exception& e) {
+        if (!std::exchange(refreshFailed_, true)) camel::log::warn("the Server does not answer: %s", e.what());
+        return;
+    }
+    refreshFailed_ = false;
+    // Who is paired and connected, while Settings shows it.
+    if (settings_.allowControl && SettingsPanel().Visibility() == Visibility::Visible && ++computersTicks_ >= 20) {
+        computersTicks_ = 0;
+        refreshComputers();
+    }
 }
 
 void MainWindow::showScanProgress() {
@@ -738,6 +750,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         snapshot.settings.airplay.deviceId != settings_.airplay.deviceId) {
         shownDevicesRevision_ = snapshot.devices.revision;
         showOutputsOf(snapshot.settings);
+    }
+    // Control by other computers may be turned off from one of them.
+    if (snapshot.settings.allowControl != settings_.allowControl) {
+        settings_.allowControl = snapshot.settings.allowControl;
+        populateComputers();
     }
     if (snapshot.playback.receivers != receivers_) {
         receivers_ = snapshot.playback.receivers;
@@ -1285,6 +1302,7 @@ void MainWindow::showPage(hstring const& tag) {
         homeView->refresh();
     }
     SettingsPanel().Visibility(tag == L"settings" ? Visibility::Visible : Visibility::Collapsed);
+    if (tag == L"settings" && settings_.allowControl) refreshComputers();
     const bool library = tag == L"albums" || tag == L"artists" || tag == L"composers" || tag == L"genres" || tag == L"years" ||
                          tag == L"tracks" || tag == L"folders" || std::wstring_view(tag).starts_with(L"smart:");
     Library().Visibility(library ? Visibility::Visible : Visibility::Collapsed);
@@ -1680,15 +1698,11 @@ void MainWindow::OnPaneToggleRequested(TitleBar const&, Windows::Foundation::IIn
 // Back sits in the title bar, as in other Windows apps, while a library page has somewhere to return to.
 void MainWindow::addSettingsLinks() {
     const std::pair<const wchar_t*, FrameworkElement> cards[] = {
-        {L"Settings_Library/Text", LibraryCard()},
-        {L"Settings_Outputs/Text", OutputsCard()},
-        {L"Settings_Playback/Text", PlaybackCard()},
-        {L"Settings_Dsp/Text", VolumeCard()},
-        {L"Settings_Status/Text", StatusCard()},
-        {L"Settings_Decoders/Text", DecodersCard()},
-        {L"Settings_Interface/Text", InterfaceCard()},
-        {L"Settings_Hotkeys/Text", HotkeysCard()},
-        {L"Reset_Title/Text", ResetCard()},
+        {L"Settings_Library/Text", LibraryCard()},     {L"Settings_Outputs/Text", OutputsCard()},
+        {L"Settings_Playback/Text", PlaybackCard()},   {L"Settings_Dsp/Text", VolumeCard()},
+        {L"Settings_Status/Text", StatusCard()},       {L"Settings_Decoders/Text", DecodersCard()},
+        {L"Settings_Interface/Text", InterfaceCard()}, {L"Settings_Hotkeys/Text", HotkeysCard()},
+        {L"Settings_Computers/Text", ComputersCard()}, {L"Reset_Title/Text", ResetCard()},
         {L"Settings_About/Text", AboutCard()},
     };
     for (const auto& [title, card] : cards) {

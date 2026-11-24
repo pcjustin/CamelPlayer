@@ -84,6 +84,10 @@ struct SettingsDto {
     std::vector<std::string> airplayGroup;
     std::string followedDefault;
     std::string lastFileUtf8;
+    Role role = Role::Play;
+    ControlledServer controlled;
+    bool allowControl = false;
+    bool startWithWindowsAsked = false;
     bool operator==(const SettingsDto&) const = default;
 };
 

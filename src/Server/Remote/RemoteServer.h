@@ -14,6 +14,7 @@
 #include <string>
 
 #include "Server/Api/ServerApi.h"
+#include "Server/Remote/DevicePairing.h"
 
 namespace camel::server {
 
@@ -36,7 +37,7 @@ public:
 // Another computer's CamelPlayer through the Server API (docs/Plan.md §17.8, docs/Server-API.md), the same IServer
 // the window uses for its own: calls go out as JSON and wait for their answers, each on the caller's thread; the
 // Server's events come in pushed and keep the snapshot; covers, uploads and downloads go over plain HTTP.
-class RemoteServer final : public IServer {
+class RemoteServer final : public IServer, public DevicePairing {
 public:
     struct Options {
         std::string host;
@@ -44,6 +45,9 @@ public:
         std::filesystem::path cache;             // where covers fetched are kept; a temporary folder when empty
         std::chrono::milliseconds timeout{5000}; // to connect and to get the first snapshot
         std::string token;                       // this device's, from pair()
+        // A Control point's own settings.json: what belongs to its computer (copyComputerSettings) is read from it and
+        // saved to it, never to the Server, whose settings show for the rest. Empty shows the Server's alone.
+        std::filesystem::path ownSettings;
     };
     // Connects and waits for the Server's first snapshot; throws NotPaired without a token the Server knows, and
     // std::runtime_error when it cannot connect.
@@ -54,6 +58,7 @@ public:
 
     bool connected() const;
     nlohmann::json hello() const; // what the Server said of itself as the connection opened
+    std::string device() const;   // this device's ID, as the Server knows it
 
     struct Paired {
         std::string token, device;
@@ -63,10 +68,10 @@ public:
     static Paired pair(const std::string& host, uint16_t port, const std::string& name, const std::string& code,
                        std::chrono::milliseconds timeout = std::chrono::seconds(5));
     // Pairing as any paired device may do it (docs/Plan.md 17.8).
-    std::string pairingCode();
-    nlohmann::json pairedDevices();
-    bool revokeDevice(const std::string& device);
-    void resetOwner(); // cuts this device off too
+    std::string pairingCode() override;
+    nlohmann::json pairedDevices() override;
+    bool revokeDevice(const std::string& device) override;
+    void resetOwner() override; // cuts this device off too
     // Notices the Server sends, such as pairing having stopped after wrong codes; on the connection's thread.
     void setNoticeListener(std::function<void(const nlohmann::json&)> listener);
 

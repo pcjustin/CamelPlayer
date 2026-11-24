@@ -56,6 +56,9 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// This computer's IPv4 addresses on the LAN, for typing on another computer.
+std::vector<std::string> lanAddresses();
+
 // The Servers that answer within `wait`.
 std::vector<FoundServer> findServers(std::chrono::milliseconds wait);
 
