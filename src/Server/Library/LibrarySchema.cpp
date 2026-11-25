@@ -523,6 +523,9 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
                     "UPDATE app_state SET key=key||':' WHERE key IN ('session','session_order','session_automatic');"
                     "ALTER TABLE play_events ADD COLUMN zone TEXT;");
         },
+        // One or two characters, which the full-text index cannot look up, are looked for in the names alone: reading
+        // every track's row took 200 ms of a search over 93,149 tracks, these columns a third of it.
+        [](sqlite::Database& db) { db.exec("CREATE INDEX tracks_search_text ON tracks(title_norm,artist_norm,album_norm);"); },
     };
     return migrations;
 }

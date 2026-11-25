@@ -42,7 +42,12 @@ struct Search {
     std::string text;    // normalized query, matched by instr in Walk
     std::string phrase;  // FTS5 phrase for Fts
     std::string pattern; // LIKE pattern for one or two characters
-    std::string hits;    // JSON array of matching track ids for Hits
+    std::string hits;    // JSON array of matching track ids for Hits, and for Like when there are few
+
+    // The few tracks a short query matches, in ?5, which Like's filters are kept to.
+    std::string likeHits() const {
+        return plan == Plan::Like && !hits.empty() ? " AND t.id IN (SELECT value FROM json_each(?5)) " : "";
+    }
 
     // The filter and its first bound parameter: ?1 for every plan.
     std::string filter() const {
@@ -51,7 +56,8 @@ struct Search {
             return {};
         case Plan::Like:
             return " AND (t.title_norm LIKE ?1 ESCAPE '\\' OR t.artist_norm LIKE ?1 ESCAPE '\\' OR t.album_norm LIKE ?1 "
-                   "ESCAPE '\\') ";
+                   "ESCAPE '\\') " +
+                   likeHits();
         case Plan::Hits:
             return " AND t.id IN (SELECT value FROM json_each(?1)) ";
         case Plan::Walk:
@@ -68,6 +74,7 @@ struct Search {
             break;
         case Plan::Like:
             statement.bind(1, pattern);
+            if (!hits.empty()) statement.bind(5, hits);
             break;
         case Plan::Hits:
             statement.bind(1, hits);
@@ -101,6 +108,18 @@ Search plan(sqlite::Database& db, std::string_view filter, int64_t offset, int64
             search.pattern.push_back(c);
         }
         search.pattern.push_back('%');
+        // The few tracks such a query matches, as two Han characters most often are, are found in one pass over the names'
+        // own index; the page, the albums and the artists then read those alone rather than every track each.
+        auto rows = db.prepare("SELECT id FROM tracks INDEXED BY tracks_search_text WHERE title_norm LIKE ?1 ESCAPE '\\' "
+                               "OR artist_norm LIKE ?1 ESCAPE '\\' OR album_norm LIKE ?1 ESCAPE '\\' LIMIT ?2");
+        rows.bind(1, search.pattern).bind(2, kHits + 1);
+        std::string hits = "[";
+        int64_t count = 0;
+        while (rows.step()) {
+            if (count++) hits.push_back(',');
+            hits += std::to_string(rows.integer(0));
+        }
+        if (count <= kHits) search.hits = hits + "]";
         return search;
     }
     search.phrase = "\"";
@@ -212,7 +231,8 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
     {
         const bool like = search.plan == Search::Plan::Like;
         const std::string albumFilter =
-            like ? " AND (t.album_norm LIKE ?1 ESCAPE '\\' OR t.artist_norm LIKE ?1 ESCAPE '\\') " : search.filter();
+            like ? " AND (t.album_norm LIKE ?1 ESCAPE '\\' OR t.artist_norm LIKE ?1 ESCAPE '\\') " + search.likeHits()
+                 : search.filter();
         const std::string albumFrom = std::string(search.from()) + "JOIN albums a ON a.id=t.album_id ";
         // Albums of a broad query keep the order their walk reads them in, on every page.
         const bool ranked = like || search.plan == Search::Plan::Hits;
@@ -250,7 +270,7 @@ LibrarySearchResults searchLibrary(const LibraryStore& store, const std::string&
         std::string artistFilter;
         switch (search.plan) {
         case Search::Plan::Like:
-            artistFilter = " AND (t.artist_norm LIKE ?1 ESCAPE '\\' OR v.value_norm LIKE ?1 ESCAPE '\\') ";
+            artistFilter = " AND (t.artist_norm LIKE ?1 ESCAPE '\\' OR v.value_norm LIKE ?1 ESCAPE '\\') " + search.likeHits();
             break;
         case Search::Plan::Hits:
             artistFilter = search.filter() + " AND instr(coalesce(t.artist_norm,t.artist,''),?4)>0 ";

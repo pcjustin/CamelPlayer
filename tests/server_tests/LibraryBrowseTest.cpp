@@ -260,6 +260,8 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     RecordProperty("query_cpu_delta_100ns", cpu100ns);
     EXPECT_LT(p95, 100.0);
     EXPECT_LT(broadSuggestionP95, 100.0);
+    // Two characters that no name holds, as two Han characters most often are, read every track's names once.
+    EXPECT_LT(twoCharacterP95, 100.0);
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks"), 100000);
 }
 
