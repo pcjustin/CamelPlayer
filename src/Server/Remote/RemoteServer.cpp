@@ -117,7 +117,8 @@ struct RemoteServer::Impl {
     };
     std::mutex coversMutex;
     std::map<std::string, KeptCover> covers;
-    std::atomic<uint64_t> library = 0; // the library's revision, as the last page showed it
+    std::atomic<uint64_t> coversWritten = 0; // names each partial cover file, so that no two askers write the same one
+    std::atomic<uint64_t> library = 0;       // the library's revision, as the last page showed it
     // A Control point's own Discord, from the zone it follows; last, so it goes first, its cover loads with it.
     std::unique_ptr<DiscordPresence> discord;
 
@@ -877,9 +878,12 @@ std::optional<ArtworkReference> RemoteServer::artwork(const ArtworkRequest& requ
     const auto file = folder / (toWide(key) + L".jpg");
     std::error_code ec;
     if (!std::filesystem::exists(file, ec)) {
-        const auto partial = folder / (toWide(key) + L".part");
+        // Two asking at once for one cover, as an album row and the player bar, wrote one partial file: the first's
+        // rename was refused while the other held it, and it named a cover not yet in place.
+        const auto partial = folder / (toWide(key) + L"-" + std::to_wstring(++impl_->coversWritten) + L".part");
         std::ofstream(partial, std::ios::binary).write(reply.body.data(), std::streamsize(reply.body.size()));
         std::filesystem::rename(partial, file, ec);
+        if (ec) std::filesystem::remove(partial, ec); // the other's is in place, or being read
     }
     return ArtworkReference{key, file};
 }

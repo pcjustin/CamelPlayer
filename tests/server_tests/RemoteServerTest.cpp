@@ -7,6 +7,7 @@
 #include <ws2tcpip.h>
 
 #include <taglib/flacfile.h>
+#include <wil/resource.h>
 
 #include <atomic>
 #include <chrono>
@@ -300,6 +301,26 @@ TEST_F(RemoteServerTest, ACoverChangedInTheLibraryIsAskedForAgain) {
     const auto changed = remote->artwork({ArtworkKind::Album, album});
     ASSERT_TRUE(changed);
     EXPECT_NE(changed->key, first->key);
+}
+
+// A cover another asker is writing at the same moment, as when an album row and the player bar show the same album, is
+// still in its file for this one: the player bar of a Control point just paired stayed without its cover.
+TEST_F(RemoteServerTest, ACoverAnotherAskerIsWritingAtOnceIsStillInItsFile) {
+    coverFolder(*remote, *local, dir / "music", 0x40);
+    const auto track = local->browseTracks(0, 1, std::nullopt).tracks.at(0).path;
+    const auto first = remote->artwork({ArtworkKind::Track, 0, track});
+    ASSERT_TRUE(first);
+    std::filesystem::remove(first->path);
+    const auto partial = first->path.parent_path() / (camel::toWide(first->key) + L".part");
+    const wil::unique_hfile writing(CreateFileW(partial.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                                CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    ASSERT_TRUE(writing);
+    const auto again = remote->artwork({ArtworkKind::Track, 0, track});
+    ASSERT_TRUE(again);
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(again->path, ec);
+    EXPECT_FALSE(ec) << ec.message();
+    EXPECT_GT(size, 0u);
 }
 
 TEST_F(RemoteServerTest, FilesGoOverHttp) {
