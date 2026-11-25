@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "Common/util/Log.h"
+#include "Common/util/ReadWholeFile.h"
 #include "Common/util/Text.h"
 #include "Server/Api/ApiCalls.h"
 #include "Server/Api/ApiTypesJson.h"
@@ -48,8 +49,7 @@ void respondError(SOCKET s, int status, const char* reason, const std::exception
 }
 
 std::string readFile(const std::filesystem::path& file) {
-    std::ifstream in(file, std::ios::binary);
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    return readWholeFile(file).value_or(std::string());
 }
 
 int64_t number(const std::map<std::string, std::string>& query, const char* key) {
@@ -367,11 +367,12 @@ struct ApiServer::Impl {
                 r.name = textOf(query, "name");
                 if (query.contains("pixels")) r.pixels = unsigned(number(query, "pixels"));
                 const auto found = server.artwork(r);
-                if (!found) {
+                const auto image = found ? readWholeFile(found->path) : std::nullopt;
+                if (!image || image->empty()) {
                     respond(s, 404, "Not Found", "text/plain", "no artwork");
                     return;
                 }
-                respond(s, 200, "OK", "image/jpeg", readFile(found->path), "X-Artwork-Key: " + found->key + "\r\n");
+                respond(s, 200, "OK", "image/jpeg", *image, "X-Artwork-Key: " + found->key + "\r\n");
             } else if (request.first == "POST" && path == "/artist-picture") {
                 respond(s, 200, "OK", "application/json", json(server.setArtistPicture(textOf(query, "name"), bytes())).dump());
             } else if (request.first == "POST" && path == "/playlist") {

@@ -4,13 +4,12 @@
 #pragma once
 #include <list>
 #include <algorithm>
-#include <fstream>
-#include <iterator>
 #include <mutex>
 #include <unordered_set>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include "Common/util/ReadWholeFile.h"
 #include "Server/Api/ServerApi.h"
 
 namespace ui {
@@ -88,9 +87,9 @@ inline winrt::fire_and_forget loadArtwork(winrt::Microsoft::UI::Xaml::Controls::
         }
         Windows::Storage::Streams::InMemoryRandomAccessStream stream;
         {
-            std::ifstream in(ref->path, std::ios::binary);
-            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), {});
-            if (bytes.empty()) co_return;
+            const auto read = camel::readWholeFile(ref->path);
+            if (!read || read->empty()) co_return;
+            const std::vector<uint8_t> bytes(read->begin(), read->end());
             Windows::Storage::Streams::DataWriter writer(stream);
             writer.WriteBytes(bytes);
             co_await writer.StoreAsync();

@@ -9,6 +9,7 @@
 #include <taglib/flacfile.h>
 #include <wil/resource.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -17,6 +18,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include "Server/Api/ApiCalls.h"
 #include "Server/Api/ApiJson.h"
@@ -28,6 +30,7 @@
 #include "Server/Remote/ApiSession.h"
 #include "Server/Remote/Connection.h"
 #include "Server/Remote/RemoteServer.h"
+#include "Common/util/ReadWholeFile.h"
 #include "Common/util/Text.h"
 #include "TestUtil.h"
 
@@ -321,6 +324,30 @@ TEST_F(RemoteServerTest, ACoverAnotherAskerIsWritingAtOnceIsStillInItsFile) {
     const auto size = std::filesystem::file_size(again->path, ec);
     EXPECT_FALSE(ec) << ec.message();
     EXPECT_GT(size, 0u);
+}
+
+// Several asking at once for one cover each read it as soon as they have its file, as the window does: a read while
+// another asker still held the file it had just put in place found nothing, and so did the player bar now and then.
+TEST_F(RemoteServerTest, ACoverAskedForAtOnceCanBeReadByEveryAsker) {
+    coverFolder(*remote, *local, dir / "music", 0x40);
+    const auto track = local->browseTracks(0, 1, std::nullopt).tracks.at(0).path;
+    constexpr size_t kAskers = 16;
+    for (int round = 0; round < 60; ++round) {
+        std::filesystem::remove_all(dir / "cache");
+        std::array<size_t, kAskers> read{};
+        std::atomic<bool> go = false;
+        std::vector<std::thread> askers;
+        askers.reserve(kAskers);
+        for (size_t i = 0; i < kAskers; ++i)
+            askers.emplace_back([&, i] {
+                while (!go) std::this_thread::yield();
+                if (const auto reference = remote->artwork({ArtworkKind::Track, 0, track}))
+                    read.at(i) = camel::readWholeFile(reference->path).value_or(std::string()).size();
+            });
+        go = true;
+        for (auto& asker : askers) asker.join();
+        for (size_t i = 0; i < kAskers; ++i) ASSERT_GT(read.at(i), 0u) << "round " << round << ", asker " << i;
+    }
 }
 
 TEST_F(RemoteServerTest, FilesGoOverHttp) {

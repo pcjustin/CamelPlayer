@@ -866,7 +866,7 @@ std::optional<ArtworkReference> RemoteServer::artwork(const ArtworkRequest& requ
             return ArtworkReference{kept, file};
     }
     const auto reply = impl_->http("GET", target);
-    if (reply.status != 200) return std::nullopt;
+    if (reply.status != 200 || reply.body.empty()) return std::nullopt;
     const auto key = reply.head.header("x-artwork-key");
     if (key.empty() || key.find_first_of("/\\:.") != std::string::npos) return std::nullopt;
     if (keep) {
@@ -878,12 +878,12 @@ std::optional<ArtworkReference> RemoteServer::artwork(const ArtworkRequest& requ
     const auto file = folder / (toWide(key) + L".jpg");
     std::error_code ec;
     if (!std::filesystem::exists(file, ec)) {
-        // Two asking at once for one cover, as an album row and the player bar, wrote one partial file: the first's
-        // rename was refused while the other held it, and it named a cover not yet in place.
+        // Several may ask at once for one cover, as an album row and the player bar: each writes a partial file of its
+        // own, and only the first is put in place. Replacing a cover already there made a read of it at that moment
+        // find nothing.
         const auto partial = folder / (toWide(key) + L"-" + std::to_wstring(++impl_->coversWritten) + L".part");
         std::ofstream(partial, std::ios::binary).write(reply.body.data(), std::streamsize(reply.body.size()));
-        std::filesystem::rename(partial, file, ec);
-        if (ec) std::filesystem::remove(partial, ec); // the other's is in place, or being read
+        if (!MoveFileExW(partial.c_str(), file.c_str(), 0)) std::filesystem::remove(partial, ec);
     }
     return ArtworkReference{key, file};
 }
