@@ -221,7 +221,7 @@ void FileDetailsWindow::create(HWND owner, ElementTheme theme) {
     app.MoveAndResize({x, y, width, height});
 
     colorCaptionButtons();
-    root_.ActualThemeChanged([this](auto&&, auto&&) {
+    ui::followTheme(root_, [this] {
         if (!mica()) root_.Background(themeBrush(root_, L"SolidBackgroundFillColorBaseBrush"));
         colorCaptionButtons();
         render();

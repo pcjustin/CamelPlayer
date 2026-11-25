@@ -104,8 +104,8 @@ void WaveformBar::draw() {
         }
         path.Data(group);
     }
-    rest_.Fill(themeBrush(layer_, L"ControlStrongFillColorDefaultBrush")); // 3:1 at least, as graphics need
-    played_.Fill(themeBrush(layer_, L"AccentFillColorDefaultBrush"));
+    rest_.Fill(shapeBrush(layer_, L"ControlStrongFillColorDefaultBrush")); // 3:1 at least, as graphics need
+    played_.Fill(shapeBrush(layer_, L"AccentFillColorDefaultBrush"));
     setPlayed(playedFraction_);
 }
 

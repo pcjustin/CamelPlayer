@@ -238,7 +238,7 @@ void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Com
     submit_ = std::move(submit);
     playlistMenu_ = std::move(playlistMenu);
     // The format badges are colored from code, so they follow a change of theme.
-    ActualThemeChanged([this](auto&&, auto&&) { showAlbumFormats(albumBadges_.formats()); });
+    ui::followTheme(*this, [this] { showAlbumFormats(albumBadges_.formats()); });
     // A dragged divider changes the columns but not the rows, so the rows' own size changes do not refit their credits.
     columnsChanged_ = Application::Current()
                           .Resources()

@@ -86,7 +86,7 @@ ColumnDivider::ColumnDivider() {
         const auto self = divider.as<FrameworkElement>();
         const bool focused = self.FocusState() == FocusState::Keyboard;
         line.Width(focused ? 3 : 1);
-        line.Fill(ui::themeBrush(self, focused ? L"AccentFillColorDefaultBrush" : L"DividerStrokeColorDefaultBrush"));
+        line.Fill(ui::shapeBrush(self, focused ? L"AccentFillColorDefaultBrush" : L"DividerStrokeColorDefaultBrush"));
     };
     Loaded([this, paint](Windows::Foundation::IInspectable const& divider, RoutedEventArgs const& e) {
         const wchar_t* names[] = {L"Library_SortTitle", L"Library_SortArtist", L"Library_SortAlbum"};
@@ -97,7 +97,7 @@ ColumnDivider::ColumnDivider() {
         Automation::AutomationProperties::SetHelpText(*this, ui::tr(L"Columns_DividerHelp"));
         paint(divider, e);
     });
-    ActualThemeChanged(paint);
+    ui::followTheme(*this, [this, paint] { paint(*this, nullptr); });
     GotFocus(paint);
     LostFocus(paint);
     Children().Append(line);

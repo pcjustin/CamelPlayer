@@ -275,7 +275,7 @@ void MainWindow::InitializeComponent() {
     SetTitleBar(AppTitleBar());
     AppWindow().TitleBar().PreferredHeightOption(Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
     colorCaptionButtons();
-    Content().as<FrameworkElement>().ActualThemeChanged([this](auto&&, auto&&) {
+    ui::followTheme(Content().as<FrameworkElement>(), [this] {
         colorCaptionButtons();
         repaintTheme();
         fileDetails_.setTheme(Content().as<FrameworkElement>().ActualTheme());
@@ -1150,8 +1150,9 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
     // As in Roon, the lamp tells how a stream plays, so it shows only while one is open.
     LampButton().Visibility(s.output && s.source ? Visibility::Visible : Visibility::Collapsed);
-    Lamp().Fill(themeBrush(lampColor_));
-    PathVerdictDot().Fill(themeBrush(lampColor_));
+    const auto lamp = ui::shapeBrush(Content().as<FrameworkElement>(), lampColor_);
+    Lamp().Fill(lamp);
+    PathVerdictDot().Fill(lamp);
     PathVerdictText().Text(LampText().Text());
     Automation::AutomationProperties::SetName(LampButton(), LampText().Text());
     dspColor_ = dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush";
@@ -1770,8 +1771,9 @@ Media::Brush MainWindow::themeBrush(const wchar_t* key) const {
 // Colors set from code take the theme's brushes again once the window shows another theme.
 void MainWindow::repaintTheme() {
     if (waveformBar_) waveformBar_->repaint();
-    Lamp().Fill(themeBrush(lampColor_));
-    PathVerdictDot().Fill(themeBrush(lampColor_));
+    const auto lamp = ui::shapeBrush(Content().as<FrameworkElement>(), lampColor_);
+    Lamp().Fill(lamp);
+    PathVerdictDot().Fill(lamp);
     DspButtonText().Foreground(themeBrush(dspColor_));
     if (playbackFavorite_) PlaybackFavoriteIcon().Foreground(themeBrush(L"AccentTextFillColorPrimaryBrush"));
     showSignalPath(std::exchange(shownPath_, {}), shownPathGroup_);

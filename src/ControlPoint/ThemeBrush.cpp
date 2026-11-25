@@ -9,6 +9,8 @@
 #include <winrt/Windows.UI.ViewManagement.h>
 
 #include <algorithm>
+#include <memory>
+#include <string_view>
 #include <vector>
 
 using namespace winrt;
@@ -17,6 +19,19 @@ using namespace Microsoft::UI::Xaml;
 namespace ui {
 
 namespace {
+
+using Windows::UI::ViewManagement::UISettings;
+
+bool highContrast() {
+    static const Windows::UI::ViewManagement::AccessibilitySettings accessibility;
+    return accessibility.HighContrast();
+}
+
+// One instance for the system colours and their changes: an instance raises ColorValuesChanged only while it lives.
+UISettings& systemColors() {
+    static UISettings settings;
+    return settings;
+}
 
 // `key` in the theme dictionary `theme` of `dictionary` or of a dictionary merged into it.
 Windows::Foundation::IInspectable themed(ResourceDictionary const& dictionary, hstring const& theme,
@@ -120,12 +135,11 @@ bool blackSurfacesShown() {
 }
 
 Media::Brush themeBrush(ElementTheme theme, const wchar_t* key) {
-    static const Windows::UI::ViewManagement::AccessibilitySettings accessibility;
     const auto resources = Application::Current().Resources();
     const auto name = box_value(key);
     // WinUI names the dark dictionary Default.
     const wchar_t* themes[2] = {L"Light", nullptr};
-    if (accessibility.HighContrast())
+    if (highContrast())
         themes[0] = L"HighContrast";
     else if (theme == ElementTheme::Dark ||
              (theme == ElementTheme::Default && Application::Current().RequestedTheme() == ApplicationTheme::Dark)) {
@@ -140,6 +154,31 @@ Media::Brush themeBrush(ElementTheme theme, const wchar_t* key) {
 
 Media::Brush themeBrush(FrameworkElement const& element, const wchar_t* key) {
     return themeBrush(element.ActualTheme(), key);
+}
+
+Media::Brush shapeBrush(ElementTheme theme, const wchar_t* key) {
+    if (!highContrast()) return themeBrush(theme, key);
+    using Windows::UI::ViewManagement::UIElementType;
+    const std::wstring_view name(key);
+    const auto type = name.starts_with(L"Accent")                         ? UIElementType::Highlight
+                      : name.find(L"Disabled") != std::wstring_view::npos ? UIElementType::GrayText
+                                                                          : UIElementType::WindowText;
+    return Media::SolidColorBrush(systemColors().UIElementColor(type));
+}
+
+Media::Brush shapeBrush(FrameworkElement const& element, const wchar_t* key) {
+    return shapeBrush(element.ActualTheme(), key);
+}
+
+void followTheme(FrameworkElement const& element, std::function<void()> paint) {
+    // The colours' subscription lives as long as the element's own handler, which holds it.
+    auto changed = std::make_shared<UISettings::ColorValuesChanged_revoker>(systemColors().ColorValuesChanged(
+        auto_revoke, [queue = element.DispatcherQueue(), weak = make_weak(element), paint](auto&&, auto&&) {
+            queue.TryEnqueue([weak, paint] {
+                if (weak.get()) paint();
+            });
+        }));
+    element.ActualThemeChanged([changed, paint = std::move(paint)](auto&&, auto&&) { paint(); });
 }
 
 } // namespace ui

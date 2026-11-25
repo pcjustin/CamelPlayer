@@ -335,16 +335,16 @@ void EqEditor::redraw() {
         label(text, 2, std::clamp(yOf(db) - 16, 0.0, height - 16));
     }
 
-    const auto curve = [&](const wchar_t* color) {
+    const auto curve = [&](Media::Brush const& color) {
         Shapes::Polyline p;
-        p.Stroke(brush(color));
+        p.Stroke(color);
         p.StrokeThickness(2);
         p.Opacity(eq_.enabled ? 1.0 : 0.45);
         curve_.Children().Append(p);
         return p;
     };
-    rightCurve_ = curve(L"TextFillColorSecondaryBrush");
-    leftCurve_ = curve(L"AccentFillColorDefaultBrush");
+    rightCurve_ = curve(brush(L"TextFillColorSecondaryBrush"));
+    leftCurve_ = curve(ui::shapeBrush(curve_, L"AccentFillColorDefaultBrush"));
 
     for (size_t i = 0; i < eq_.bands.size(); ++i) {
         const auto& band = eq_.bands[i];
@@ -352,7 +352,7 @@ void EqEditor::redraw() {
         handle.Width(kHandle);
         handle.Height(kHandle);
         Shapes::Ellipse dot;
-        dot.Fill(band.enabled ? brush(L"AccentFillColorDefaultBrush") : brush(L"ControlFillColorDefaultBrush"));
+        dot.Fill(band.enabled ? ui::shapeBrush(curve_, L"AccentFillColorDefaultBrush") : brush(L"ControlFillColorDefaultBrush"));
         dot.Stroke(brush(L"ControlStrongStrokeColorDefaultBrush"));
         dot.StrokeThickness(1);
         handle.Children().Append(dot);
