@@ -23,7 +23,6 @@
 #include "Background.h"
 #include "DialogPlacement.h"
 #include "FileDetailsWindow.h"
-#include "Substitute.h"
 #include "FilePicker.h"
 #include "MenuSelection.h"
 #include "UiText.h"
@@ -141,22 +140,22 @@ void PlaylistView::load() {
     const auto read = ++loads_;
     loading_.start();
     if (playlist_ == 0) {
-        background([this, server = server_, tracks = tr(L"Library_Tracks"), read] {
+        background([this, server = server_, read] {
             auto list = std::make_shared<std::vector<PlaylistSummary>>(server->playlists());
-            return std::function<void()>([this, list, tracks, read] {
+            return std::function<void()>([this, list, read] {
                 if (read != loads_) return;
                 loading_.stop();
                 playlists_ = *list;
                 auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
                 for (const auto& p : playlists_) {
                     ui::BrowseRow row{p.id, {}, ui::utf8(p.name)};
-                    row.trailing = hstring(ui::substitute(std::wstring(tracks), {ui::count(p.tracks)}));
+                    row.trailing = ui::counted(L"Library_Tracks", p.tracks);
                     auto item = make<BrowseItem>();
                     get_self<BrowseItem>(item)->fill(row);
                     items.Append(item);
                 }
                 PlaylistList().ItemsSource(items);
-                HeaderDetail().Text(ui::format(L"Playlist_Count", {std::to_wstring(playlists_.size())}));
+                HeaderDetail().Text(ui::counted(L"Playlist_Count", int64_t(playlists_.size())));
                 EmptyText().Text(tr(L"Playlist_None"));
                 EmptyText().Visibility(playlists_.empty() ? Visibility::Visible : Visibility::Collapsed);
             });
@@ -215,7 +214,7 @@ void PlaylistView::showTotals() {
         unavailable += row.unavailable;
     }
     const auto total = rows.size();
-    std::wstring detail(ui::format(L"Library_Tracks", {ui::count(int64_t(total))}));
+    std::wstring detail(ui::counted(L"Library_Tracks", int64_t(total)));
     if (durationMs) detail += L" · " + ui::formatTime(double(durationMs) / 1000.0);
     if (unavailable) detail += L" · " + std::wstring(ui::format(L"Playlist_UnavailableCount", {ui::count(unavailable)}));
     if (total > ui::PlaylistCollection::kShown)
@@ -423,9 +422,9 @@ winrt::fire_and_forget PlaylistView::OnImportClick(Windows::Foundation::IInspect
             if (self->handlers_.notify) self->handlers_.notify(tr(L"Playlist_ImportFailed"), hstring(file.wstring()), true);
             return;
         }
-        std::wstring message(ui::format(L"Library_Tracks", {ui::count(change->added)}));
+        std::wstring message(ui::counted(L"Library_Tracks", change->added));
         if (change->skippedUnavailable)
-            message += L" · " + std::wstring(ui::format(L"Playlist_SkippedUrls", {ui::count(change->skippedUnavailable)}));
+            message += L" · " + std::wstring(ui::counted(L"Playlist_SkippedUrls", change->skippedUnavailable));
         if (self->handlers_.changed) self->handlers_.changed();
         if (self->handlers_.notify)
             self->handlers_.notify(ui::format(L"Playlist_Imported", {std::wstring(ui::utf8(change->name))}), hstring(message),

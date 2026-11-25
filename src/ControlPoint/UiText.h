@@ -24,5 +24,7 @@ winrt::hstring deviceErrorTitle(camel::audio::ErrorCode code, std::string_view d
 winrt::hstring utf8(const std::string& s);
 std::wstring formatTime(double seconds); // m:ss or h:mm:ss
 std::wstring count(int64_t n);           // 70,715
+// The string `key` with the count `n` in {0}: for one, the string `key`_One, which English has in the singular.
+winrt::hstring counted(const wchar_t* key, int64_t n);
 
 } // namespace ui

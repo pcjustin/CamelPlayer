@@ -273,11 +273,10 @@ winrt::fire_and_forget MainWindow::checkInstallation(bool manual) {
         if (manual) {
             self->CheckInstallButton().IsEnabled(true);
             self->InstallStatusText().Text(
-                !failure.empty() ? ui::format(L"Install_CheckFailed", {std::wstring(ui::utf8(failure))})
-                : !check         ? tr(L"Install_NoManifest")
-                : check->intact()
-                    ? ui::format(L"Install_Intact", {std::to_wstring(check->files)})
-                    : ui::format(L"Install_Problems", {std::to_wstring(check->missing.size() + check->damaged.size())}));
+                !failure.empty()  ? ui::format(L"Install_CheckFailed", {std::wstring(ui::utf8(failure))})
+                : !check          ? tr(L"Install_NoManifest")
+                : check->intact() ? ui::format(L"Install_Intact", {std::to_wstring(check->files)})
+                                  : ui::counted(L"Install_Problems", int64_t(check->missing.size() + check->damaged.size())));
         }
         if (!check || check->intact()) return;
         self->installCheck_ = check;
@@ -293,8 +292,8 @@ void MainWindow::showRepairOffer() {
     auto bar = RepairBar();
     bar.Severity(InfoBarSeverity::Warning);
     bar.Title(tr(L"Repair_Title"));
-    bar.Message(
-        ui::format(L"Repair_Text", {std::to_wstring(check.missing.size() + check.damaged.size()), L"" CAMEL_VERSION_STRING}));
+    const auto files = check.missing.size() + check.damaged.size();
+    bar.Message(ui::format(files == 1 ? L"Repair_Text_One" : L"Repair_Text", {std::to_wstring(files), L"" CAMEL_VERSION_STRING}));
     RepairButton().Content(box_value(tr(L"Repair_Install")));
     RepairButton().Visibility(Visibility::Visible);
     RepairDetailsButton().Visibility(Visibility::Visible);

@@ -48,7 +48,7 @@ hstring listeningTime(int64_t ms) {
 }
 
 hstring plays(int64_t n) {
-    return ui::format(L"Home_Plays", {ui::count(n)});
+    return ui::counted(L"Home_Plays", n);
 }
 
 Windows::Foundation::IInspectable item(const ui::BrowseRow& row) {
@@ -325,10 +325,12 @@ winrt::fire_and_forget HomeView::refresh() {
         self->rows_[L"AddedRow"] = albums(data->added);
         for (const auto& row : {self->PlayedRow(), self->AddedRow()}) self->fill(row);
         self->PlayedEmpty().Visibility(data->played.albums.empty() ? Visibility::Visible : Visibility::Collapsed);
+        self->PlayedMore().Visibility(data->played.albums.empty() ? Visibility::Collapsed : Visibility::Visible);
+        self->AddedMore().Visibility(data->added.albums.empty() ? Visibility::Collapsed : Visibility::Visible);
 
-        hstring counts = ui::format(L"Library_Albums", {ui::count(data->added.total)}) + L" · " +
-                         ui::format(L"Library_Tracks", {ui::count(data->tracks)}) + L" · " +
-                         ui::format(L"Search_ArtistCount", {ui::count(data->artists)});
+        hstring counts = ui::counted(L"Library_Albums", data->added.total) + L" · " +
+                         ui::counted(L"Library_Tracks", data->tracks) + L" · " +
+                         ui::counted(L"Search_ArtistCount", data->artists);
         self->LibraryCounts().Text(data->tracks ? counts : tr(L"Library_Empty/Text"));
         if (camel::measure::measuring())
             camel::log::info("measure: home shown %.0f ms after process start", camel::measure::sinceProcessStart());
@@ -440,7 +442,7 @@ winrt::fire_and_forget HomeView::loadPeriod() {
         auto history = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
         for (const auto& h : stats.history) history.Append(item(historyRow(h)));
         self->HistoryList().ItemsSource(history);
-        self->HistoryHeader().Text(ui::format(L"Home_History", {ui::count(stats.historyTotal)}));
+        self->HistoryHeader().Text(ui::counted(L"Home_History", stats.historyTotal));
     });
 }
 

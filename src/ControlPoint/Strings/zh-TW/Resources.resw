@@ -170,10 +170,15 @@
   <data name="Library_Empty.Text" xml:space="preserve"><value>還沒有音樂。請到「設定 › 媒體庫」加入資料夾，會在背景建立索引。</value></data>
   <data name="Library_Unknown" xml:space="preserve"><value>未知</value></data>
   <data name="Library_Albums" xml:space="preserve"><value>{0} 張專輯</value></data>
+  <data name="Library_Albums_One" xml:space="preserve"><value>{0} 張專輯</value></data>
   <data name="Library_Tracks" xml:space="preserve"><value>{0} 首</value></data>
+  <data name="Library_Tracks_One" xml:space="preserve"><value>{0} 首</value></data>
   <data name="Library_ComposerCount" xml:space="preserve"><value>{0} 位作曲家</value></data>
+  <data name="Library_ComposerCount_One" xml:space="preserve"><value>{0} 位作曲家</value></data>
   <data name="Library_GenreCount" xml:space="preserve"><value>{0} 種類型</value></data>
+  <data name="Library_GenreCount_One" xml:space="preserve"><value>{0} 種類型</value></data>
   <data name="Library_YearCount" xml:space="preserve"><value>{0} 個年份</value></data>
+  <data name="Library_YearCount_One" xml:space="preserve"><value>{0} 個年份</value></data>
   <data name="Library_Folder" xml:space="preserve"><value>資料夾</value></data>
   <data name="Library_SortTitle" xml:space="preserve"><value>標題</value></data>
   <data name="Library_SortArtist" xml:space="preserve"><value>演出者</value></data>
@@ -187,7 +192,11 @@
   <data name="Settings_RemoveFolder.Content" xml:space="preserve"><value>移除資料夾</value></data>
   <data name="Settings_FolderOffline" xml:space="preserve"><value>離線</value></data>
   <data name="Settings_RemoveFolderTitle" xml:space="preserve"><value>要從媒體庫移除「{0}」嗎？</value></data>
-  <data name="Settings_RemoveFolderConfirm" xml:space="preserve"><value>其中的 {0} 首曲目會離開媒體庫，連同 {1} 次播放、{2} 個最愛和 {3} 個播放清單項目，媒體庫檔案也會隨之縮小。這無法復原。音樂檔案本身不會被刪除；之後再加入這個資料夾，會當作新資料夾重新掃描。</value></data>
+  <data name="Settings_RemoveFolderConfirm" xml:space="preserve"><value>移除後，其中的 {0}會離開媒體庫，連同 {1}、{2}和 {3}，媒體庫檔案也會隨之縮小。這無法復原。音樂檔案本身不會被刪除；之後再加入這個資料夾，會當作新資料夾重新掃描。</value></data>
+  <data name="Count_Favorites" xml:space="preserve"><value>{0} 個最愛</value></data>
+  <data name="Count_Favorites_One" xml:space="preserve"><value>{0} 個最愛</value></data>
+  <data name="Count_PlaylistEntries" xml:space="preserve"><value>{0} 個播放清單項目</value></data>
+  <data name="Count_PlaylistEntries_One" xml:space="preserve"><value>{0} 個播放清單項目</value></data>
   <data name="Settings_RemoveFolderPrimary" xml:space="preserve"><value>移除</value></data>
   <data name="Library_AlbumsPending" xml:space="preserve"><value>專輯會在掃描資料夾時陸續出現。</value></data>
   <data name="Library_Loading.AutomationProperties.Name" xml:space="preserve"><value>載入中</value></data>
@@ -279,6 +288,7 @@
   <data name="Artist_AppearsOn" xml:space="preserve"><value>參與演出</value></data>
   <data name="Search_Artists" xml:space="preserve"><value>演出者</value></data>
   <data name="Search_ArtistCount" xml:space="preserve"><value>{0} 位演出者</value></data>
+  <data name="Search_ArtistCount_One" xml:space="preserve"><value>{0} 位演出者</value></data>
   <data name="Search_All" xml:space="preserve"><value>顯示所有「{0}」的結果</value></data>
   <data name="Search_Title" xml:space="preserve"><value>搜尋「{0}」</value></data>
   <data name="Search_None" xml:space="preserve"><value>媒體庫中沒有符合的結果。</value></data>
@@ -294,6 +304,7 @@
   <data name="Home_Month.Text" xml:space="preserve"><value>本月</value></data>
   <data name="Home_AllTime.Text" xml:space="preserve"><value>全部</value></data>
   <data name="Home_Plays" xml:space="preserve"><value>{0} 次播放</value></data>
+  <data name="Home_Plays_One" xml:space="preserve"><value>{0} 次播放</value></data>
   <data name="Home_RecentlyPlayed.Text" xml:space="preserve"><value>最近播放</value></data>
   <data name="Home_RecentlyAdded.Text" xml:space="preserve"><value>最近加入</value></data>
   <data name="Home_ViewAll.Content" xml:space="preserve"><value>檢視全部</value></data>
@@ -405,6 +416,7 @@
   <data name="Playlist_SortMore" xml:space="preserve"><value>更多排序方式</value></data>
   <data name="Playlist_PageTitle" xml:space="preserve"><value>播放清單</value></data>
   <data name="Playlist_Count" xml:space="preserve"><value>{0} 個播放清單</value></data>
+  <data name="Playlist_Count_One" xml:space="preserve"><value>{0} 個播放清單</value></data>
   <data name="Playlist_None" xml:space="preserve"><value>還沒有播放清單。在專輯、資料夾、曲目或演出者上按右鍵選擇「建立播放清單」，或匯入 M3U8 檔案。</value></data>
   <data name="Playlist_UnavailableCount" xml:space="preserve"><value>{0} 首無法使用</value></data>
   <data name="Playlist_Listed" xml:space="preserve"><value>列出前 {0} 首</value></data>
@@ -424,6 +436,7 @@
   <data name="Playlist_Imported" xml:space="preserve"><value>已匯入「{0}」</value></data>
   <data name="Playlist_ImportFailed" xml:space="preserve"><value>無法匯入播放清單檔案</value></data>
   <data name="Playlist_SkippedUrls" xml:space="preserve"><value>略過 {0} 個網址</value></data>
+  <data name="Playlist_SkippedUrls_One" xml:space="preserve"><value>略過 {0} 個網址</value></data>
   <data name="Playlist_Remove" xml:space="preserve"><value>從播放清單移除</value></data>
   <data name="Playlist_UnavailableIcon.ToolTipService.ToolTip" xml:space="preserve"><value>無法使用：檔案不存在或所在的音樂庫資料夾離線</value></data>
   <data name="Playlist_Play.Text" xml:space="preserve"><value>播放</value></data>
@@ -472,10 +485,12 @@
   <data name="Home_ByPlays" xml:space="preserve"><value>依播放次數</value></data>
   <data name="Home_ByTime" xml:space="preserve"><value>依聆聽時間</value></data>
   <data name="Home_History" xml:space="preserve"><value>播放紀錄（{0} 次）</value></data>
+  <data name="Home_History_One" xml:space="preserve"><value>播放紀錄（{0} 次）</value></data>
   <data name="Home_HistoryTitle" xml:space="preserve"><value>播放紀錄</value></data>
   <data name="Library_MenuResetStatistics" xml:space="preserve"><value>重置統計…</value></data>
   <data name="Library_ResetStatisticsTitle" xml:space="preserve"><value>重置統計？</value></data>
   <data name="Library_ResetStatisticsText" xml:space="preserve"><value>將刪除 {0} 首曲目的播放紀錄，次數從零開始。此動作無法復原。</value></data>
+  <data name="Library_ResetStatisticsText_One" xml:space="preserve"><value>將刪除 {0} 首曲目的播放紀錄，次數從零開始。此動作無法復原。</value></data>
   <data name="Library_ResetStatisticsPrimary" xml:space="preserve"><value>重置</value></data>
   <data name="Reset_StatisticsTitle.Text" xml:space="preserve"><value>聆聽統計</value></data>
   <data name="Reset_StatisticsText.Text" xml:space="preserve"><value>刪除所有播放紀錄，所有次數從零開始。</value></data>
@@ -569,10 +584,12 @@
   <data name="Install_Checking" xml:space="preserve"><value>正在檢查程式檔案…</value></data>
   <data name="Install_Intact" xml:space="preserve"><value>全部 {0} 個程式檔案都正常。</value></data>
   <data name="Install_Problems" xml:space="preserve"><value>有 {0} 個程式檔案損毀或遺失。</value></data>
+  <data name="Install_Problems_One" xml:space="preserve"><value>有 {0} 個程式檔案損毀或遺失。</value></data>
   <data name="Install_NoManifest" xml:space="preserve"><value>這個版本沒有可供比對的檔案清單。</value></data>
   <data name="Install_CheckFailed" xml:space="preserve"><value>無法檢查程式檔案：{0}</value></data>
   <data name="Repair_Title" xml:space="preserve"><value>部分程式檔案損毀或遺失</value></data>
   <data name="Repair_Text" xml:space="preserve"><value>CamelPlayer {1} 有 {0} 個檔案與正式版不符。修復會從 GitHub 重新下載這個版本並重新啟動 CamelPlayer，設定和媒體庫都會保留。</value></data>
+  <data name="Repair_Text_One" xml:space="preserve"><value>CamelPlayer {1} 有 {0} 個檔案與正式版不符。修復會從 GitHub 重新下載這個版本並重新啟動 CamelPlayer，設定和媒體庫都會保留。</value></data>
   <data name="Repair_Install" xml:space="preserve"><value>修復</value></data>
   <data name="Repair_Details.Content" xml:space="preserve"><value>詳細資料</value></data>
   <data name="Repair_Skip.Content" xml:space="preserve"><value>略過</value></data>

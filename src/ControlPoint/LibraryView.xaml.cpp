@@ -46,16 +46,22 @@ using ui::tr;
 namespace winrt::CamelPlayer::implementation {
 namespace {
 
-// Localized texts are read on the UI thread and handed to background fetches.
-struct Texts {
-    hstring unknown = tr(L"Library_Unknown"), albums = tr(L"Library_Albums"), tracks = tr(L"Library_Tracks"),
-            folder = tr(L"Library_Folder"), artists = tr(L"Search_ArtistCount"), artist = tr(L"Library_RoleArtist"),
-            composer = tr(L"Library_RoleComposer");
+// A count's text for one and for any other number, as ui::counted chooses them.
+struct CountText {
+    explicit CountText(const wchar_t* key) : many(tr(key)), one(tr((std::wstring(key) + L"_One").c_str())) {}
+    hstring many, one;
 };
 
-// `format` is read on the UI thread and passed to work done elsewhere, so it comes already translated.
-hstring counted(const hstring& format, int64_t n) {
-    return hstring(ui::substitute(std::wstring(format), {ui::count(n)}));
+// Localized texts are read on the UI thread and handed to background fetches.
+struct Texts {
+    hstring unknown = tr(L"Library_Unknown"), folder = tr(L"Library_Folder"), artist = tr(L"Library_RoleArtist"),
+            composer = tr(L"Library_RoleComposer");
+    CountText albums{L"Library_Albums"}, tracks{L"Library_Tracks"}, artists{L"Search_ArtistCount"};
+};
+
+// `text` is read on the UI thread and passed to work done elsewhere, so it comes already translated.
+hstring counted(const CountText& text, int64_t n) {
+    return hstring(ui::substitute(std::wstring(n == 1 ? text.one : text.many), {ui::count(n)}));
 }
 
 // Tags written with surrounding spaces, tabs or ideographic spaces show without them; a blank one is unknown.
@@ -182,6 +188,31 @@ ScrollViewer scrollViewerOf(DependencyObject const& root) {
     return nullptr;
 }
 
+// A row's arrows are enabled only while it can scroll their way: a row whose items all fit has nowhere to go.
+void followRowArrows(ListViewBase const& list, Button const& back, Button const& forward) {
+    auto wired = std::make_shared<bool>(false);
+    list.SizeChanged(
+        [weakList = make_weak(list), weakBack = make_weak(back), weakForward = make_weak(forward), wired](auto&&, auto&&) {
+            const auto list = weakList.get();
+            const auto viewer = list ? scrollViewerOf(list) : nullptr;
+            if (!viewer) return;
+            const auto update = [weakViewer = make_weak(viewer), weakBack, weakForward] {
+                const auto viewer = weakViewer.get();
+                const auto back = weakBack.get();
+                const auto forward = weakForward.get();
+                if (!viewer || !back || !forward) return;
+                back.IsEnabled(viewer.HorizontalOffset() > 0.5);
+                forward.IsEnabled(viewer.HorizontalOffset() < viewer.ScrollableWidth() - 0.5);
+            };
+            if (!std::exchange(*wired, true)) {
+                viewer.ViewChanged([update](auto&&, auto&&) { update(); });
+                viewer.RegisterPropertyChangedCallback(ScrollViewer::ScrollableWidthProperty(),
+                                                       [update](auto&&, auto&&) { update(); });
+            }
+            update();
+        });
+}
+
 } // namespace
 
 ui::BrowsePage LibraryView::albumRows(const LibraryAlbumPage& page) {
@@ -192,6 +223,10 @@ void LibraryView::InitializeComponent() {
     LibraryViewT::InitializeComponent();
     ToolTipService::SetToolTip(DescendingToggle(), box_value(tr(L"Library_Descending")));
     Automation::AutomationProperties::SetName(DescendingToggle(), tr(L"Library_Descending"));
+    followRowArrows(SearchAlbums(), SearchAlbumsBack(), SearchAlbumsForward());
+    followRowArrows(SearchArtists(), SearchArtistsBack(), SearchArtistsForward());
+    followRowArrows(ArtistOwn(), ArtistOwnBack(), ArtistOwnForward());
+    followRowArrows(ArtistGuest(), ArtistGuestBack(), ArtistGuestForward());
 }
 
 void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Command)> submit, ui::PlaylistMenu playlistMenu,
@@ -1370,7 +1405,7 @@ winrt::fire_and_forget LibraryView::confirmReset(std::vector<LibraryTrackKey> tr
     ContentDialog dialog;
     ui::placeDialog(dialog, XamlRoot());
     dialog.Title(box_value(tr(L"Library_ResetStatisticsTitle")));
-    dialog.Content(box_value(ui::format(L"Library_ResetStatisticsText", {ui::count(int64_t(tracks.size()))})));
+    dialog.Content(box_value(ui::counted(L"Library_ResetStatisticsText", int64_t(tracks.size()))));
     dialog.PrimaryButtonText(tr(L"Library_ResetStatisticsPrimary"));
     dialog.CloseButtonText(tr(L"Playlist_Cancel"));
     dialog.DefaultButton(ContentDialogButton::Close);
@@ -1629,7 +1664,7 @@ void LibraryView::showAlbumFormats(const std::vector<LibraryAlbumFormat>& format
         text.Text(label);
         text.Style(resources.Lookup(box_value(L"CaptionTextBlockStyle")).as<Microsoft::UI::Xaml::Style>());
         badge.Child(text);
-        if (formats.size() > 1) ToolTipService::SetToolTip(badge, box_value(counted(tr(L"Library_Tracks"), f.tracks)));
+        if (formats.size() > 1) ToolTipService::SetToolTip(badge, box_value(ui::counted(L"Library_Tracks", f.tracks)));
         AlbumFormats().Children().Append(badge);
     }
     AlbumFormats().Visibility(AlbumFormats().Children().Size() ? Visibility::Visible : Visibility::Collapsed);
@@ -1909,7 +1944,7 @@ void LibraryView::showCount(int64_t total) {
               : current_.field == Field::Genre    ? L"Library_GenreCount"
                                                   : L"Library_YearCount";
     }
-    if (key) HeaderDetail().Text(counted(tr(key), total));
+    if (key) HeaderDetail().Text(ui::counted(key, total));
 }
 
 // Whole lists in a name order get the jump bar: albums by title or artist, artists, composers and genres.

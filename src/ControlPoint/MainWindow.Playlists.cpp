@@ -149,7 +149,7 @@ winrt::fire_and_forget MainWindow::askNewPlaylist(ui::SourceFetch fetch) {
 }
 
 void MainWindow::showPlaylistChange(const PlaylistChange& change, bool created) {
-    std::wstring message(ui::format(L"Library_Tracks", {ui::count(change.added)}));
+    std::wstring message(ui::counted(L"Library_Tracks", change.added));
     if (const auto skipped = change.skippedUnavailable + change.skippedDuplicates + change.skippedExisting)
         message += L" · " + std::wstring(ui::format(L"Playlist_Skipped", {ui::count(skipped)}));
     const std::wstring name(ui::utf8(change.name));

@@ -317,6 +317,7 @@ private:
     // Several Control points at once (docs/Plan.md §17.8): the link to another computer's Server, and what another
     // device did to the zone this window follows or to them all.
     void showLink();
+    void enablePlayerBar();
     // "CamelPlayer on <name>" in the title bar while this computer controls another (docs/Plan.md §17.8).
     void showComputerName();
     void showChanges(const camel::server::Snapshot& snapshot);

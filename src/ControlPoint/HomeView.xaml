@@ -150,7 +150,7 @@
 
                 <Grid Margin="0,12,0,0">
                     <TextBlock x:Name="PlayedHeader" x:Uid="Home_RecentlyPlayed" Style="{StaticResource SectionHeaderStyle}" />
-                    <HyperlinkButton x:Uid="Home_ViewAll" Tag="played" Click="OnViewAllClick" HorizontalAlignment="Right" />
+                    <HyperlinkButton x:Name="PlayedMore" x:Uid="Home_ViewAll" Tag="played" Click="OnViewAllClick" Visibility="Collapsed" HorizontalAlignment="Right" />
                 </Grid>
                 <TextBlock x:Name="PlayedEmpty" x:Uid="Home_NoPlays" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
                 <GridView x:Name="PlayedRow" AutomationProperties.LabeledBy="{x:Bind PlayedHeader}" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
@@ -160,7 +160,7 @@
 
                 <Grid Margin="0,12,0,0">
                     <TextBlock x:Name="AddedHeader" x:Uid="Home_RecentlyAdded" Style="{StaticResource SectionHeaderStyle}" />
-                    <HyperlinkButton x:Uid="Home_ViewAll" Tag="added" Click="OnViewAllClick" HorizontalAlignment="Right" />
+                    <HyperlinkButton x:Name="AddedMore" x:Uid="Home_ViewAll" Tag="added" Click="OnViewAllClick" Visibility="Collapsed" HorizontalAlignment="Right" />
                 </Grid>
                 <GridView x:Name="AddedRow" AutomationProperties.LabeledBy="{x:Bind AddedHeader}" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
                           SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"

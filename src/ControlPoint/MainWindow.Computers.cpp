@@ -358,6 +358,20 @@ void MainWindow::showLink() {
         break;
     }
     ConnectionBar().IsOpen(link != IServer::Link::Connected);
+    enablePlayerBar();
+}
+
+// The player bar's buttons act on the Server, so they wait while it does not answer; the zone picker stays, as it offers
+// Play music on this computer.
+void MainWindow::enablePlayerBar() {
+    const bool answers = !shownLink_ || *shownLink_ == IServer::Link::Connected;
+    const bool hasTrack = answers && !shown_.playback.pathUtf8.empty();
+    for (const auto& button : {PlayPauseButton(), PreviousButton(), NextButton()}) button.IsEnabled(hasTrack);
+    PositionSlider().IsEnabled(hasTrack);
+    for (const auto& toggle : {ShuffleButton(), RepeatButton()}) toggle.IsEnabled(answers);
+    DspButton().IsEnabled(answers);
+    VolumeButton().IsEnabled(answers);
+    PlaybackFavoriteButton().IsEnabled(answers && playbackFile_ != 0);
 }
 
 // What another device did to the music this window follows, or to all of it, as "Paused by Study PC" (docs/Plan.md

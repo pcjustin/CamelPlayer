@@ -137,4 +137,9 @@ std::wstring count(int64_t n) {
     return text;
 }
 
+winrt::hstring counted(const wchar_t* key, int64_t n) {
+    const std::wstring one = std::wstring(key) + L"_One";
+    return format(n == 1 ? one.c_str() : key, {count(n)});
+}
+
 } // namespace ui

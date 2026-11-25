@@ -883,12 +883,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         waveformAsked_ = {};
     }
     const auto [pos, total] = showPosition(s);
-    const bool hasTrack = !s.pathUtf8.empty();
-    PlayPauseButton().IsEnabled(hasTrack);
-    PreviousButton().IsEnabled(hasTrack);
-    NextButton().IsEnabled(hasTrack);
-    CoverButton().IsEnabled(hasTrack);
-    PositionSlider().IsEnabled(hasTrack);
+    CoverButton().IsEnabled(!s.pathUtf8.empty());
     ShuffleButton().IsChecked(snapshot.queue.shuffle);
     RepeatButton().IsChecked(snapshot.queue.repeat != RepeatMode::Off);
     if (snapshot.queue.repeat != shownRepeat_) {
@@ -912,9 +907,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         shownQueueMarks_ = snapshot.queue.marks;
         shownQueueEntryId_ = snapshot.queueEntryId;
         const bool windowed = snapshot.queue.entries.size() > ui::QueueCollection::kShown;
+        const auto entries = int64_t(snapshot.queue.entries.size());
         QueueCountText().Text(
-            ui::format(windowed ? L"Queue_CountWindowed" : L"Library_Tracks",
-                       {ui::count(int64_t(snapshot.queue.entries.size())), ui::count(int64_t(ui::QueueCollection::kShown))}));
+            windowed ? ui::format(L"Queue_CountWindowed", {ui::count(entries), ui::count(int64_t(ui::QueueCollection::kShown))})
+                     : ui::counted(L"Library_Tracks", entries));
         QueueEmptyText().Visibility(snapshot.queue.entries.empty() ? Visibility::Visible : Visibility::Collapsed);
         queueItems_->update(snapshot.queue.entries, snapshot.queueEntryId);
     } else if (shownQueueEntryId_ != snapshot.queueEntryId) {
@@ -953,8 +949,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     }
 
     const bool marked = !s.pathUtf8.empty() && currentEntry != snapshot.queue.entries.end() && currentEntry->file;
-    PlaybackFavoriteButton().IsEnabled(marked);
     playbackFile_ = marked ? currentEntry->file : 0;
+    enablePlayerBar();
     showPlaybackFavorite(marked && currentEntry->favorite);
 
     if (media_) {
@@ -1516,9 +1512,11 @@ winrt::fire_and_forget MainWindow::OnRemoveFolderClick(Windows::Foundation::IIns
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.Title(box_value(ui::format(L"Settings_RemoveFolderTitle", {std::wstring(ui::utf8(root.name))})));
     TextBlock explanation;
-    explanation.Text(
-        ui::format(L"Settings_RemoveFolderConfirm", {ui::count(contents.tracks), ui::count(contents.plays),
-                                                     ui::count(contents.favorites), ui::count(contents.playlistEntries)}));
+    explanation.Text(ui::format(L"Settings_RemoveFolderConfirm",
+                                {std::wstring(ui::counted(L"Library_Tracks", contents.tracks)),
+                                 std::wstring(ui::counted(L"Home_Plays", contents.plays)),
+                                 std::wstring(ui::counted(L"Count_Favorites", contents.favorites)),
+                                 std::wstring(ui::counted(L"Count_PlaylistEntries", contents.playlistEntries))}));
     explanation.TextWrapping(TextWrapping::Wrap);
     dialog.Content(explanation);
     dialog.PrimaryButtonText(ui::tr(L"Settings_RemoveFolderPrimary"));

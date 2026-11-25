@@ -469,10 +469,10 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="SearchAlbumsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
-                                <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="albums-back" Click="OnSearchRowScroll" Padding="6">
+                                <Button Grid.Column="1" x:Uid="Search_ScrollBack" x:Name="SearchAlbumsBack" Tag="albums-back" Click="OnSearchRowScroll" Padding="6">
                                     <FontIcon Glyph="&#xE76B;" FontSize="12" />
                                 </Button>
-                                <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="albums-forward" Click="OnSearchRowScroll" Padding="6">
+                                <Button Grid.Column="2" x:Uid="Search_ScrollForward" x:Name="SearchAlbumsForward" Tag="albums-forward" Click="OnSearchRowScroll" Padding="6">
                                     <FontIcon Glyph="&#xE76C;" FontSize="12" />
                                 </Button>
                             </Grid>
@@ -493,10 +493,10 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="SearchArtistsHeader" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
-                                <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="artists-back" Click="OnSearchRowScroll" Padding="6">
+                                <Button Grid.Column="1" x:Uid="Search_ScrollBack" x:Name="SearchArtistsBack" Tag="artists-back" Click="OnSearchRowScroll" Padding="6">
                                     <FontIcon Glyph="&#xE76B;" FontSize="12" />
                                 </Button>
-                                <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="artists-forward" Click="OnSearchRowScroll" Padding="6">
+                                <Button Grid.Column="2" x:Uid="Search_ScrollForward" x:Name="SearchArtistsForward" Tag="artists-forward" Click="OnSearchRowScroll" Padding="6">
                                     <FontIcon Glyph="&#xE76C;" FontSize="12" />
                                 </Button>
                             </Grid>
@@ -562,10 +562,10 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="ArtistOwnTitle" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="own-back" Click="OnSearchRowScroll" Padding="6">
+                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" x:Name="ArtistOwnBack" Tag="own-back" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76B;" FontSize="12" />
                             </Button>
-                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="own-forward" Click="OnSearchRowScroll" Padding="6">
+                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" x:Name="ArtistOwnForward" Tag="own-forward" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76C;" FontSize="12" />
                             </Button>
                             <HyperlinkButton x:Name="ArtistOwnAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="own" Click="OnArtistViewAllClick" />
@@ -588,10 +588,10 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="ArtistGuestTitle" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" Tag="guest-back" Click="OnSearchRowScroll" Padding="6">
+                            <Button Grid.Column="1" x:Uid="Search_ScrollBack" x:Name="ArtistGuestBack" Tag="guest-back" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76B;" FontSize="12" />
                             </Button>
-                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" Tag="guest-forward" Click="OnSearchRowScroll" Padding="6">
+                            <Button Grid.Column="2" x:Uid="Search_ScrollForward" x:Name="ArtistGuestForward" Tag="guest-forward" Click="OnSearchRowScroll" Padding="6">
                                 <FontIcon Glyph="&#xE76C;" FontSize="12" />
                             </Button>
                             <HyperlinkButton x:Name="ArtistGuestAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="guest" Click="OnArtistViewAllClick" />

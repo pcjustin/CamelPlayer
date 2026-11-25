@@ -170,10 +170,15 @@
   <data name="Library_Empty.Text" xml:space="preserve"><value>No music yet. Add a folder under Settings › Library; it is indexed in the background.</value></data>
   <data name="Library_Unknown" xml:space="preserve"><value>Unknown</value></data>
   <data name="Library_Albums" xml:space="preserve"><value>{0} albums</value></data>
+  <data name="Library_Albums_One" xml:space="preserve"><value>{0} album</value></data>
   <data name="Library_Tracks" xml:space="preserve"><value>{0} tracks</value></data>
+  <data name="Library_Tracks_One" xml:space="preserve"><value>{0} track</value></data>
   <data name="Library_ComposerCount" xml:space="preserve"><value>{0} composers</value></data>
+  <data name="Library_ComposerCount_One" xml:space="preserve"><value>{0} composer</value></data>
   <data name="Library_GenreCount" xml:space="preserve"><value>{0} genres</value></data>
+  <data name="Library_GenreCount_One" xml:space="preserve"><value>{0} genre</value></data>
   <data name="Library_YearCount" xml:space="preserve"><value>{0} years</value></data>
+  <data name="Library_YearCount_One" xml:space="preserve"><value>{0} year</value></data>
   <data name="Library_Folder" xml:space="preserve"><value>Folder</value></data>
   <data name="Library_SortTitle" xml:space="preserve"><value>Title</value></data>
   <data name="Library_SortArtist" xml:space="preserve"><value>Artist</value></data>
@@ -187,7 +192,11 @@
   <data name="Settings_RemoveFolder.Content" xml:space="preserve"><value>Remove folder</value></data>
   <data name="Settings_FolderOffline" xml:space="preserve"><value>offline</value></data>
   <data name="Settings_RemoveFolderTitle" xml:space="preserve"><value>Remove “{0}” from the library?</value></data>
-  <data name="Settings_RemoveFolderConfirm" xml:space="preserve"><value>Its {0} tracks leave the library with their {1} plays, {2} favorites and {3} playlist entries, and the library file shrinks. This cannot be undone. The music files themselves stay where they are; adding the folder again scans it as new.</value></data>
+  <data name="Settings_RemoveFolderConfirm" xml:space="preserve"><value>Removing it takes {0} out of the library, with {1}, {2} and {3}, and the library file shrinks. This cannot be undone. The music files themselves stay where they are; adding the folder again scans it as new.</value></data>
+  <data name="Count_Favorites" xml:space="preserve"><value>{0} favorites</value></data>
+  <data name="Count_Favorites_One" xml:space="preserve"><value>{0} favorite</value></data>
+  <data name="Count_PlaylistEntries" xml:space="preserve"><value>{0} playlist entries</value></data>
+  <data name="Count_PlaylistEntries_One" xml:space="preserve"><value>{0} playlist entry</value></data>
   <data name="Settings_RemoveFolderPrimary" xml:space="preserve"><value>Remove</value></data>
   <data name="Library_AlbumsPending" xml:space="preserve"><value>Albums appear here as the library folders are scanned.</value></data>
   <data name="Library_Loading.AutomationProperties.Name" xml:space="preserve"><value>Loading</value></data>
@@ -279,6 +288,7 @@
   <data name="Artist_AppearsOn" xml:space="preserve"><value>Appears on</value></data>
   <data name="Search_Artists" xml:space="preserve"><value>Artists</value></data>
   <data name="Search_ArtistCount" xml:space="preserve"><value>{0} artists</value></data>
+  <data name="Search_ArtistCount_One" xml:space="preserve"><value>{0} artist</value></data>
   <data name="Search_All" xml:space="preserve"><value>Show all results for “{0}”</value></data>
   <data name="Search_Title" xml:space="preserve"><value>Search: {0}</value></data>
   <data name="Search_None" xml:space="preserve"><value>Nothing in the library matches this search.</value></data>
@@ -294,6 +304,7 @@
   <data name="Home_Month.Text" xml:space="preserve"><value>This month</value></data>
   <data name="Home_AllTime.Text" xml:space="preserve"><value>All time</value></data>
   <data name="Home_Plays" xml:space="preserve"><value>{0} plays</value></data>
+  <data name="Home_Plays_One" xml:space="preserve"><value>{0} play</value></data>
   <data name="Home_RecentlyPlayed.Text" xml:space="preserve"><value>Recently played</value></data>
   <data name="Home_RecentlyAdded.Text" xml:space="preserve"><value>Recently added</value></data>
   <data name="Home_ViewAll.Content" xml:space="preserve"><value>View all</value></data>
@@ -405,6 +416,7 @@ Details: {0}</value></data>
   <data name="Playlist_SortMore" xml:space="preserve"><value>More sorting</value></data>
   <data name="Playlist_PageTitle" xml:space="preserve"><value>Playlists</value></data>
   <data name="Playlist_Count" xml:space="preserve"><value>{0} playlists</value></data>
+  <data name="Playlist_Count_One" xml:space="preserve"><value>{0} playlist</value></data>
   <data name="Playlist_None" xml:space="preserve"><value>No playlists yet. Right-click albums, folders, tracks or artists and choose Create playlist, or import an M3U8 file.</value></data>
   <data name="Playlist_UnavailableCount" xml:space="preserve"><value>{0} unavailable</value></data>
   <data name="Playlist_Listed" xml:space="preserve"><value>the first {0} are listed</value></data>
@@ -424,6 +436,7 @@ Details: {0}</value></data>
   <data name="Playlist_Imported" xml:space="preserve"><value>Imported “{0}”</value></data>
   <data name="Playlist_ImportFailed" xml:space="preserve"><value>Could not import the playlist file</value></data>
   <data name="Playlist_SkippedUrls" xml:space="preserve"><value>{0} web addresses skipped</value></data>
+  <data name="Playlist_SkippedUrls_One" xml:space="preserve"><value>{0} web address skipped</value></data>
   <data name="Playlist_Remove" xml:space="preserve"><value>Remove from playlist</value></data>
   <data name="Playlist_UnavailableIcon.ToolTipService.ToolTip" xml:space="preserve"><value>Unavailable: the file is missing or its library folder is offline</value></data>
   <data name="Playlist_Play.Text" xml:space="preserve"><value>Play</value></data>
@@ -472,10 +485,12 @@ Details: {0}</value></data>
   <data name="Home_ByPlays" xml:space="preserve"><value>By plays</value></data>
   <data name="Home_ByTime" xml:space="preserve"><value>By listening time</value></data>
   <data name="Home_History" xml:space="preserve"><value>History ({0} plays)</value></data>
+  <data name="Home_History_One" xml:space="preserve"><value>History ({0} play)</value></data>
   <data name="Home_HistoryTitle" xml:space="preserve"><value>History</value></data>
   <data name="Library_MenuResetStatistics" xml:space="preserve"><value>Reset statistics…</value></data>
   <data name="Library_ResetStatisticsTitle" xml:space="preserve"><value>Reset statistics?</value></data>
   <data name="Library_ResetStatisticsText" xml:space="preserve"><value>The plays of {0} tracks are deleted and their counts start from zero. This cannot be undone.</value></data>
+  <data name="Library_ResetStatisticsText_One" xml:space="preserve"><value>The plays of {0} track are deleted and its count starts from zero. This cannot be undone.</value></data>
   <data name="Library_ResetStatisticsPrimary" xml:space="preserve"><value>Reset</value></data>
   <data name="Reset_StatisticsTitle.Text" xml:space="preserve"><value>Listening statistics</value></data>
   <data name="Reset_StatisticsText.Text" xml:space="preserve"><value>Deletes every recorded play; all counts start from zero.</value></data>
@@ -569,10 +584,12 @@ Details: {0}</value></data>
   <data name="Install_Checking" xml:space="preserve"><value>Checking the program files…</value></data>
   <data name="Install_Intact" xml:space="preserve"><value>All {0} program files are intact.</value></data>
   <data name="Install_Problems" xml:space="preserve"><value>{0} program files are damaged or missing.</value></data>
+  <data name="Install_Problems_One" xml:space="preserve"><value>{0} program file is damaged or missing.</value></data>
   <data name="Install_NoManifest" xml:space="preserve"><value>This build has no file list to check against.</value></data>
   <data name="Install_CheckFailed" xml:space="preserve"><value>Could not check the program files: {0}</value></data>
   <data name="Repair_Title" xml:space="preserve"><value>Some program files are damaged or missing</value></data>
   <data name="Repair_Text" xml:space="preserve"><value>{0} files of CamelPlayer {1} do not match the release. Repair downloads this version again from GitHub and restarts CamelPlayer; your settings and library are kept.</value></data>
+  <data name="Repair_Text_One" xml:space="preserve"><value>{0} file of CamelPlayer {1} does not match the release. Repair downloads this version again from GitHub and restarts CamelPlayer; your settings and library are kept.</value></data>
   <data name="Repair_Install" xml:space="preserve"><value>Repair</value></data>
   <data name="Repair_Details.Content" xml:space="preserve"><value>Details</value></data>
   <data name="Repair_Skip.Content" xml:space="preserve"><value>Skip</value></data>
@@ -706,7 +723,7 @@ Details: {0}</value></data>
   <data name="Volume_Slider.AutomationProperties.Name" xml:space="preserve"><value>Volume</value></data>
   <data name="Volume_Mute" xml:space="preserve"><value>Mute</value></data>
   <data name="Volume_Unmute" xml:space="preserve"><value>Unmute</value></data>
-  <data name="Loudness_Progress" xml:space="preserve"><value>{0} of {1} tracks have a ReplayGain value.</value></data>
+  <data name="Loudness_Progress" xml:space="preserve"><value>Tracks with a ReplayGain value: {0} of {1}.</value></data>
   <data name="Loudness_Off" xml:space="preserve"><value>Turn ReplayGain on to analyze the rest in the background.</value></data>
   <data name="Loudness_Analyzing" xml:space="preserve"><value>Analyzing in the background…</value></data>
   <data name="SignalPath_ReplayGain" xml:space="preserve"><value>ReplayGain</value></data>
