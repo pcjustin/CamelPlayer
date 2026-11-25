@@ -73,11 +73,12 @@ private:
     std::vector<Record> records_;
 };
 
-template <class F> void timed(Recorder& recorder, int client, const char* kind, F&& call) {
+// `what` names what was asked, such as a search's words, in the record.
+template <class F> void timed(Recorder& recorder, int client, const char* kind, F&& call, std::string what = {}) {
     const auto from = Clock::now();
     try {
         call();
-        recorder.add(client, kind, from, Clock::now(), true);
+        recorder.add(client, kind, from, Clock::now(), true, std::move(what));
     } catch (const std::exception& e) {
         recorder.add(client, kind, from, Clock::now(), false, e.what());
     }
@@ -138,8 +139,13 @@ void browse(RemoteServer& server, int client, Clock::time_point end, Recorder& r
                     listed.push_back(album.id);
             });
         } else if (choice < 80) {
+            // As the window searches: the first page, then its counts, and the first page of the matching tracks' list.
             const auto& query = words[std::uniform_int_distribution<size_t>(0, words.size() - 1)(random)];
-            timed(recorder, client, "search", [&] { server.searchLibrary(query, 0, kSearchShown, std::nullopt); });
+            timed(
+                recorder, client, "search", [&] { server.searchLibrary(query, 0, kSearchShown, std::nullopt, {}, false); },
+                query);
+            timed(recorder, client, "search counts", [&] { server.searchLibrary(query, 0, 1, std::nullopt); }, query);
+            timed(recorder, client, "search tracks", [&] { server.searchTracks(query, 0, kPage, std::nullopt); }, query);
         } else if (!fetched.empty() && choice < 88) {
             const auto album = fetched[std::uniform_int_distribution<size_t>(0, fetched.size() - 1)(random)];
             timed(recorder, client, "cover again", [&] { server.artwork({ArtworkKind::Album, album}); });
