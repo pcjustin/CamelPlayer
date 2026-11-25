@@ -31,8 +31,27 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <ContentPresenter HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <Grid>
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Overlay.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Overlay.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            <Border x:Name="Overlay" CornerRadius="8" IsHitTestVisible="False" />
+                        </Grid>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -88,6 +107,29 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </Grid>
         </DataTemplate>
+        <!-- A play of the history: its start and zone in a column of their own width, wrapping onto a second line, so that
+             the columns of every row line up. -->
+        <DataTemplate x:Key="HistoryTemplate" x:DataType="local:BrowseItem">
+            <Grid Padding="0,6" ColumnSpacing="16" Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="200" />
+                    <ColumnDefinition Width="3*" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" MinWidth="72" />
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Uid="Home_UnavailableIcon" Glyph="&#xE7BA;" FontSize="14" Visibility="{x:Bind IsUnavailable, Mode=OneWay}"
+                          Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Detail, Mode=OneWay}" VerticalAlignment="Center" TextWrapping="Wrap" MaxLines="2"
+                           TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Title, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" />
+                <TextBlock Grid.Column="3" Text="{x:Bind Subtitle, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="4" Text="{x:Bind Trailing, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </DataTemplate>
         <ItemsPanelTemplate x:Key="RowPanel">
             <ItemsStackPanel Orientation="Horizontal" />
         </ItemsPanelTemplate>
@@ -99,24 +141,28 @@
                 <!-- The library's size, not a listening statistic, so it sits under the title rather than among the cards. -->
                 <StackPanel>
                     <TextBlock x:Uid="Home_Title" Style="{StaticResource TitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level1" />
-                    <TextBlock x:Name="LibraryCounts" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock x:Name="LibraryCounts" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <ProgressRing x:Name="LoadingIndicator" x:Uid="Library_Loading" IsActive="False" Visibility="Collapsed"
+                                      Width="16" Height="16" />
+                    </StackPanel>
                 </StackPanel>
 
                 <Grid Margin="0,12,0,0">
-                    <TextBlock x:Uid="Home_RecentlyPlayed" Style="{StaticResource SectionHeaderStyle}" />
+                    <TextBlock x:Name="PlayedHeader" x:Uid="Home_RecentlyPlayed" Style="{StaticResource SectionHeaderStyle}" />
                     <HyperlinkButton x:Uid="Home_ViewAll" Tag="played" Click="OnViewAllClick" HorizontalAlignment="Right" />
                 </Grid>
                 <TextBlock x:Name="PlayedEmpty" x:Uid="Home_NoPlays" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
-                <GridView x:Name="PlayedRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                <GridView x:Name="PlayedRow" AutomationProperties.LabeledBy="{x:Bind PlayedHeader}" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
                           SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
                           ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                           ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
 
                 <Grid Margin="0,12,0,0">
-                    <TextBlock x:Uid="Home_RecentlyAdded" Style="{StaticResource SectionHeaderStyle}" />
+                    <TextBlock x:Name="AddedHeader" x:Uid="Home_RecentlyAdded" Style="{StaticResource SectionHeaderStyle}" />
                     <HyperlinkButton x:Uid="Home_ViewAll" Tag="added" Click="OnViewAllClick" HorizontalAlignment="Right" />
                 </Grid>
-                <GridView x:Name="AddedRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                <GridView x:Name="AddedRow" AutomationProperties.LabeledBy="{x:Bind AddedHeader}" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
                           SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
                           ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                           ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
@@ -231,28 +277,28 @@
                     </Grid>
 
                     <Grid>
-                        <TextBlock x:Uid="Home_TopAlbums" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TopAlbumsHeader" x:Uid="Home_TopAlbums" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
                         <HyperlinkButton x:Uid="Home_ViewAll" Tag="topAlbums" Click="OnViewAllClick" HorizontalAlignment="Right" />
                     </Grid>
-                    <GridView x:Name="TopAlbumsRow" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                    <GridView x:Name="TopAlbumsRow" AutomationProperties.LabeledBy="{x:Bind TopAlbumsHeader}" ItemTemplate="{StaticResource CoverTemplate}" ItemsPanel="{StaticResource RowPanel}"
                               SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnAlbumClick"
                               ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                               ScrollViewer.VerticalScrollMode="Disabled" Height="250" SizeChanged="OnRowSizeChanged" />
 
                     <Grid>
-                        <TextBlock x:Uid="Home_TopArtists" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TopArtistsHeader" x:Uid="Home_TopArtists" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
                         <HyperlinkButton x:Uid="Home_ViewAll" Tag="topArtists" Click="OnViewAllClick" HorizontalAlignment="Right" />
                     </Grid>
-                    <ListView x:Name="TopArtistsRow" ItemTemplate="{StaticResource ArtistTemplate}" ItemsPanel="{StaticResource RowPanel}"
+                    <ListView x:Name="TopArtistsRow" AutomationProperties.LabeledBy="{x:Bind TopArtistsHeader}" ItemTemplate="{StaticResource ArtistTemplate}" ItemsPanel="{StaticResource RowPanel}"
                               SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnArtistClick"
                               ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                               ScrollViewer.VerticalScrollMode="Disabled" />
 
                     <Grid>
-                        <TextBlock x:Uid="Home_TopTracks" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TopTracksHeader" x:Uid="Home_TopTracks" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
                         <HyperlinkButton x:Uid="Home_ViewAll" Tag="topTracks" Click="OnViewAllClick" HorizontalAlignment="Right" />
                     </Grid>
-                    <ListView x:Name="TopTracksList" ItemTemplate="{StaticResource TrackTemplate}" SelectionMode="None"
+                    <ListView x:Name="TopTracksList" AutomationProperties.LabeledBy="{x:Bind TopTracksHeader}" ItemTemplate="{StaticResource TrackTemplate}" SelectionMode="None"
                               IsItemClickEnabled="True" ItemClick="OnTrackClick"
                               ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" />
 
@@ -260,7 +306,7 @@
                         <TextBlock x:Name="HistoryHeader" Style="{StaticResource SectionHeaderStyle}" />
                         <HyperlinkButton x:Uid="Home_ViewAll" Tag="history" Click="OnViewAllClick" HorizontalAlignment="Right" />
                     </Grid>
-                    <ListView x:Name="HistoryList" ItemTemplate="{StaticResource TrackTemplate}" SelectionMode="None"
+                    <ListView x:Name="HistoryList" AutomationProperties.LabeledBy="{x:Bind HistoryHeader}" ItemTemplate="{StaticResource HistoryTemplate}" SelectionMode="None"
                               IsItemClickEnabled="True" ItemClick="OnTrackClick"
                               ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" />
                 </StackPanel>

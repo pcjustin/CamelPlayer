@@ -556,10 +556,16 @@ winrt::fire_and_forget MainWindow::OnAsioPanelClick(Windows::Foundation::IInspec
     co_return;
 }
 
+// Busy until a snapshot shows the Server has scanned.
 void MainWindow::OnRefreshDevicesClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
     Command command;
     command.kind = CommandKind::RefreshDevices;
-    submitCommand(std::move(command));
+    const uint64_t run = server_ ? server_->snapshot().run : 0;
+    refreshStamp_ = submitCommand(std::move(command));
+    if (!refreshStamp_) return;
+    refreshRun_ = run;
+    RefreshDevicesButton().IsEnabled(false);
+    RefreshDevicesRing().IsActive(true);
 }
 
 } // namespace winrt::CamelPlayer::implementation

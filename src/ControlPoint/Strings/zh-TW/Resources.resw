@@ -126,7 +126,7 @@
   <data name="KsMode_RtEvent" xml:space="preserve"><value>WaveRT 事件</value></data>
   <data name="KsMode_RtPoll" xml:space="preserve"><value>WaveRT 輪詢</value></data>
   <data name="KsMode_Standard" xml:space="preserve"><value>標準串流</value></data>
-  <data name="Device_Default" xml:space="preserve"><value>Windows 預設裝置（WASAPI）</value></data>
+  <data name="Device_Default" xml:space="preserve"><value>Windows 預設裝置 (WASAPI)</value></data>
   <data name="Device_NotConnected" xml:space="preserve"><value>未連接</value></data>
   <data name="Status_Adjusted" xml:space="preserve"><value>設定值 ≠ 實際值</value></data>
   <data name="Lang_System" xml:space="preserve"><value>跟隨系統</value></data>
@@ -153,13 +153,19 @@
   <data name="Library_GoToPlaying.ToolTipService.ToolTip" xml:space="preserve"><value>跳到正在播放 (Ctrl+L)</value></data>
   <data name="Library_PlayingMark" xml:space="preserve"><value>播放中</value></data>
   <data name="Library_PausedMark" xml:space="preserve"><value>已暫停</value></data>
+  <data name="Library_FavoriteMark" xml:space="preserve"><value>最愛</value></data>
+  <data name="Library_UnavailableMark" xml:space="preserve"><value>無法使用</value></data>
+  <data name="Library_SortedAscending" xml:space="preserve"><value>{0}，遞增排序</value></data>
+  <data name="Library_SortedDescending" xml:space="preserve"><value>{0}，遞減排序</value></data>
+  <data name="Columns_Divider" xml:space="preserve"><value>{0}與{1}欄的寬度</value></data>
+  <data name="Columns_DividerHelp" xml:space="preserve"><value>以左右方向鍵調整；按 Home 讓所有欄位回到原本的寬度</value></data>
   <data name="Error_Other" xml:space="preserve"><value>播放錯誤</value></data>
   <data name="Error_PlayerInUse" xml:space="preserve"><value>播放器正被其他來源使用，按播放可改回這裡播放</value></data>
   <data name="Error_PlayerLost" xml:space="preserve"><value>播放器未連接，恢復連線後按播放</value></data>
   <data name="Error_ReceiverRefuses" xml:space="preserve"><value>接收端拒絕這台電腦：請在「家庭」App 的「家庭設定 › 喇叭與電視 › 允許喇叭與電視存取」選「同一網路上的任何人」，再按播放</value></data>
   <data name="Error_ReceiverNotAllowed" xml:space="preserve"><value>接收端沒有允許 CamelPlayer：請在接收端跳出的通知中於 15 秒內接受 CamelPlayer，再按播放</value></data>
   <data name="Error_MacRefuses" xml:space="preserve"><value>這台 Mac 只允許它自己的使用者隔空播放：請在 Mac 的「系統設定 › 一般 › AirDrop 與接力」，把「允許隔空播放的對象」改成「同一網路上的任何人」或「所有人」，再按播放</value></data>
-  <data name="Error_ReceiverRegrouped" xml:space="preserve"><value>接收端已變更，例如在「家庭」App 中組成或拆開了立體聲：請在輸出選單重新選擇；剛組成的立體聲會自動接著播放</value></data>
+  <data name="Error_ReceiverRegrouped" xml:space="preserve"><value>接收端已變更，例如在「家庭」App 中組成或拆開了立體聲：請在區域選單重新選擇；剛組成的立體聲會自動接著播放</value></data>
   <data name="Error_PlayerDidNotPlay" xml:space="preserve"><value>播放器沒有開始播放，請確認它已開機且不在待機，再按播放</value></data>
   <data name="Library_Empty.Text" xml:space="preserve"><value>還沒有音樂。請到「設定 › 媒體庫」加入資料夾，會在背景建立索引。</value></data>
   <data name="Library_Unknown" xml:space="preserve"><value>未知</value></data>
@@ -184,12 +190,19 @@
   <data name="Settings_RemoveFolderConfirm" xml:space="preserve"><value>其中的 {0} 首曲目會離開媒體庫，連同 {1} 次播放、{2} 個最愛和 {3} 個播放清單項目，媒體庫檔案也會隨之縮小。這無法復原。音樂檔案本身不會被刪除；之後再加入這個資料夾，會當作新資料夾重新掃描。</value></data>
   <data name="Settings_RemoveFolderPrimary" xml:space="preserve"><value>移除</value></data>
   <data name="Library_AlbumsPending" xml:space="preserve"><value>專輯會在掃描資料夾時陸續出現。</value></data>
+  <data name="Library_Loading.AutomationProperties.Name" xml:space="preserve"><value>載入中</value></data>
+  <data name="Library_TracksPending" xml:space="preserve"><value>曲目會在掃描資料夾時陸續出現。</value></data>
+  <data name="Library_ArtistsPending" xml:space="preserve"><value>演出者會在掃描資料夾時陸續出現。</value></data>
+  <data name="Library_ComposersNone" xml:space="preserve"><value>還沒有作曲家。掃描資料夾時會依曲目的作曲家標籤列出。</value></data>
+  <data name="Library_GenresNone" xml:space="preserve"><value>還沒有類型。掃描資料夾時會依曲目的類型標籤列出。</value></data>
+  <data name="Library_YearsNone" xml:space="preserve"><value>還沒有年份。掃描資料夾時會依曲目的日期標籤列出。</value></data>
   <data name="Library_Scanning" xml:space="preserve"><value>正在掃描媒體庫：已檢查 {0} / {1} 個檔案</value></data>
   <data name="Library_Finishing" xml:space="preserve"><value>已檢查所有檔案，正在整理專輯…</value></data>
   <data name="Queue_Title.Text" xml:space="preserve"><value>播放佇列</value></data>
   <data name="Queue_Close.Content" xml:space="preserve"><value>關閉</value></data>
   <data name="Queue_RemoveEntry" xml:space="preserve"><value>從佇列移除此曲</value></data>
   <data name="Queue_Clear.Text" xml:space="preserve"><value>清空佇列</value></data>
+  <data name="Queue_Cleared" xml:space="preserve"><value>已清空佇列</value></data>
   <data name="Queue_Save.Text" xml:space="preserve"><value>將佇列儲存為播放清單</value></data>
   <data name="Queue_More.AutomationProperties.Name" xml:space="preserve"><value>更多佇列選項</value></data>
   <data name="Queue_More.ToolTipService.ToolTip" xml:space="preserve"><value>更多佇列選項</value></data>
@@ -306,6 +319,7 @@
   <data name="Guide_Back" xml:space="preserve"><value>上一步</value></data>
   <data name="Guide_Skip" xml:space="preserve"><value>略過</value></data>
   <data name="Guide_Finish" xml:space="preserve"><value>完成</value></data>
+  <data name="Guide_Step" xml:space="preserve"><value>第 {0} 步，共 {1} 步</value></data>
   <data name="Error_NoDataFolder" xml:space="preserve"><value>CamelPlayer 找不到或無法建立 %LOCALAPPDATA% 中的資料夾，因此無法啟動。請確認該資料夾存在且你的帳號可以寫入。</value></data>
   <data name="Error_NewerData" xml:space="preserve"><value>這份 CamelPlayer 資料是由較新的版本建立的，這個版本無法使用。請改用較新版本的 CamelPlayer；資料都沒有變動。</value></data>
   <data name="Error_DataFailed" xml:space="preserve"><value>CamelPlayer 無法開啟它的資料，因此無法啟動：{0}。資料都沒有變動。回報這個問題時，請附上 {1} 中的紀錄檔。</value></data>
@@ -378,7 +392,8 @@
   <data name="Playlist_ConfirmAdd" xml:space="preserve"><value>加入</value></data>
   <data name="Playlist_Cancel" xml:space="preserve"><value>取消</value></data>
   <data name="Playlist_NewTitle" xml:space="preserve"><value>新增播放清單</value></data>
-  <data name="Playlist_NamePlaceholder" xml:space="preserve"><value>名稱（可留空）</value></data>
+  <data name="Playlist_NamePlaceholder" xml:space="preserve"><value>可留空</value></data>
+  <data name="Playlist_NameLabel" xml:space="preserve"><value>名稱</value></data>
   <data name="Playlist_Skipped" xml:space="preserve"><value>略過 {0} 首：無法使用、重複或已在清單中</value></data>
   <data name="Playlist_Created" xml:space="preserve"><value>已建立播放清單「{0}」</value></data>
   <data name="Playlist_Added" xml:space="preserve"><value>已加入「{0}」</value></data>
@@ -431,6 +446,8 @@
   <data name="Settings_FolderPlaysOn.OffContent" xml:space="preserve"><value>只播所在的資料夾</value></data>
   <data name="Queue_Autoplay.Text" xml:space="preserve"><value>播完後自動播放</value></data>
   <data name="Queue_AutomaticIcon.ToolTipService.ToolTip" xml:space="preserve"><value>佇列播完後自動加入</value></data>
+  <data name="Queue_CurrentMark" xml:space="preserve"><value>目前曲目</value></data>
+  <data name="Queue_AutomaticMark" xml:space="preserve"><value>自動加入</value></data>
   <data name="Settings_Hotkeys.Text" xml:space="preserve"><value>快捷鍵</value></data>
   <data name="Settings_HotkeysText.Text" xml:space="preserve"><value>全系統：在任何程式中都有效。點選組合後按下新的組合（需含 Ctrl、Alt 或 Win）；按 Esc 保留原本的組合。</value></data>
   <data name="Settings_HotkeysDefaults.Content" xml:space="preserve"><value>還原預設快捷鍵</value></data>
@@ -441,6 +458,8 @@
   <data name="Hotkey_Press" xml:space="preserve"><value>請按下新的組合…</value></data>
   <data name="Hotkey_None" xml:space="preserve"><value>無</value></data>
   <data name="Hotkey_Clear" xml:space="preserve"><value>清除</value></data>
+  <data name="Hotkey_Named" xml:space="preserve"><value>{0}：{1}</value></data>
+  <data name="Hotkey_ClearNamed" xml:space="preserve"><value>清除{0}</value></data>
   <data name="Hotkey_Taken" xml:space="preserve"><value>這個組合已被其他程式使用，請改用其他組合。</value></data>
   <data name="Settings_WindowKeys.Text" xml:space="preserve"><value>視窗在前景時</value></data>
   <data name="Settings_WindowKeysText.Text" xml:space="preserve"><value>Space 播放／暫停 · Ctrl+→ 下一首 · Ctrl+← 上一首 · Ctrl+Shift+→ 快轉 10 秒 · Ctrl+Shift+← 倒轉 10 秒 · Alt+← 或滑鼠的上一頁鍵：資料庫頁面返回。播放的按鍵在文字欄位打字、或開著對話框和選單時不會作用。</value></data>
@@ -466,8 +485,10 @@
   <data name="Marks_RemoveFavorite" xml:space="preserve"><value>從最愛移除</value></data>
   <data name="Marks_AddFavoriteAlbum" xml:space="preserve"><value>加入最愛專輯</value></data>
   <data name="Marks_RemoveFavoriteAlbum" xml:space="preserve"><value>從最愛專輯移除</value></data>
-  <data name="Marks_FavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>最愛</value></data>
-  <data name="Marks_FavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>最愛</value></data>
+  <data name="Marks_FavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>加入最愛</value></data>
+  <data name="Marks_FavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>加入最愛</value></data>
+  <data name="Marks_FavoriteOn" xml:space="preserve"><value>從最愛移除</value></data>
+  <data name="Marks_FavoriteOff" xml:space="preserve"><value>加入最愛</value></data>
   <data name="Marks_AlbumFavoriteButton.AutomationProperties.Name" xml:space="preserve"><value>最愛專輯</value></data>
   <data name="Marks_AlbumFavoriteButton.ToolTipService.ToolTip" xml:space="preserve"><value>最愛專輯</value></data>
   <data name="Marks_AddFavoriteArtist" xml:space="preserve"><value>加入最愛演出者</value></data>
@@ -602,6 +623,9 @@
   <data name="Eq_Column_Q" xml:space="preserve"><value>Q</value></data>
   <data name="Eq_Column_Slope" xml:space="preserve"><value>斜率 (/oct)</value></data>
   <data name="Eq_RemoveBand" xml:space="preserve"><value>移除頻段</value></data>
+  <data name="Eq_Band" xml:space="preserve"><value>第 {0} 頻段</value></data>
+  <data name="Eq_BandControl" xml:space="preserve"><value>第 {0} 頻段，{1}</value></data>
+  <data name="Eq_RemoveBandNumber" xml:space="preserve"><value>移除第 {0} 頻段</value></data>
   <data name="Eq_SaveTitle" xml:space="preserve"><value>儲存等化器預設組</value></data>
   <data name="Eq_PresetName" xml:space="preserve"><value>名稱</value></data>
   <data name="Eq_Save" xml:space="preserve"><value>儲存</value></data>
@@ -610,8 +634,8 @@
   <data name="Eq_ImportDropped" xml:space="preserve"><value>第 {0} 行已略過：數值不是等化器能使用的數字。</value></data>
   <data name="Eq_ImportFailed" xml:space="preserve"><value>檔案裡沒有 CamelPlayer 能讀取的濾波器。請選擇 Equalizer APO 設定檔或 AutoEq 的 ParametricEQ.txt。</value></data>
   <data name="SignalPath_Eq" xml:space="preserve"><value>參數式等化器</value></data>
-  <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP：ReplayGain、等化器、crossfeed 與卷積</value></data>
-  <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP：ReplayGain、等化器、crossfeed 與卷積</value></data>
+  <data name="Dsp_Button.ToolTipService.ToolTip" xml:space="preserve"><value>DSP：ReplayGain、等化器、Crossfeed 與卷積</value></data>
+  <data name="Dsp_Button.AutomationProperties.Name" xml:space="preserve"><value>DSP：ReplayGain、等化器、Crossfeed 與卷積</value></data>
   <data name="Dsp_Off" xml:space="preserve"><value>所有 DSP 都已關閉，播放維持 bit-perfect。</value></data>
   <data name="Dsp_Flat" xml:space="preserve"><value>目前沒有任何處理改變訊號，播放維持 bit-perfect。</value></data>
   <data name="Dsp_Headroom" xml:space="preserve"><value>整條 DSP 鏈的自動前級增益：−{0} dB，避免削波。</value></data>
@@ -624,7 +648,8 @@
   <data name="Dsp_MenuSettings" xml:space="preserve"><value>DSP 設定…</value></data>
   <data name="Dsp_ForOutput" xml:space="preserve"><value>設定的是使用中的輸出「{0}」，每個輸出各有自己的一組。</value></data>
   <data name="Dsp_MenuForOutput" xml:space="preserve"><value>用於 {0}</value></data>
-  <data name="Dsp_ButtonForOutput" xml:space="preserve"><value>用於 {0} 的 DSP：ReplayGain、等化器、crossfeed 與卷積</value></data>
+  <data name="Dsp_ButtonForOutput" xml:space="preserve"><value>用於 {0} 的 DSP：ReplayGain、等化器、Crossfeed 與卷積</value></data>
+  <data name="Dsp_ButtonActive" xml:space="preserve"><value>{0}。目前正在改變訊號</value></data>
   <data name="Output_Dsp" xml:space="preserve"><value>DSP</value></data>
   <data name="Output_DspNone" xml:space="preserve"><value>全部關閉</value></data>
   <data name="Output_DspReplayGain" xml:space="preserve"><value>ReplayGain：{0}</value></data>
@@ -632,7 +657,7 @@
   <data name="Output_DspAllOff" xml:space="preserve"><value>關閉所有 DSP</value></data>
   <data name="Settings_DspOrder.Text" xml:space="preserve"><value>處理順序</value></data>
   <data name="Settings_DspRestoreOrder.Content" xml:space="preserve"><value>恢復預設順序</value></data>
-  <data name="Settings_DspOrderNote.Text" xml:space="preserve"><value>預設順序「等化器 → crossfeed → 卷積」讓房間或耳機校正最靠近喇叭或耳機。只有左右聲道處理不同時（例如只作用單一聲道的 EQ 頻段，或 true stereo 的 IR），搭配 crossfeed 才會因順序而聽起來不同。</value></data>
+  <data name="Settings_DspOrderNote.Text" xml:space="preserve"><value>預設順序「等化器 → Crossfeed → 卷積」讓房間或耳機校正最靠近喇叭或耳機。只有左右聲道處理不同時（例如只作用單一聲道的 EQ 頻段，或 true stereo 的 IR），搭配 Crossfeed 才會因順序而聽起來不同。</value></data>
   <data name="Settings_Crossfeed.Header" xml:space="preserve"><value>Crossfeed</value></data>
   <data name="Settings_Crossfeed.OnContent" xml:space="preserve"><value>把一部分聲音送到另一耳，模擬喇叭聆聽（耳機用）</value></data>
   <data name="Settings_Crossfeed.OffContent" xml:space="preserve"><value>把一部分聲音送到另一耳，模擬喇叭聆聽（耳機用）</value></data>
@@ -640,7 +665,7 @@
   <data name="Settings_CrossfeedCustom.Content" xml:space="preserve"><value>自訂</value></data>
   <data name="Settings_CrossfeedCutoff.Header" xml:space="preserve"><value>截止頻率 (Hz)</value></data>
   <data name="Settings_CrossfeedFeed.Header" xml:space="preserve"><value>串音量 (dB)</value></data>
-  <data name="Settings_CrossfeedNote.Text" xml:space="preserve"><value>bs2b crossfeed。Default 為 700 Hz、4.5 dB，Chu Moy 為 700 Hz、6 dB，Jan Meier 為 650 Hz、9.5 dB。自訂可設定 300–2000 Hz 的截止頻率與 1–15 dB 的串音量；串音量越低，送到另一耳的聲音越多。</value></data>
+  <data name="Settings_CrossfeedNote.Text" xml:space="preserve"><value>bs2b Crossfeed。Default 為 700 Hz、4.5 dB，Chu Moy 為 700 Hz、6 dB，Jan Meier 為 650 Hz、9.5 dB。自訂可設定 300–2000 Hz 的截止頻率與 1–15 dB 的串音量；串音量越低，送到另一耳的聲音越多。</value></data>
   <data name="Settings_Convolution.Header" xml:space="preserve"><value>卷積</value></data>
   <data name="Settings_Convolution.OnContent" xml:space="preserve"><value>播放時套用 IR</value></data>
   <data name="Settings_Convolution.OffContent" xml:space="preserve"><value>播放時套用 IR</value></data>
@@ -659,7 +684,7 @@
   <data name="Convolution_Layout" xml:space="preserve"><value>IR 必須是 1、2 或 4 聲道。</value></data>
   <data name="Convolution_TooLong" xml:space="preserve"><value>這個 IR 太長：在播放取樣率下每聲道最多 1,048,576 個取樣點。</value></data>
   <data name="Convolution_FileTypes" xml:space="preserve"><value>IR 檔案 (*.wav, *.zip)</value></data>
-  <data name="SignalPath_Crossfeed" xml:space="preserve"><value>crossfeed</value></data>
+  <data name="SignalPath_Crossfeed" xml:space="preserve"><value>Crossfeed</value></data>
   <data name="SignalPath_Convolution" xml:space="preserve"><value>卷積</value></data>
   <data name="Settings_Volume.Text" xml:space="preserve"><value>音量</value></data>
   <data name="Settings_VolumeMode.Header" xml:space="preserve"><value>音量控制</value></data>
@@ -686,7 +711,7 @@
   <data name="SignalPath_ReplayGain" xml:space="preserve"><value>ReplayGain</value></data>
   <data name="SignalPath_Volume" xml:space="preserve"><value>音量</value></data>
   <data name="SignalPath_Muted" xml:space="preserve"><value>靜音</value></data>
-  <data name="Dsp_OffLevelled" xml:space="preserve"><value>等化器、crossfeed 與卷積都已關閉；軟體音量或 ReplayGain 仍可能調整音量。</value></data>
+  <data name="Dsp_OffLevelled" xml:space="preserve"><value>等化器、Crossfeed 與卷積都已關閉；軟體音量或 ReplayGain 仍可能調整音量。</value></data>
   <data name="Dsp_FlatLevelled" xml:space="preserve"><value>目前鏈上沒有任何處理改變訊號；軟體音量或 ReplayGain 仍可能調整音量。</value></data>
   <data name="Settings_Crossfade.Text" xml:space="preserve"><value>交叉淡化</value></data>
   <data name="Settings_CrossfadeSwitch.OnContent" xml:space="preserve"><value>換曲時讓前後兩首重疊</value></data>
@@ -698,6 +723,7 @@
   <data name="Crossfade_SkipFormat" xml:space="preserve"><value>這首沒有交叉淡化：前一首的串流無法接受它的格式。</value></data>
   <data name="Crossfade_SkipNoPreload" xml:space="preserve"><value>這首沒有交叉淡化：它沒有及時準備好。</value></data>
   <data name="SignalPath_Decoder" xml:space="preserve"><value>解碼器</value></data>
+  <data name="SignalPath_DtsCore" xml:space="preserve"><value>{0} → DTS 核心解碼</value></data>
   <data name="SignalPath_Device" xml:space="preserve"><value>裝置</value></data>
   <data name="SignalPath_NativeDsd" xml:space="preserve"><value>原生 DSD</value></data>
   <data name="SignalPath_Float" xml:space="preserve"><value>整數轉浮點</value></data>
@@ -706,10 +732,12 @@
   <data name="SignalPath_StageSource" xml:space="preserve"><value>來源</value></data>
   <data name="SignalPath_StageProcessing" xml:space="preserve"><value>處理</value></data>
   <data name="SignalPath_StageOutput" xml:space="preserve"><value>輸出</value></data>
+  <data name="SignalPath_StageOutputGroup" xml:space="preserve"><value>輸出 · {0} 台裝置的群組</value></data>
   <data name="SignalPath_Unchanged" xml:space="preserve"><value>沒有處理，訊號原樣通過</value></data>
   <data name="SignalPath_Panel.AutomationProperties.Name" xml:space="preserve"><value>訊號路徑</value></data>
   <data name="SignalPath_Lamp.ToolTipService.ToolTip" xml:space="preserve"><value>顯示訊號路徑</value></data>
   <data name="SignalPath_Lamp.AutomationProperties.HelpText" xml:space="preserve"><value>顯示訊號路徑</value></data>
+  <data name="SignalPath_LampTip" xml:space="preserve"><value>{0}。{1}</value></data>
   <data name="Tip_Play" xml:space="preserve"><value>播放</value></data>
   <data name="Tip_Pause" xml:space="preserve"><value>暫停</value></data>
   <data name="Tip_RepeatOff" xml:space="preserve"><value>循環：關閉</value></data>
@@ -738,12 +766,12 @@
   <data name="Discord_CoverReady" xml:space="preserve"><value>封面通道已就緒。</value></data>
   <data name="Discord_CoverFailed" xml:space="preserve"><value>封面通道無法使用：{0}</value></data>
   <data name="Settings_Outputs.Text" xml:space="preserve"><value>音訊輸出</value></data>
-  <data name="Settings_OutputsNote.Text" xml:space="preserve"><value>開啟的輸出會列在播放列的輸出選單，播放中也能在那裡切換。每個輸出都有自己的設定，按該列的齒輪就能開啟。</value></data>
+  <data name="Settings_OutputsNote.Text" xml:space="preserve"><value>每個開啟的輸出都是播放列區域選單中的一個區域，在那裡選擇要控制的區域。每個輸出都有自己的設定，按該列的齒輪就能開啟。</value></data>
   <data name="Output_Button.ToolTipService.ToolTip" xml:space="preserve"><value>區域</value></data>
   <data name="Output_ButtonName" xml:space="preserve"><value>區域：{0}</value></data>
   <data name="Output_ButtonOn" xml:space="preserve"><value>{0}：{1}</value></data>
   <data name="Output_InUse" xml:space="preserve"><value>使用中</value></data>
-  <data name="Output_Enabled" xml:space="preserve"><value>顯示在輸出選單</value></data>
+  <data name="Output_Enabled" xml:space="preserve"><value>顯示在區域選單</value></data>
   <data name="Output_More" xml:space="preserve"><value>更多</value></data>
   <data name="Output_Settings" xml:space="preserve"><value>設定</value></data>
   <data name="Output_SettingsClose" xml:space="preserve"><value>關閉</value></data>
@@ -752,9 +780,9 @@
   <data name="Output_RenameNote" xml:space="preserve"><value>留空則使用裝置本身的名稱</value></data>
   <data name="Output_Delete" xml:space="preserve"><value>刪除</value></data>
   <data name="Output_TurnOffTitle" xml:space="preserve"><value>要關閉 {0} 嗎？</value></data>
-  <data name="Output_TurnOffText" xml:space="preserve"><value>它正在播放。關閉後會停止並離開輸出選單；它的佇列會保留，等再開啟時使用。</value></data>
+  <data name="Output_TurnOffText" xml:space="preserve"><value>它正在播放。關閉後會停止並離開區域選單；它的佇列會保留，等再開啟時使用。</value></data>
   <data name="Output_TurnOff" xml:space="preserve"><value>關閉</value></data>
-  <data name="Output_DeleteQueueText" xml:space="preserve"><value>它的設定、名稱和輸出選單中的位置都會清除，它的佇列也會刪除。之後再找到時，會從預設值開始。</value></data>
+  <data name="Output_DeleteQueueText" xml:space="preserve"><value>它的設定、名稱和區域選單中的位置都會清除，它的佇列也會刪除。之後再找到時，會從預設值開始。</value></data>
   <data name="Output_DeleteKeepQueue" xml:space="preserve"><value>先把它的佇列存成播放清單</value></data>
   <data name="Output_DeletedQueueName" xml:space="preserve"><value>{0} 的佇列</value></data>
   <data name="Output_Zone" xml:space="preserve"><value>它的區域</value></data>
@@ -770,7 +798,7 @@
   <data name="Output_SameNameTaken" xml:space="preserve"><value>另一個輸出已經使用這個名稱，請換一個。</value></data>
   <data name="Output_SameNameEnable" xml:space="preserve"><value>開啟</value></data>
   <data name="Output_DeleteTitle" xml:space="preserve"><value>要刪除 {0} 的設定嗎？</value></data>
-  <data name="Output_DeleteText" xml:space="preserve"><value>它的設定、名稱和輸出選單中的位置都會清除。之後再找到時，會從預設值開始。</value></data>
+  <data name="Output_DeleteText" xml:space="preserve"><value>它的設定、名稱和區域選單中的位置都會清除。之後再找到時，會從預設值開始。</value></data>
   <data name="Output_Offline" xml:space="preserve"><value>{0}（未連接）</value></data>
   <data name="Output_Unsupported" xml:space="preserve"><value>{0}（不支援）</value></data>
   <data name="Output_InUseUnsupported" xml:space="preserve"><value>使用中；{0}</value></data>
@@ -789,16 +817,21 @@
   <data name="Zone_PlayName" xml:space="preserve"><value>{0} {1}</value></data>
   <data name="Zone_Group" xml:space="preserve"><value>組成群組…</value></data>
   <data name="Zone_GroupTitle" xml:space="preserve"><value>與 {0} 組成群組</value></data>
-  <data name="Zone_GroupText" xml:space="preserve"><value>選擇要和 {0} 一起播放的 AirPlay 接收器。它們會像一個區域一樣同步播放 {0} 的佇列，各自保留自己的音量與立體聲、左聲道或右聲道。</value></data>
+  <data name="Zone_GroupText" xml:space="preserve"><value>選擇要和這個區域一起播放的 AirPlay 接收器。它們會像一個區域一樣同步播放它的佇列，各自保留自己的音量與立體聲、左聲道或右聲道。</value></data>
   <data name="Zone_GroupSave" xml:space="preserve"><value>組成群組</value></data>
   <data name="Zone_Ungroup" xml:space="preserve"><value>解散群組</value></data>
-  <data name="Zone_GroupLocalText" xml:space="preserve"><value>選擇要和 {0} 一起播放的本機輸出。它們一起播放 {0} 的佇列，各自保留自己的設定：時脈那台照單獨播放時一樣播放，其他台以漂移修正跟隨它，不是 bit-perfect。</value></data>
+  <data name="Zone_GroupLocalText" xml:space="preserve"><value>選擇要和這個區域一起播放的本機輸出。它們一起播放它的佇列，各自保留自己的設定：時脈照單獨播放時一樣播放，其他輸出以漂移修正跟隨它，不是 bit-perfect。</value></data>
   <data name="Zone_SameDevice" xml:space="preserve"><value>{0}，同一台裝置</value></data>
   <data name="Zone_Clock" xml:space="preserve"><value>時脈</value></data>
   <data name="Zone_MemberLost" xml:space="preserve"><value>{0} 已停止：{1}</value></data>
   <data name="Output_GroupDelay" xml:space="preserve"><value>群組中的延遲（毫秒）</value></data>
   <data name="Output_GroupDelayNote" xml:space="preserve"><value>在本機輸出的群組裡，這台比群組的時脈晚這麼多毫秒播放，用耳朵把各個房間對齊。</value></data>
   <data name="SignalPath_DriftCorrection" xml:space="preserve"><value>漂移修正</value></data>
+  <data name="SignalPath_GroupClock" xml:space="preserve"><value>時脈</value></data>
+  <data name="SignalPath_ModeShared" xml:space="preserve"><value>WASAPI 共用</value></data>
+  <data name="SignalPath_ModeExclusive" xml:space="preserve"><value>WASAPI 獨佔</value></data>
+  <data name="SignalPath_ModeEvent" xml:space="preserve"><value>事件驅動</value></data>
+  <data name="SignalPath_ModePolling" xml:space="preserve"><value>輪詢</value></data>
   <data name="Zone_PauseAll" xml:space="preserve"><value>全部暫停</value></data>
   <data name="Zone_Offline" xml:space="preserve"><value>未連線</value></data>
   <data name="Zone_InUseBy" xml:space="preserve"><value>{0} 正在使用</value></data>

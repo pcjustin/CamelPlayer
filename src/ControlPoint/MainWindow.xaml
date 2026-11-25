@@ -164,12 +164,8 @@
                 </Grid.RowDefinitions>
                 <StackPanel MaxWidth="820" HorizontalAlignment="Left">
                     <TextBlock x:Uid="Settings_Title" Style="{StaticResource TitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level1" />
-                    <!-- Filled in from the card titles; one Tab stop, the arrow keys move along. -->
-                    <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled"
-                                  VerticalScrollBarVisibility="Disabled">
-                        <StackPanel x:Name="SettingsLinks" Orientation="Horizontal" Spacing="20"
-                                    TabFocusNavigation="Once" XYFocusKeyboardNavigation="Enabled" />
-                    </ScrollViewer>
+                    <!-- Filled in from the card titles in rows as wide as the page; one Tab stop, the arrow keys move along. -->
+                    <StackPanel x:Name="SettingsLinks" TabFocusNavigation="Once" XYFocusKeyboardNavigation="Enabled" />
                 </StackPanel>
                 <ScrollViewer x:Name="SettingsScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto"
                               ViewChanged="OnSettingsScrolled">
@@ -202,9 +198,9 @@
                             <StackPanel Spacing="12">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <FontIcon Glyph="&#xE8F1;" FontSize="20" />
-                                    <TextBlock x:Uid="Settings_Library" Style="{StaticResource CardHeaderStyle}" />
+                                    <TextBlock x:Name="LibraryCardHeader" x:Uid="Settings_Library" Style="{StaticResource CardHeaderStyle}" />
                                 </StackPanel>
-                                <ListView x:Name="RootList" SelectionMode="Single" MaxHeight="240" CornerRadius="4"
+                                <ListView x:Name="RootList" AutomationProperties.LabeledBy="{x:Bind LibraryCardHeader}" SelectionMode="Single" MaxHeight="240" CornerRadius="4"
                                           BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
                                 <TextBlock x:Name="ScanText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
                                            Visibility="Collapsed" />
@@ -243,7 +239,10 @@
                                     </InfoBar.ActionButton>
                                 </InfoBar>
                                 <StackPanel x:Name="OutputList" Spacing="4" />
-                                <Button x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <Button x:Name="RefreshDevicesButton" x:Uid="Settings_Refresh" Click="OnRefreshDevicesClick" />
+                                    <ProgressRing x:Name="RefreshDevicesRing" IsActive="False" Width="20" Height="20" />
+                                </StackPanel>
                                 <!-- One output's settings, which a row's gear shows in a dialog. -->
                                 <Border x:Name="OutputSettingsHost" Visibility="Collapsed">
                                 <StackPanel x:Name="OutputSettingsPanel" Spacing="12">
@@ -670,12 +669,12 @@
                                     <TextBlock x:Name="AllowControlText" TextWrapping="Wrap" IsTextSelectionEnabled="True"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
                                 </StackPanel>
-                                <InfoBar x:Name="ControlFirewallNotice" x:Uid="Control_FirewallNotice" Severity="Warning" IsClosable="False">
+                                <InfoBar x:Name="ControlFirewallNotice" Visibility="Collapsed" x:Uid="Control_FirewallNotice" Severity="Warning" IsClosable="False">
                                     <InfoBar.ActionButton>
                                         <Button x:Uid="Firewall_AddButton" Click="OnAddControlFirewallRuleClick" />
                                     </InfoBar.ActionButton>
                                 </InfoBar>
-                                <InfoBar x:Name="PublicNetworkNotice" x:Uid="Control_PublicNotice" Severity="Warning" IsClosable="False">
+                                <InfoBar x:Name="PublicNetworkNotice" Visibility="Collapsed" x:Uid="Control_PublicNotice" Severity="Warning" IsClosable="False">
                                     <InfoBar.ActionButton>
                                         <Button x:Uid="Control_NetworkSettings" Click="OnNetworkSettingsClick" />
                                     </InfoBar.ActionButton>
@@ -814,7 +813,7 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" />
+                            <TextBlock x:Name="QueueTitle" x:Uid="Queue_Title" Style="{StaticResource SubtitleTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" />
                             <TextBlock x:Name="QueueCountText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
@@ -843,9 +842,9 @@
                             <FontIcon Glyph="&#xE711;" FontSize="14" />
                         </Button>
                     </Grid>
-                    <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="Extended" CanDragItems="True" CanReorderItems="True" AllowDrop="True"
+                    <ListView x:Name="QueueList" AutomationProperties.LabeledBy="{x:Bind QueueTitle}" Grid.Row="1" SelectionMode="Extended" CanDragItems="True" CanReorderItems="True" AllowDrop="True"
                               DragItemsCompleted="OnQueueDragItemsCompleted" DoubleTapped="OnQueueDoubleTapped"
-                              KeyDown="OnQueueKeyDown">
+                              KeyDown="OnQueueKeyDown" PreviewKeyDown="OnQueuePreviewKeyDown">
                         <ListView.Resources>
                             <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
                             <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
@@ -854,7 +853,7 @@
                         </ListView.Resources>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="local:QueueItem">
-                                <Grid ColumnSpacing="8" AutomationProperties.Name="{x:Bind Title, Mode=OneWay}" Background="Transparent"
+                                <Grid ColumnSpacing="8" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}" Background="Transparent"
                                       ContextRequested="OnQueueContextRequested">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="20" />
@@ -898,25 +897,46 @@
 
         <!-- The lyrics (docs/Plan.md §8.1), over everything above the player bar as in Roon; the bar's cover opens them.
              The playing track's cover, enlarged, shows blurred and darkened behind them, in either theme. -->
-        <Grid x:Name="LyricsView" Grid.Row="2" Visibility="Collapsed" Background="Black">
+        <!-- A contrast theme shows its own colours. -->
+        <Grid x:Name="LyricsView" Grid.Row="2" Visibility="Collapsed">
+            <Grid.Resources>
+                <ResourceDictionary>
+                    <ResourceDictionary.ThemeDictionaries>
+                        <ResourceDictionary x:Key="Default">
+                            <SolidColorBrush x:Key="LyricsBackgroundBrush" Color="Black" />
+                            <SolidColorBrush x:Key="LyricsTextBrush" Color="White" />
+                            <AcrylicBrush x:Key="LyricsTintBrush" TintColor="Black" TintOpacity="0.7" TintLuminosityOpacity="0.35"
+                                          FallbackColor="#E6101010" />
+                            <SolidColorBrush x:Key="LyricsScrimBrush" Color="#80000000" />
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="HighContrast">
+                            <SolidColorBrush x:Key="LyricsBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                            <SolidColorBrush x:Key="LyricsTextBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                            <SolidColorBrush x:Key="LyricsTintBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                            <SolidColorBrush x:Key="LyricsScrimBrush" Color="Transparent" />
+                        </ResourceDictionary>
+                    </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
+            </Grid.Resources>
+            <Rectangle Fill="{ThemeResource LyricsBackgroundBrush}" />
             <Image x:Name="LyricsBackdrop" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
-            <Rectangle x:Name="LyricsAcrylic">
-                <Rectangle.Fill>
-                    <AcrylicBrush TintColor="Black" TintOpacity="0.55" TintLuminosityOpacity="0.35" FallbackColor="#E6101010" />
-                </Rectangle.Fill>
-            </Rectangle>
+            <Rectangle x:Name="LyricsAcrylic" Fill="{ThemeResource LyricsTintBrush}" />
+            <!-- The acrylic passes a white cover's light through as rgb 165; this halves it, for dimmed lines at 4:1. -->
+            <Rectangle Fill="{ThemeResource LyricsScrimBrush}" />
             <ScrollViewer x:Name="LyricsScroller" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
-                          VerticalScrollBarVisibility="Hidden" SizeChanged="OnLyricsScrollerSizeChanged">
+                          VerticalScrollBarVisibility="Hidden" SizeChanged="OnLyricsScrollerSizeChanged"
+                          Foreground="{ThemeResource LyricsTextBrush}">
                 <StackPanel x:Name="LyricsLines" HorizontalAlignment="Center" MaxWidth="960" Padding="32,0" Spacing="16" />
             </ScrollViewer>
             <StackPanel x:Name="LyricsNone" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" Padding="32"
                         Visibility="Collapsed">
                 <Image x:Name="LyricsNoneCover" Width="220" Height="220" Stretch="Uniform" />
-                <TextBlock x:Name="LyricsNoneTitle" FontSize="28" FontWeight="SemiBold" Foreground="White" TextAlignment="Center"
-                           TextWrapping="Wrap" />
-                <TextBlock x:Name="LyricsNoneArtist" FontSize="18" Foreground="White" Opacity="0.75" TextAlignment="Center"
-                           TextWrapping="Wrap" />
-                <TextBlock x:Uid="Lyrics_None" FontSize="16" Foreground="White" Opacity="0.6" TextAlignment="Center" Margin="0,12,0,0" />
+                <TextBlock x:Name="LyricsNoneTitle" Style="{StaticResource TitleTextBlockStyle}"
+                           Foreground="{ThemeResource LyricsTextBrush}" TextAlignment="Center" TextWrapping="Wrap" />
+                <TextBlock x:Name="LyricsNoneArtist" Style="{StaticResource BodyLargeTextBlockStyle}"
+                           Foreground="{ThemeResource LyricsTextBrush}" Opacity="0.8" TextAlignment="Center" TextWrapping="Wrap" />
+                <TextBlock x:Uid="Lyrics_None" Style="{StaticResource BodyLargeTextBlockStyle}"
+                           Foreground="{ThemeResource LyricsTextBrush}" Opacity="0.75" TextAlignment="Center" Margin="0,12,0,0" />
             </StackPanel>
         </Grid>
 
@@ -1019,7 +1039,7 @@
                             </ResourceDictionary>
                         </StackPanel.Resources>
                         <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap"
-                                   MaxLines="1" FontSize="14" FontWeight="SemiBold" />
+                                   MaxLines="1" Style="{StaticResource BodyStrongTextBlockStyle}" />
                         <!-- Each name in the artist credit opens that artist. -->
                         <StackPanel x:Name="ArtistCredit" Orientation="Horizontal" Visibility="Collapsed">
                             <StackPanel.Resources>
@@ -1031,7 +1051,8 @@
                         </StackPanel>
                         <HyperlinkButton x:Name="AlbumLink" Click="OnAlbumLinkClick" Padding="0"
                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Visibility="Collapsed">
-                            <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap" MaxLines="1" FontSize="12" />
+                            <TextBlock x:Name="AlbumLinkText" TextTrimming="CharacterEllipsis" IsTextTrimmedChanged="OnTextTrimmedChanged" TextWrapping="NoWrap" MaxLines="1"
+                                       Style="{StaticResource CaptionTextBlockStyle}" />
                         </HyperlinkButton>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="16,0,0,0">
@@ -1155,6 +1176,8 @@
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon x:Name="OutputIcon" Glyph="&#xE7F5;" />
                                 <TextBlock x:Name="OutputName" MaxWidth="160" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                <!-- A group's count, kept in view while its name is trimmed. -->
+                                <TextBlock x:Name="OutputGroupCount" VerticalAlignment="Center" Visibility="Collapsed" />
                                 <FontIcon Glyph="&#xE70E;" FontSize="10" />
                             </StackPanel>
                         </Button>

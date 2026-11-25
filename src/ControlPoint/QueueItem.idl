@@ -14,5 +14,6 @@ namespace CamelPlayer {
     Boolean ShowsAutomatic { get; }; // an entry autoplay added, marked while it is not playing
     Boolean IsFavorite { get; };
     String RemoveLabel { get; };
+    String AccessibleName { get; }; // the title and artist with what the marks beside them show
 }
 } // namespace CamelPlayer

@@ -43,10 +43,66 @@ void MainWindow::removeSelectedQueueEntries() {
     submitCommand(std::move(command));
 }
 
+void MainWindow::moveQueueEntries(int step) {
+    if (!ui::moveSelected(QueueList(), *queueItems_, step)) return;
+    Command command;
+    command.kind = CommandKind::QueueReorder;
+    command.entryIds = queueItems_->ids();
+    submitCommand(std::move(command));
+}
+
+// Clearing can be undone, as a playlist's edits can: the entries come back, and the one playing plays on where it was.
 void MainWindow::OnQueueClearClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
+    if (!server_) return;
+    const auto snapshot = server_->snapshot();
+    std::vector<TrackSource> sources;
+    uint64_t index = 0;
+    for (const auto& entry : snapshot.queue.entries) {
+        if (entry.id == snapshot.queueEntryId) index = sources.size();
+        sources.push_back(entry.source);
+    }
+    const auto& playback = snapshot.playback;
+    const bool playing = playback.state == PlaybackState::Playing;
+    const uint64_t frame = playing ? playback.position : 0;
     Command command;
     command.kind = CommandKind::QueueClear;
     submitCommand(std::move(command));
+    if (!sources.empty()) showQueueCleared(snapshot.selectedZone, sources, index, playing, frame);
+}
+
+void MainWindow::showQueueCleared(const std::string& zone, const std::vector<TrackSource>& sources, uint64_t index, bool playing,
+                                  uint64_t frame) {
+    auto bar = PlaylistNotice();
+    bar.IsOpen(false);
+    bar.Title(tr(L"Queue_Cleared"));
+    bar.Message({});
+    bar.Severity(InfoBarSeverity::Informational);
+    Button undo;
+    undo.Content(box_value(tr(L"Playlist_Undo")));
+    undo.Click([this, zone, sources, index, playing, frame](auto&&, auto&&) {
+        PlaylistNotice().IsOpen(false);
+        // A queue that was not playing comes back without playing.
+        Command restore;
+        restore.kind = playing ? CommandKind::QueueReplace : CommandKind::QueueAdd;
+        restore.zone = zone;
+        restore.sources = sources;
+        restore.index = index;
+        submitCommand(std::move(restore));
+        if (!playing || !frame) return;
+        Command seek;
+        seek.kind = CommandKind::Seek;
+        seek.zone = zone;
+        seek.frame = frame;
+        submitCommand(std::move(seek));
+    });
+    StackPanel actions;
+    actions.Margin({0, 0, 0, 12});
+    actions.Children().Append(undo);
+    bar.Content(actions);
+    bar.IsOpen(true);
+    noticeUndo_.reset();
+    noticeTimer_.Stop();
+    noticeTimer_.Start();
 }
 
 winrt::fire_and_forget MainWindow::OnQueueSaveClick(Windows::Foundation::IInspectable const&, RoutedEventArgs const&) {
@@ -99,10 +155,21 @@ void MainWindow::OnQueueKeyDown(Windows::Foundation::IInspectable const&, Input:
     removeSelectedQueueEntries();
 }
 
+// Taken before the list, which moves the focus on Up and Down.
+void MainWindow::OnQueuePreviewKeyDown(Windows::Foundation::IInspectable const&, Input::KeyRoutedEventArgs const& e) {
+    const int step = ui::moveStep(e);
+    if (!step) return;
+    e.Handled(true);
+    moveQueueEntries(step);
+}
+
 void MainWindow::showPlaybackFavorite(bool favorite) {
     if (playbackFavorite_ == favorite) return;
     playbackFavorite_ = favorite;
     PlaybackFavoriteIcon().Glyph(favorite ? L"\xE00B" : L"\xE006");
+    const auto name = tr(favorite ? L"Marks_FavoriteOn" : L"Marks_FavoriteOff");
+    Automation::AutomationProperties::SetName(PlaybackFavoriteButton(), name);
+    ToolTipService::SetToolTip(PlaybackFavoriteButton(), box_value(name));
     if (favorite)
         PlaybackFavoriteIcon().Foreground(themeBrush(L"AccentTextFillColorPrimaryBrush"));
     else
@@ -136,7 +203,10 @@ void MainWindow::OnQueueContextRequested(UIElement const& sender, Input::Context
             }
             return [sources] { return sources; };
         });
-        queueMenu_.Items().RemoveAt(0); // the separator before the playlist entries
+        ui::insertMoveMenu(queueMenu_, 0, [this](int step) {
+            if (!ui::actsOnSelection(QueueList(), *queueItems_, queueMenuItem_)) QueueList().SelectedItem(queueMenuItem_);
+            moveQueueEntries(step);
+        });
         ui::appendFavoriteMenu(queueMenu_, [this](bool favorite) {
             std::vector<LibraryTrackKey> tracks;
             for (const auto& item : queueMenuItems()) {

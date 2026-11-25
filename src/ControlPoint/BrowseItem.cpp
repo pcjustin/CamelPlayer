@@ -39,6 +39,7 @@ void BrowseItem::setFavorite(bool favorite) {
     row_.favorite = favorite;
     changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"IsFavorite"));
     changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"FavoriteGlyph"));
+    changed_(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs(L"FavoriteName"));
 }
 
 void BrowseItem::setExpanded(bool expanded) {

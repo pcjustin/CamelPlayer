@@ -14,8 +14,11 @@
 #endif
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 #include <vector>
+
+#include "UiText.h"
 
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
@@ -49,6 +52,17 @@ std::vector<uint32_t> starColumns(Controls::Grid const& grid) {
     return out;
 }
 
+// The widths with the boundary after the column `left` moved by `by`, each of the pair kept at least kNarrowest wide.
+std::optional<camel::TrackColumns> resized(const std::array<double, 3>& widths, size_t left, double by) {
+    const size_t right = left + 1;
+    const double pair = widths[left] + widths[right];
+    if (pair < 2 * kNarrowest) return std::nullopt;
+    auto out = widths;
+    out[left] = std::clamp(widths[left] + by, kNarrowest, pair - kNarrowest);
+    out[right] = pair - out[left];
+    return camel::TrackColumns{out[0], out[1], out[2]};
+}
+
 } // namespace
 
 void TrackColumnWidths::columns(const camel::TrackColumns& columns) {
@@ -67,12 +81,50 @@ ColumnDivider::ColumnDivider() {
     line.HorizontalAlignment(HorizontalAlignment::Center);
     // In the theme the window shows, which a change in Settings gives the content alone, not the Application: known once
     // the divider is in the window.
+    // Focused from the keyboard, the line is drawn wider in the accent colour.
     const auto paint = [line](Windows::Foundation::IInspectable const& divider, auto&&) {
-        line.Fill(ui::themeBrush(divider.as<FrameworkElement>(), L"DividerStrokeColorDefaultBrush"));
+        const auto self = divider.as<FrameworkElement>();
+        const bool focused = self.FocusState() == FocusState::Keyboard;
+        line.Width(focused ? 3 : 1);
+        line.Fill(ui::themeBrush(self, focused ? L"AccentFillColorDefaultBrush" : L"DividerStrokeColorDefaultBrush"));
     };
-    Loaded(paint);
+    Loaded([this, paint](Windows::Foundation::IInspectable const& divider, RoutedEventArgs const& e) {
+        const wchar_t* names[] = {L"Library_SortTitle", L"Library_SortArtist", L"Library_SortAlbum"};
+        if (boundary_ >= 0 && boundary_ <= 1)
+            Automation::AutomationProperties::SetName(
+                *this, ui::format(L"Columns_Divider",
+                                  {std::wstring(ui::tr(names[boundary_])), std::wstring(ui::tr(names[boundary_ + 1]))}));
+        Automation::AutomationProperties::SetHelpText(*this, ui::tr(L"Columns_DividerHelp"));
+        paint(divider, e);
+    });
     ActualThemeChanged(paint);
+    GotFocus(paint);
+    LostFocus(paint);
     Children().Append(line);
+    IsTabStop(true);
+    // Left and Right move the boundary as dragging does; Home returns every column to 3:2:2, as a double-click does.
+    KeyDown([this](auto&&, Input::KeyRoutedEventArgs const& e) {
+        using Windows::System::VirtualKey;
+        const auto key = e.Key();
+        if (key == VirtualKey::Home) {
+            ui::trackColumns().columns({});
+            ui::trackColumns().commit();
+            e.Handled(true);
+            return;
+        }
+        if (key != VirtualKey::Left && key != VirtualKey::Right) return;
+        e.Handled(true);
+        const auto grid = Parent().try_as<Controls::Grid>();
+        if (!grid || boundary_ < 0 || boundary_ > 1) return;
+        const auto columns = starColumns(grid);
+        if (columns.size() < 3) return;
+        std::array<double, 3> widths{};
+        for (size_t i = 0; i < 3; ++i) widths[i] = grid.ColumnDefinitions().GetAt(columns[i]).ActualWidth();
+        if (const auto moved = resized(widths, size_t(boundary_), key == VirtualKey::Left ? -16.0 : 16.0)) {
+            ui::trackColumns().columns(*moved);
+            ui::trackColumns().commit();
+        }
+    });
 
     PointerPressed([this](auto&&, Input::PointerRoutedEventArgs const& e) {
         const auto grid = Parent().try_as<Controls::Grid>();
@@ -86,14 +138,10 @@ ColumnDivider::ColumnDivider() {
     });
     PointerMoved([this](auto&&, Input::PointerRoutedEventArgs const& e) {
         if (!dragging_) return;
-        const auto left = size_t(boundary_), right = left + 1;
-        const double pair = startWidths_[left] + startWidths_[right];
-        if (pair < 2 * kNarrowest) return;
-        auto widths = startWidths_;
-        const double moved = e.GetCurrentPoint(Parent().as<UIElement>()).Position().X - startX_;
-        widths[left] = std::clamp(startWidths_[left] + moved, kNarrowest, pair - kNarrowest);
-        widths[right] = pair - widths[left];
-        ui::trackColumns().columns({widths[0], widths[1], widths[2]});
+        const double by = e.GetCurrentPoint(Parent().as<UIElement>()).Position().X - startX_;
+        const auto moved = resized(startWidths_, size_t(boundary_), by);
+        if (!moved) return;
+        ui::trackColumns().columns(*moved);
         e.Handled(true);
     });
     const auto release = [this](auto&&, Input::PointerRoutedEventArgs const&) {

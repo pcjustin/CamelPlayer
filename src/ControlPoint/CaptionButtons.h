@@ -4,12 +4,26 @@
 
 #pragma once
 
+#include <winrt/Windows.UI.ViewManagement.h>
+
 namespace ui {
 
-// The minimize, maximize and close buttons of a window whose title bar is drawn by the app, in its theme's colors.
+// The minimize, maximize and close buttons of a window whose title bar is drawn by the app, in its theme's colors; a
+// contrast theme's own colors while Windows uses one.
 inline void colorCaptionButtons(winrt::Microsoft::UI::Windowing::AppWindow const& window, bool dark) {
     using winrt::Windows::UI::Color;
     const auto bar = window.TitleBar();
+    if (winrt::Windows::UI::ViewManagement::AccessibilitySettings().HighContrast()) {
+        bar.ButtonBackgroundColor(nullptr);
+        bar.ButtonInactiveBackgroundColor(nullptr);
+        bar.ButtonForegroundColor(nullptr);
+        bar.ButtonHoverForegroundColor(nullptr);
+        bar.ButtonPressedForegroundColor(nullptr);
+        bar.ButtonInactiveForegroundColor(nullptr);
+        bar.ButtonHoverBackgroundColor(nullptr);
+        bar.ButtonPressedBackgroundColor(nullptr);
+        return;
+    }
     const Color foreground = dark ? Color{255, 255, 255, 255} : Color{255, 0, 0, 0};
     const Color transparent{0, 0, 0, 0};
     bar.ButtonBackgroundColor(transparent);

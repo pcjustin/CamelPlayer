@@ -229,9 +229,10 @@ void MainWindow::showCrossfade() {
 }
 
 // Rebuilds the signal path rows only when a step changed; snapshots arrive many times a second.
-void MainWindow::showSignalPath(std::vector<PathStep> steps) {
-    if (steps == shownPath_) return;
+void MainWindow::showSignalPath(std::vector<PathStep> steps, size_t group) {
+    if (steps == shownPath_ && group == shownPathGroup_) return;
     shownPath_ = std::move(steps);
+    shownPathGroup_ = group;
     auto grid = SignalPathGrid();
     grid.Children().Clear();
     grid.RowDefinitions().Clear();
@@ -266,7 +267,9 @@ void MainWindow::showSignalPath(std::vector<PathStep> steps) {
         addRow();
         TextBlock heading;
         heading.Style(caption);
-        heading.Text(tr(title));
+        heading.Text(stage == PathStage::Output && shownPathGroup_ > 1
+                         ? ui::format(L"SignalPath_StageOutputGroup", {std::to_wstring(shownPathGroup_)})
+                         : tr(title));
         heading.Foreground(secondary);
         heading.Margin({0, row == 0 ? 0.0 : 12.0, 0, 6});
         Automation::AutomationProperties::SetHeadingLevel(heading, Automation::Peers::AutomationHeadingLevel::Level2);
@@ -344,14 +347,29 @@ void MainWindow::showSignalPath(std::vector<PathStep> steps) {
             ToolTipService::SetToolTip(dot, box_value(tr(state)));
             marker.Children().Append(dot);
             const Thickness gap{0, 0, 0, last ? 0.0 : 10.0};
+            // A long name wraps rather than taking the detail's room.
             TextBlock name;
             name.Style(body);
             name.Text(step.name);
             name.Margin(gap);
-            Automation::AutomationProperties::SetName(name, step.name + L", " + tr(state));
+            name.MaxWidth(160);
+            name.TextWrapping(TextWrapping::Wrap);
+            // The device a step plays through on a line of its own, then the state in words as well as by the dot's colour.
             TextBlock detail;
             detail.Style(body);
-            detail.Text(step.detail);
+            const hstring words = step.detail.empty() ? tr(state) : tr(state) + L" · " + step.detail;
+            if (step.device.empty()) {
+                detail.Text(words);
+            } else {
+                Documents::Run device;
+                device.Text(step.device);
+                device.Foreground(themeBrush(L"TextFillColorPrimaryBrush"));
+                Documents::Run rest;
+                rest.Text(words);
+                detail.Inlines().Append(device);
+                detail.Inlines().Append(Documents::LineBreak());
+                detail.Inlines().Append(rest);
+            }
             detail.Margin(gap);
             detail.TextWrapping(TextWrapping::Wrap);
             detail.IsTextSelectionEnabled(true);

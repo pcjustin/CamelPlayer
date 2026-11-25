@@ -29,11 +29,12 @@ void MainWindow::OnCoverClick(Windows::Foundation::IInspectable const&, RoutedEv
 }
 
 constexpr auto kLyricsFollowAgain = std::chrono::seconds(3);
-constexpr double kLyricsDimmed = 0.45;
+constexpr double kLyricsDimmed = 0.6;
 
 void MainWindow::openLyrics(bool open) {
     lyricsOpen_ = open;
     LyricsView().Visibility(open ? Visibility::Visible : Visibility::Collapsed);
+    Nav().IsEnabled(!open); // what the lyrics cover takes no focus
     const hstring tip = tr(open ? L"Lyrics_Hide" : L"Lyrics_Show");
     ToolTipService::SetToolTip(CoverButton(), box_value(tip));
     Automation::AutomationProperties::SetName(CoverButton(), tip);
@@ -85,9 +86,10 @@ void MainWindow::showLyrics() {
     for (const auto& line : lyrics_.lines) {
         TextBlock text;
         text.Text(ui::utf8(line.text));
-        text.FontSize(lyrics_.synced ? 30 : 24);
-        text.FontWeight(Microsoft::UI::Text::FontWeights::SemiBold());
-        text.Foreground(Media::SolidColorBrush(Windows::UI::Colors::White()));
+        text.Style(Application::Current()
+                       .Resources()
+                       .Lookup(box_value(lyrics_.synced ? L"TitleTextBlockStyle" : L"SubtitleTextBlockStyle"))
+                       .as<Style>());
         text.TextAlignment(TextAlignment::Center);
         text.HorizontalAlignment(HorizontalAlignment::Center);
         text.TextWrapping(TextWrapping::Wrap);

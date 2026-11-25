@@ -37,6 +37,15 @@ bool hasGain(EqKind kind) {
     return kind == EqKind::Peaking || kind == EqKind::LowShelf || kind == EqKind::HighShelf;
 }
 
+// Every row repeats the columns, so each control is named with its band as well.
+hstring bandName(size_t band, const wchar_t* column) {
+    return format(L"Eq_BandControl", {std::to_wstring(band + 1), std::wstring(tr(column))});
+}
+
+hstring bandNumber(const wchar_t* key, size_t band) {
+    return format(key, {std::to_wstring(band + 1)});
+}
+
 bool hasSlope(EqKind kind) {
     return kind == EqKind::LowPass || kind == EqKind::HighPass;
 }
@@ -176,6 +185,7 @@ void EqEditor::rebuildRows() {
         on.MinWidth(0);
         on.Width(56);
         on.Content(box_value(to_hstring(i + 1)));
+        Automation::AutomationProperties::SetName(on, bandNumber(L"Eq_Band", i));
         on.Click([this, i](Windows::Foundation::IInspectable const& sender, auto&&) {
             eq_.bands[i].enabled = sender.as<CheckBox>().IsChecked().Value();
             redraw();
@@ -205,9 +215,12 @@ void EqEditor::rebuildRows() {
         row.Children().Append(controls.q);
         row.Children().Append(controls.slope);
 
-        Automation::AutomationProperties::SetName(kind, tr(L"Eq_Column_Type"));
-        Automation::AutomationProperties::SetName(channels, tr(L"Eq_Column_Channels"));
-        Automation::AutomationProperties::SetName(controls.slope, tr(L"Eq_Column_Slope"));
+        Automation::AutomationProperties::SetName(kind, bandName(i, L"Eq_Column_Type"));
+        Automation::AutomationProperties::SetName(channels, bandName(i, L"Eq_Column_Channels"));
+        Automation::AutomationProperties::SetName(controls.frequency, bandName(i, L"Eq_Column_Frequency"));
+        Automation::AutomationProperties::SetName(controls.gain, bandName(i, L"Eq_Column_Gain"));
+        Automation::AutomationProperties::SetName(controls.q, bandName(i, L"Eq_Column_Q"));
+        Automation::AutomationProperties::SetName(controls.slope, bandName(i, L"Eq_Column_Slope"));
 
         kind.SelectionChanged([this, i](Windows::Foundation::IInspectable const& sender, auto&&) {
             const auto box = sender.as<ComboBox>();
@@ -251,7 +264,7 @@ void EqEditor::rebuildRows() {
         icon.FontSize(12);
         remove.Content(icon);
         ToolTipService::SetToolTip(remove, box_value(tr(L"Eq_RemoveBand")));
-        Automation::AutomationProperties::SetName(remove, tr(L"Eq_RemoveBand"));
+        Automation::AutomationProperties::SetName(remove, bandNumber(L"Eq_RemoveBandNumber", i));
         remove.Click([this, i](auto&&, auto&&) { removeBand(i); });
         row.Children().Append(remove);
 
@@ -301,24 +314,25 @@ void EqEditor::redraw() {
         l.StrokeThickness(1);
         curve_.Children().Append(l);
     };
+    const auto caption = Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>();
     const auto label = [&](const std::wstring& text, double x, double y) {
         TextBlock t;
         t.Text(text);
-        t.FontSize(10);
-        t.Foreground(brush(L"TextFillColorTertiaryBrush"));
+        t.Style(caption);
+        t.Foreground(brush(L"TextFillColorSecondaryBrush"));
         Canvas::SetLeft(t, x);
         Canvas::SetTop(t, y);
         curve_.Children().Append(t);
     };
     for (double f : {20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0}) {
         line(xOf(f), 0, xOf(f), height, L"DividerStrokeColorDefaultBrush");
-        label(hertz(f), std::min(xOf(f) + 2, width - 24), height - 14);
+        label(hertz(f), std::min(xOf(f) + 2, width - 28), height - 16);
     }
     for (double db : {-rangeDb_, -rangeDb_ / 2, 0.0, rangeDb_ / 2, rangeDb_}) {
         line(0, yOf(db), width, yOf(db), db == 0 ? L"ControlStrongStrokeColorDefaultBrush" : L"DividerStrokeColorDefaultBrush");
         wchar_t text[16];
         swprintf_s(text, L"%+g dB", db);
-        label(text, 2, std::clamp(yOf(db) - 14, 0.0, height - 14));
+        label(text, 2, std::clamp(yOf(db) - 16, 0.0, height - 16));
     }
 
     const auto curve = [&](const wchar_t* color) {
@@ -344,12 +358,12 @@ void EqEditor::redraw() {
         handle.Children().Append(dot);
         TextBlock number;
         number.Text(to_hstring(i + 1));
-        number.FontSize(10);
+        number.Style(caption);
         number.HorizontalAlignment(HorizontalAlignment::Center);
         number.VerticalAlignment(VerticalAlignment::Center);
         number.Foreground(band.enabled ? brush(L"TextOnAccentFillColorPrimaryBrush") : brush(L"TextFillColorPrimaryBrush"));
         handle.Children().Append(number);
-        Automation::AutomationProperties::SetName(handle, to_hstring(i + 1));
+        Automation::AutomationProperties::SetName(handle, bandNumber(L"Eq_Band", i));
 
         handle.PointerPressed([this, i](Windows::Foundation::IInspectable const& sender, Input::PointerRoutedEventArgs const& e) {
             dragging_ = int(i);

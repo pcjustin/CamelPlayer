@@ -199,6 +199,7 @@ void LibraryView::attach(std::shared_ptr<IServer> server, std::function<void(Com
                          std::function<void(bool)> answerArtistPictures, std::function<void()> listChanged) {
     server_ = std::move(server);
     listChanged_ = std::move(listChanged);
+    loading_.attach(LoadingIndicator());
     submit_ = std::move(submit);
     playlistMenu_ = std::move(playlistMenu);
     // The format badges are colored from code, so they follow a change of theme.
@@ -354,13 +355,14 @@ void LibraryView::showSearch(hstring const& query, std::function<void()> leave) 
     refreshTimer_.Start();
 }
 
-// Albums and artists of a search; the matching tracks page through the list below them.
+// Albums and artists of a search; the matching tracks page through the list below them. Their counts follow in a second
+// call: counting the matches of a broad query took most of its time, so the first page shows before them.
 void LibraryView::loadSearchGroups() {
     constexpr int64_t kShown = 50;
     const int64_t requested = camel::measure::now();
     background([this, server = server_, query = current_.query, texts = Texts{}, requested] {
-        auto results = std::make_shared<LibrarySearchResults>(server->searchLibrary(query, 0, kShown, std::nullopt));
-        return std::function<void()>([this, results, texts, requested] {
+        auto results = std::make_shared<LibrarySearchResults>(server->searchLibrary(query, 0, kShown, std::nullopt, {}, false));
+        return std::function<void()>([this, results, texts, requested, query] {
             auto albums = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
             for (const auto& a : results->albums) {
                 ui::BrowseRow row{a.id, {}, orUnknown(a.title, texts), ui::utf8(a.artist), {}, {}};
@@ -371,26 +373,40 @@ void LibraryView::loadSearchGroups() {
             for (const auto& name : results->artists) artists.Append(item({0, name, orUnknown(name, texts), {}, {}, {}}));
             SearchAlbums().ItemsSource(albums);
             SearchArtists().ItemsSource(artists);
-            const auto header = [](const wchar_t* key, int64_t total) { return tr(key) + L" · " + to_hstring(total); };
-            SearchAlbumsHeader().Text(header(L"Search_Albums", results->totalAlbums));
-            SearchArtistsHeader().Text(header(L"Search_Artists", results->totalArtists));
-            SearchTracksHeader().Text(header(L"Search_Tracks", results->tracks.total));
-            const auto shown = [](int64_t total) { return total ? Visibility::Visible : Visibility::Collapsed; };
-            SearchAlbumsHeader().Visibility(shown(results->totalAlbums));
-            SearchAlbums().Visibility(shown(results->totalAlbums));
-            SearchArtistsHeader().Visibility(shown(results->totalArtists));
-            SearchArtists().Visibility(shown(results->totalArtists));
-            SearchTracksHeader().Visibility(shown(results->tracks.total));
-            showListColumns(results->tracks.total > 0, false, false);
-            HeaderDetail().Text(counted(texts.tracks, results->tracks.total) + L" · " +
-                                counted(texts.albums, results->totalAlbums) + L" · " +
-                                counted(texts.artists, results->totalArtists));
-            const bool none = !results->tracks.total && !results->totalAlbums && !results->totalArtists;
+            SearchAlbumsHeader().Text(tr(L"Search_Albums"));
+            SearchArtistsHeader().Text(tr(L"Search_Artists"));
+            SearchTracksHeader().Text(tr(L"Search_Tracks"));
+            const auto shown = [](bool any) { return any ? Visibility::Visible : Visibility::Collapsed; };
+            const bool anyTracks = !results->tracks.tracks.empty();
+            SearchAlbumsBar().Visibility(shown(!results->albums.empty())); // the heading with its scroll arrows
+            SearchAlbums().Visibility(shown(!results->albums.empty()));
+            SearchArtistsBar().Visibility(shown(!results->artists.empty()));
+            SearchArtists().Visibility(shown(!results->artists.empty()));
+            SearchTracksHeader().Visibility(shown(anyTracks));
+            showListColumns(anyTracks, false, false);
+            HeaderDetail().Text(L"");
+            const bool none = !anyTracks && results->albums.empty() && results->artists.empty();
             EmptyText().Text(tr(L"Search_None"));
             EmptyText().Visibility(none ? Visibility::Visible : Visibility::Collapsed);
             if (camel::measure::measuring())
                 camel::log::info("measure: search results page in %.1f ms",
                                  camel::measure::milliseconds(requested, camel::measure::now()));
+            if (!none) loadSearchCounts(query);
+        });
+    });
+}
+
+void LibraryView::loadSearchCounts(std::string query) {
+    background([this, server = server_, query = std::move(query), texts = Texts{}] {
+        auto counts = std::make_shared<LibrarySearchResults>(server->searchLibrary(query, 0, 1, std::nullopt));
+        return std::function<void()>([this, counts, texts] {
+            const auto header = [](const wchar_t* key, int64_t total) { return tr(key) + L" · " + to_hstring(total); };
+            SearchAlbumsHeader().Text(header(L"Search_Albums", counts->totalAlbums));
+            SearchArtistsHeader().Text(header(L"Search_Artists", counts->totalArtists));
+            SearchTracksHeader().Text(header(L"Search_Tracks", counts->tracks.total));
+            HeaderDetail().Text(counted(texts.tracks, counts->tracks.total) + L" · " +
+                                counted(texts.albums, counts->totalAlbums) + L" · " +
+                                counted(texts.artists, counts->totalArtists));
         });
     });
 }
@@ -405,12 +421,21 @@ void LibraryView::showEmpty(int64_t total) {
         return;
     }
     const bool noRoots = hasRoots_ && !*hasRoots_;
-    const bool pending = total == 0 && current_.mode == Mode::Albums && !current_.filter;
-    if (total > 0 || (!noRoots && !pending)) {
+    // A page with nothing on it says why: no folders yet, a scan still under way, or no tags of its kind.
+    using Field = LibraryGroupField;
+    const wchar_t* why = noRoots                                             ? L"Library_Empty/Text"
+                         : current_.filter || current_.mode == Mode::Folders ? nullptr
+                         : current_.mode == Mode::Albums                     ? L"Library_AlbumsPending"
+                         : current_.mode == Mode::Tracks                     ? L"Library_TracksPending"
+                         : current_.field == Field::Artist                   ? L"Library_ArtistsPending"
+                         : current_.field == Field::Composer                 ? L"Library_ComposersNone"
+                         : current_.field == Field::Genre                    ? L"Library_GenresNone"
+                                                                             : L"Library_YearsNone";
+    if (total > 0 || !why) {
         EmptyText().Visibility(Visibility::Collapsed);
         return;
     }
-    EmptyText().Text(noRoots ? tr(L"Library_Empty/Text") : tr(L"Library_AlbumsPending"));
+    EmptyText().Text(tr(why));
     EmptyText().Visibility(Visibility::Visible);
 }
 
@@ -686,16 +711,20 @@ void LibraryView::fillSortChoices() {
     DescendingToggle().IsChecked(descending_);
     TrackColumns().Visibility(sortable ? Visibility::Visible : Visibility::Collapsed);
     if (current_.mode == Mode::Tracks) showListColumns(!sortable);
-    // The sorted column's header carries an arrow pointing the way it sorts.
-    const std::tuple<TextBlock, FontIcon, TrackSort, const wchar_t*> columns[] = {
-        {TitleColumnText(), TitleColumnArrow(), TrackSort::Title, L"Library_SortTitle"},
-        {ArtistColumnText(), ArtistColumnArrow(), TrackSort::Artist, L"Library_SortArtist"},
-        {AlbumColumnText(), AlbumColumnArrow(), TrackSort::Album, L"Library_SortAlbum"},
-        {DurationColumnText(), DurationColumnArrow(), TrackSort::Duration, L"Library_SortDuration"}};
-    for (const auto& [text, arrow, sort, key] : columns) {
+    // The sorted column's header carries an arrow pointing the way it sorts, and says it in its name.
+    const std::tuple<Button, TextBlock, FontIcon, TrackSort, const wchar_t*> columns[] = {
+        {TitleColumn(), TitleColumnText(), TitleColumnArrow(), TrackSort::Title, L"Library_SortTitle"},
+        {ArtistColumn(), ArtistColumnText(), ArtistColumnArrow(), TrackSort::Artist, L"Library_SortArtist"},
+        {AlbumColumn(), AlbumColumnText(), AlbumColumnArrow(), TrackSort::Album, L"Library_SortAlbum"},
+        {DurationColumn(), DurationColumnText(), DurationColumnArrow(), TrackSort::Duration, L"Library_SortDuration"}};
+    for (const auto& [button, text, arrow, sort, key] : columns) {
         text.Text(tr(key));
         arrow.Glyph(descending_ ? L"\xE70D" : L"\xE70E");
         arrow.Visibility(sort == trackSort_ ? Visibility::Visible : Visibility::Collapsed);
+        Automation::AutomationProperties::SetName(
+            button, sort != trackSort_ ? tr(key)
+                                       : ui::format(descending_ ? L"Library_SortedDescending" : L"Library_SortedAscending",
+                                                    {std::wstring(tr(key))}));
     }
     populating_ = false;
 }
@@ -760,7 +789,9 @@ void LibraryView::startCollection() {
     collection_ = make_self<ui::LibraryCollection>(DispatcherQueue(), std::move(fetch));
     const auto source = collection_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>();
     (current_.mode == Mode::Albums ? AlbumGrid().as<ItemsControl>() : RowList().as<ItemsControl>()).ItemsSource(source);
-    collection_->start([this](int64_t total) {
+    loading_.start();
+    collection_->start([this, collection = collection_.get()](int64_t total) {
+        if (collection == collection_.get()) loading_.stop();
         showEmpty(total);
         showCount(total);
         loadInitials();

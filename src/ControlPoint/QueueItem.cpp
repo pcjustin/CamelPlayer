@@ -18,6 +18,17 @@ hstring QueueItem::RemoveLabel() const {
     return ui::tr(L"Queue_RemoveEntry");
 }
 
+hstring QueueItem::AccessibleName() const {
+    std::wstring name(row_.title);
+    if (!row_.artist.empty()) name += L", " + std::wstring(row_.artist);
+    if (current_)
+        name += L", " + std::wstring(ui::tr(L"Queue_CurrentMark"));
+    else if (row_.automatic)
+        name += L", " + std::wstring(ui::tr(L"Queue_AutomaticMark"));
+    if (row_.favorite) name += L", " + std::wstring(ui::tr(L"Library_FavoriteMark"));
+    return hstring(name);
+}
+
 void QueueItem::fill(const ui::QueueRow& row, bool current, const camel::server::QueueEntry* entry) {
     entry_ = entry;
     if (row_ == row && current_ == current) return;

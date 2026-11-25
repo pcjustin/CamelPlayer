@@ -62,6 +62,7 @@ struct MainWindow : MainWindowT<MainWindow> {
                              Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
     void OnQueueRemoveEntryClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
     void OnQueueKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
+    void OnQueuePreviewKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
     void OnQueueContextRequested(Microsoft::UI::Xaml::UIElement const&,
                                  Microsoft::UI::Xaml::Input::ContextRequestedEventArgs const&);
     void OnQueueDragItemsCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
@@ -222,9 +223,11 @@ private:
         hstring detail;
         PathState state = PathState::BitPerfect;
         PathStage stage = PathStage::Source;
+        hstring device; // the device or receiver a step plays through, on its own line above the detail
         bool operator==(const PathStep&) const = default;
     };
-    void showSignalPath(std::vector<PathStep> steps);
+    // `group` counts the devices or receivers of a group playing, 0 for one.
+    void showSignalPath(std::vector<PathStep> steps, size_t group = 0);
     void repaintTheme();
     void showLoudnessProgress();
     void showDiscordStatus();
@@ -255,7 +258,8 @@ private:
     // position and the length in seconds.
     std::pair<double, double> showPosition(const camel::server::PlaybackSnapshot& s);
     bool movesOnlyThePosition(const camel::server::Snapshot& snapshot) const;
-    void submitCommand(camel::server::Command command);
+    // The command's id at the Server, or 0 when it was not sent.
+    uint64_t submitCommand(camel::server::Command command);
     void showPage(winrt::hstring const& tag);
     // Selects the navigation item with this tag; its page opens through the selection handler.
     void selectPage(winrt::hstring const& tag);
@@ -282,6 +286,8 @@ private:
     winrt::hstring shownTag_ = L"albums";
     winrt::hstring shownArtist_; // the player bar's artist credit
     void removeSelectedQueueEntries();
+    void moveQueueEntries(int step);
+    void nameDspButton();
     // The selected queue entries in queue order, or the right-clicked one when it is not selected.
     std::vector<Windows::Foundation::IInspectable> queueMenuItems();
     // Lists the library folders once pending commands have run; the Server is queried off the UI thread.
@@ -316,14 +322,15 @@ private:
     void showChanges(const camel::server::Snapshot& snapshot);
     std::string ownDevice() const;
     std::optional<camel::server::IServer::Link> shownLink_;
-    std::string changesZone_;                   // the zone whose changes are shown, the one followed
-    uint64_t shownChange_ = 0;                  // its last change shown or passed over
-    uint64_t shownNotice_ = 0;                  // the last change of no one zone shown or passed over
-    uint64_t shownTransfer_ = 0;                // the last Transfer to… seen
-    bool changesKnown_ = false;                 // the first snapshot set where the changes start
-    bool offeredOwnUpdate_ = false;             // this Control point, older than its Server, looked for its own update
-    uint64_t settingsStamp_ = 0;                // the last settings this window sent
-    camel::server::SettingsDto serverSettings_; // the Server's, as the last snapshot had them
+    std::string changesZone_;                    // the zone whose changes are shown, the one followed
+    uint64_t shownChange_ = 0;                   // its last change shown or passed over
+    uint64_t shownNotice_ = 0;                   // the last change of no one zone shown or passed over
+    uint64_t shownTransfer_ = 0;                 // the last Transfer to… seen
+    bool changesKnown_ = false;                  // the first snapshot set where the changes start
+    bool offeredOwnUpdate_ = false;              // this Control point, older than its Server, looked for its own update
+    uint64_t settingsStamp_ = 0;                 // the last settings this window sent
+    uint64_t refreshStamp_ = 0, refreshRun_ = 0; // the device scan this window asked for, while it runs
+    camel::server::SettingsDto serverSettings_;  // the Server's, as the last snapshot had them
     std::shared_ptr<camel::server::RemoteAccess> access_;
     uint64_t computersRefresh_ = 0;
     int computersTicks_ = 0;     // refresh ticks since the paired devices were last read
@@ -362,9 +369,12 @@ private:
     // The last play request and when it came, so the second click of a double click does not play it again.
     ui::RepeatedPlay repeatedPlay_;
     std::vector<PathStep> shownPath_;
+    size_t shownPathGroup_ = 0;
     // The theme brushes the playback state shows now, painted again when the theme changes.
     const wchar_t* lampColor_ = L"ControlStrongFillColorDisabledBrush";
     const wchar_t* dspColor_ = L"TextFillColorPrimaryBrush";
+    bool dspActive_ = false;
+    winrt::hstring dspButtonName_;         // what the DSP button is named while DSP leaves the signal as it is
     int volumeWheel_ = 0;                  // the part of a wheel notch not yet applied
     std::optional<uint32_t> playerVolume_; // the network player's own level, as the Server last reported it
     bool playerMuted_ = false;
@@ -419,6 +429,7 @@ private:
     void showPlayerArtist(hstring const& artist);
     void openArtist(hstring const& artist);
     void addSettingsLinks();
+    void wrapSettingsLinks();
     void markSettingsSection();
     winrt::fire_and_forget showOutputSettings(camel::Backend backend, std::string id, winrt::hstring label);
     // The zone picker the output button opens (docs/Plan.md §5.12): a row for each zone while it is open.
@@ -481,6 +492,7 @@ private:
     bool firewallReading_ = false;
     bool firewallAsk_ = false; // a player was enabled before the rule was known
     std::vector<std::pair<Microsoft::UI::Xaml::FrameworkElement, Microsoft::UI::Xaml::Controls::HyperlinkButton>> settingsLinks_;
+    std::vector<size_t> settingsLinkRows_; // the row each link stands in
     // Goes back in the library pages, or from Listening to Home, when the title bar offers Back.
     bool goBack();
     bool listeningShown();
@@ -538,6 +550,8 @@ private:
     void showPlaylistNotice(winrt::hstring const& title, winrt::hstring const& message, bool error,
                             std::optional<camel::server::PlaylistUndo> undo = std::nullopt, int64_t playlist = 0);
     void undoPlaylistNotice();
+    void showQueueCleared(const std::string& zone, const std::vector<camel::server::TrackSource>& sources, uint64_t index,
+                          bool playing, uint64_t frame);
     // Lists the playlists under Playlists in the navigation pane; `then` runs once they are shown.
     winrt::fire_and_forget refreshPlaylists(std::function<void()> then = {});
     void showPlaylistsInNavigation();

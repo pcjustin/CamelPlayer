@@ -70,6 +70,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     bool HasMarks() const { return row_.marks; }
     bool IsFavorite() const { return row_.favorite; }
     hstring FavoriteGlyph() const { return row_.favorite ? L"\xE00B" : L"\xE006"; }
+    hstring FavoriteName() const { return ui::tr(row_.favorite ? L"Marks_FavoriteOn" : L"Marks_FavoriteOff"); }
     bool HasAvatar() const { return row_.avatar; }
     hstring Initial() const { return ui::initialOf(row_.title); }
     Microsoft::UI::Xaml::Media::Brush AvatarBrush() const {
@@ -82,6 +83,7 @@ struct BrowseItem : BrowseItemT<BrowseItem> {
     hstring ToString() const {
         const auto title = row_.number.empty() ? row_.title : row_.number + L" " + row_.title;
         auto named = row_.subtitle.empty() ? title : title + L", " + row_.subtitle;
+        if (row_.unavailable) named = named + L", " + ui::tr(L"Library_UnavailableMark");
         if (!IsPlaying()) return named;
         return named + L", " + ui::tr(ui::nowPlaying().paused ? L"Library_PausedMark" : L"Library_PlayingMark");
     }

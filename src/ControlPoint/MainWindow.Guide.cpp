@@ -169,14 +169,26 @@ winrt::fire_and_forget MainWindow::showFirstRunGuide() {
                                                                      {L"Guide_DoneTitle", done}}};
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.DefaultButton(ContentDialogButton::Primary);
+    // Each step under the line saying which step of the guide it is.
+    TextBlock progress;
+    progress.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+    progress.Foreground(themeBrush(L"TextFillColorSecondaryBrush"));
+    ContentControl page;
+    page.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+    StackPanel paged;
+    paged.Spacing(12);
+    paged.Children().Append(progress);
+    paged.Children().Append(page);
+    dialog.Content(paged);
     size_t step = 0;
     bool control = false; // Control another CamelPlayer was chosen: the guide ends, and pairing follows
     const auto show = [&] {
         dialog.Title(box_value(tr(steps[step].first)));
-        dialog.Content(steps[step].second);
+        progress.Text(ui::format(L"Guide_Step", {std::to_wstring(step + 1), std::to_wstring(steps.size())}));
+        page.Content(steps[step].second);
         const bool last = step + 1 == steps.size();
         dialog.PrimaryButtonText(tr(last ? L"Guide_Finish" : L"Guide_Next"));
-        dialog.SecondaryButtonText(step > 0 && !last ? tr(L"Guide_Back") : hstring{});
+        dialog.SecondaryButtonText(step > 0 ? tr(L"Guide_Back") : hstring{});
         dialog.CloseButtonText(last ? hstring{} : tr(L"Guide_Skip"));
     };
     dialog.PrimaryButtonClick([&](auto&&, ContentDialogButtonClickEventArgs const& e) {

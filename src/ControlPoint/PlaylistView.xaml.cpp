@@ -36,7 +36,15 @@ using namespace camel::server;
 using ui::tr;
 
 namespace winrt::CamelPlayer::implementation {
+
 namespace {
+
+// A button busy with the work it started: disabled, with its ring turning.
+void showBusy(Button const& button, ProgressRing const& ring, bool busy) {
+    button.IsEnabled(!busy);
+    ring.IsActive(busy);
+    ring.Visibility(busy ? Visibility::Visible : Visibility::Collapsed);
+}
 
 constexpr COMDLG_FILTERSPEC kPlaylistFiles[] = {{L"M3U8", L"*.m3u8;*.m3u"}};
 
@@ -68,6 +76,7 @@ ContentDialog dialog(XamlRoot const& root, hstring const& title, hstring const& 
 void PlaylistView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
     server_ = std::move(server);
     handlers_ = std::move(handlers);
+    loading_.attach(LoadingIndicator());
     EntryList().ItemsSource(
         entries_.as<Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable>>());
     ToolTipService::SetToolTip(MoreSortButton(), box_value(tr(L"Playlist_SortMore")));
@@ -130,11 +139,13 @@ void PlaylistView::load() {
     if (!server_) return;
     // Reads run on the thread pool, so an older one can answer after a newer one; only the latest is shown.
     const auto read = ++loads_;
+    loading_.start();
     if (playlist_ == 0) {
         background([this, server = server_, tracks = tr(L"Library_Tracks"), read] {
             auto list = std::make_shared<std::vector<PlaylistSummary>>(server->playlists());
             return std::function<void()>([this, list, tracks, read] {
                 if (read != loads_) return;
+                loading_.stop();
                 playlists_ = *list;
                 auto items = single_threaded_observable_vector<Windows::Foundation::IInspectable>();
                 for (const auto& p : playlists_) {
@@ -185,6 +196,7 @@ void PlaylistView::load() {
         }
         return std::function<void()>([this, loaded, read] {
             if (read != loads_) return;
+            loading_.stop();
             name_ = loaded->name;
             edits_.loaded(loaded->revision);
             HeaderTitle().Text(name_);
@@ -309,6 +321,7 @@ winrt::fire_and_forget PlaylistView::OnRenameClick(Windows::Foundation::IInspect
     auto strong = get_strong();
     auto box = dialog(XamlRoot(), tr(L"Playlist_RenameTitle"), tr(L"Playlist_RenamePrimary"));
     TextBox name;
+    name.Header(box_value(tr(L"Playlist_NameLabel")));
     name.Text(name_);
     name.SelectAll();
     box.Content(name);
@@ -366,6 +379,7 @@ winrt::fire_and_forget PlaylistView::OnExportClick(Windows::Foundation::IInspect
     const auto playlist = playlist_;
     auto weak = get_weak();
     auto queue = DispatcherQueue();
+    showBusy(ExportButton(), ExportRing(), true);
     co_await resume_background();
     bool done = true;
     try {
@@ -376,7 +390,9 @@ winrt::fire_and_forget PlaylistView::OnExportClick(Windows::Foundation::IInspect
     }
     queue.TryEnqueue([weak, done, file = *file] {
         auto self = weak.get();
-        if (!self || !self->handlers_.notify) return;
+        if (!self) return;
+        showBusy(self->ExportButton(), self->ExportRing(), false);
+        if (!self->handlers_.notify) return;
         if (done)
             self->handlers_.notify(tr(L"Playlist_Exported"), hstring(file.wstring()), false);
         else
@@ -391,6 +407,7 @@ winrt::fire_and_forget PlaylistView::OnImportClick(Windows::Foundation::IInspect
     auto server = server_;
     auto weak = get_weak();
     auto queue = DispatcherQueue();
+    showBusy(ImportButton(), ImportRing(), true);
     co_await resume_background();
     std::optional<PlaylistChange> change;
     try {
@@ -401,6 +418,7 @@ winrt::fire_and_forget PlaylistView::OnImportClick(Windows::Foundation::IInspect
     queue.TryEnqueue([weak, change, file = *file] {
         auto self = weak.get();
         if (!self) return;
+        showBusy(self->ImportButton(), self->ImportRing(), false);
         if (!change) {
             if (self->handlers_.notify) self->handlers_.notify(tr(L"Playlist_ImportFailed"), hstring(file.wstring()), true);
             return;
@@ -434,6 +452,25 @@ void PlaylistView::OnEntryKeyDown(Windows::Foundation::IInspectable const&, Inpu
     if (e.Key() != Windows::System::VirtualKey::Delete) return;
     e.Handled(true);
     remove(selectedRows());
+}
+
+// Taken before the list, which moves the focus on Up and Down.
+void PlaylistView::OnEntryPreviewKeyDown(Windows::Foundation::IInspectable const&, Input::KeyRoutedEventArgs const& e) {
+    const int step = ui::moveStep(e);
+    if (!step) return;
+    e.Handled(true);
+    moveEntries(step);
+}
+
+void PlaylistView::moveEntries(int step) {
+    const auto position = ui::moveSelected(EntryList(), *entries_, step);
+    if (!position) return;
+    PlaylistEdit change;
+    change.kind = PlaylistEdit::Kind::Move;
+    change.playlist = playlist_;
+    change.position = *position;
+    ui::forEachSelected(EntryList(), [&](uint32_t i) { change.items.push_back(entries_->rows()[i].id); });
+    edit(std::move(change), false);
 }
 
 void PlaylistView::OnEntryDragCompleted(ListViewBase const&, DragItemsCompletedEventArgs const& e) {
@@ -482,6 +519,10 @@ void PlaylistView::OnEntryContextRequested(UIElement const& sender, Input::Conte
         add(L"Library_MenuPlayNext", L"\xE893", [this] { queue(selectedRows(menuItem_), true); });
         add(L"Library_MenuAddQueue", L"\xE710", [this] { queue(selectedRows(menuItem_), false); });
         add(L"Playlist_Remove", L"\xE738", [this] { remove(selectedRows(menuItem_)); });
+        ui::insertMoveMenu(entryMenu_, entryMenu_.Items().Size(), [this](int step) {
+            if (!ui::actsOnSelection(EntryList(), *entries_, menuItem_)) EntryList().SelectedItem(menuItem_);
+            moveEntries(step);
+        });
         if (handlers_.menu)
             handlers_.menu(entryMenu_, [this]() -> ui::SourceFetch {
                 std::vector<PlaylistSource> sources;

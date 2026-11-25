@@ -6,6 +6,7 @@
 
 #include "LibraryView.g.h"
 #include "LibraryCollection.h"
+#include "LoadingRing.h"
 #include "PlaylistMenu.h"
 #include "TrackMarks.h"
 #include "TreeReads.h"
@@ -200,6 +201,7 @@ private:
     std::optional<uint32_t> treeParent(uint32_t index) const;
     void saveOpenFolders() const;
     void loadSearchGroups();
+    void loadSearchCounts(std::string query);
     void playTracks(const std::vector<camel::server::LibraryTrackRow>& tracks, size_t index);
     void queueItem(const ui::BrowseRow& row, bool playNext);
     void queueAlbum(int64_t album, bool playNext);
@@ -257,6 +259,7 @@ private:
     std::function<void(bool)> answerArtistPictures_;
     std::function<void()> listChanged_;
     uint64_t generation_ = 0; // changes whenever another view opens
+    ui::LoadingRing loading_;
     camel::server::AlbumSort albumSort_ = camel::server::AlbumSort::Title;
     camel::server::TrackSort trackSort_ = camel::server::TrackSort::Title;
     bool descending_ = false;

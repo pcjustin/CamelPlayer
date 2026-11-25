@@ -9,6 +9,7 @@
 #include <map>
 #include <unordered_map>
 #include "LibraryCollection.h"
+#include "LoadingRing.h"
 #include "Server/Api/ServerApi.h"
 
 namespace winrt::CamelPlayer::implementation {
@@ -75,6 +76,7 @@ private:
     std::shared_ptr<camel::server::IServer> server_;
     Handlers handlers_;
     uint64_t generation_ = 0, periodGeneration_ = 0;
+    ui::LoadingRing loading_;
     Microsoft::UI::Dispatching::DispatcherQueueTimer changeTimer_{nullptr};
     uint64_t revision_ = 0; // the library revision Home last read
     bool probing_ = false;

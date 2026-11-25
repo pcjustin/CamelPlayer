@@ -6,6 +6,7 @@
 
 #include "PlaylistView.g.h"
 #include "EditSequence.h"
+#include "LoadingRing.h"
 #include "PlaylistCollection.h"
 #include "PlaylistMenu.h"
 #include "Server/Api/ServerApi.h"
@@ -54,6 +55,7 @@ struct PlaylistView : PlaylistViewT<PlaylistView> {
         e.Handled(true);
     }
     void OnEntryKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
+    void OnEntryPreviewKeyDown(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&);
     void OnEntryDragCompleted(Microsoft::UI::Xaml::Controls::ListViewBase const&,
                               Microsoft::UI::Xaml::Controls::DragItemsCompletedEventArgs const&);
     void OnEntryContextRequested(Microsoft::UI::Xaml::UIElement const&,
@@ -69,6 +71,7 @@ private:
     void submitMarks(camel::server::Command command);
     void queue(const std::vector<ui::BrowseRow>& rows, bool playNext);
     void remove(const std::vector<ui::BrowseRow>& rows);
+    void moveEntries(int step);
     struct QueuedEdit {
         camel::server::PlaylistEdit change;
         bool reloadAfter = false;
@@ -86,6 +89,7 @@ private:
     hstring name_;
     uint64_t generation_ = 0;
     uint64_t loads_ = 0; // the latest load()
+    ui::LoadingRing loading_;
     std::optional<camel::server::PlaylistSortKey> sortKey_;
     bool sortDescending_ = false;
     winrt::com_ptr<ui::PlaylistCollection> entries_ = winrt::make_self<ui::PlaylistCollection>();

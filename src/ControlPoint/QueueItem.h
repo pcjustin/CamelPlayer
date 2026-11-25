@@ -37,6 +37,8 @@ struct QueueItem : QueueItemT<QueueItem> {
     bool ShowsAutomatic() const { return row_.automatic && !current_; }
     bool IsFavorite() const { return row_.favorite; }
     hstring RemoveLabel() const;
+    hstring AccessibleName() const;
+    hstring ToString() const { return AccessibleName(); }
     event_token PropertyChanged(Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler) {
         return changed_.add(handler);
     }

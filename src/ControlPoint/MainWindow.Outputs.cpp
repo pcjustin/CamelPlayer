@@ -154,14 +154,24 @@ void MainWindow::nameZoneButton(const Snapshot& snapshot) {
     const auto inUse = std::ranges::find_if(rows, &camel::server::OutputRow::selected);
     if (inUse == rows.end()) return;
     const auto zone = std::ranges::find(snapshot.zones, snapshot.selectedZone, &ZoneSnapshot::id);
-    const hstring label = zone == snapshot.zones.end()          ? outputMenuLabel(*inUse)
-                          : zone->playback.receivers.size() > 1 ? ui::utf8(zone->name) + L" (AirPlay)"
-                          : zone->playback.members.size() > 1
-                              ? outputLabel(*inUse) + L" + " + to_hstring(zone->playback.members.size() - 1)
-                              : outputMenuLabel(*inUse);
+    // A group's name and count apart, the count shown whole however much of the name is trimmed.
+    hstring name = outputMenuLabel(*inUse), count;
+    if (zone != snapshot.zones.end() && zone->playback.receivers.size() > 1) {
+        const auto others = L" + " + std::to_wstring(zone->playback.receivers.size() - 1);
+        std::wstring own(ui::utf8(zone->name));
+        if (own.ends_with(others)) own.resize(own.size() - others.size());
+        name = hstring(own);
+        count = hstring(others.substr(1) + L" (AirPlay)");
+    } else if (zone != snapshot.zones.end() && zone->playback.members.size() > 1) {
+        name = outputLabel(*inUse);
+        count = L"+ " + to_hstring(zone->playback.members.size() - 1);
+    }
+    const hstring label = count.empty() ? name : name + L" " + count;
     ToolTipService::SetToolTip(OutputButton(), box_value(label));
     OutputIcon().Glyph(zoneGlyph(inUse->backend));
-    OutputName().Text(label);
+    OutputName().Text(name);
+    OutputGroupCount().Text(count);
+    OutputGroupCount().Visibility(count.empty() ? Visibility::Collapsed : Visibility::Visible);
     Automation::AutomationProperties::SetName(OutputButton(), ui::format(L"Output_ButtonName", {std::wstring(label)}));
 }
 
@@ -178,8 +188,8 @@ void MainWindow::populateOutputs() {
         const hstring forZone = ui::format(L"Zone_SettingsFor", {std::wstring(dspOutputLabel_)});
         PlaybackZoneText().Text(forZone);
         CrossfadeZoneText().Text(forZone);
-        const hstring dspName = ui::format(L"Dsp_ButtonForOutput", {std::wstring(dspOutputLabel_)});
-        setBadgeTip(DspButton(), dspName, dspName);
+        dspButtonName_ = ui::format(L"Dsp_ButtonForOutput", {std::wstring(dspOutputLabel_)});
+        nameDspButton();
     }
     auto list = OutputList().Children();
     list.Clear();
@@ -1115,10 +1125,11 @@ void MainWindow::openZonePicker() {
     divider.Margin(ThicknessHelper::FromLengths(-4, 4, -4, 4));
     divider.Background(themeBrush(L"DividerStrokeColorDefaultBrush"));
     content.Children().Append(divider);
+    // Pause all as wide as its words, the settings taking the rest, so that a longer language shows them whole.
     Grid foot;
-    for (int i = 0; i < 2; ++i) {
+    for (const auto width : {GridLengthHelper::Auto(), GridLengthHelper::FromValueAndType(1, GridUnitType::Star)}) {
         ColumnDefinition column;
-        column.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+        column.Width(width);
         foot.ColumnDefinitions().Append(column);
     }
     TextBlock pauseAll;
@@ -1235,6 +1246,20 @@ void MainWindow::fillZoneActions(MenuFlyout const& menu, const std::string& id) 
     const auto zone = std::ranges::find(snapshot.zones, id, &ZoneSnapshot::id);
     const auto row = std::ranges::find(zoneRows_, id, &ZoneRow::zone);
     if (zone == snapshot.zones.end() || row == zoneRows_.end()) return;
+    // The row's own Pause shows on hover or focus only, which touch never gives.
+    if (zone->playback.state != PlaybackState::Stopped) {
+        const bool playing = zone->playback.state == PlaybackState::Playing;
+        MenuFlyoutItem toggle;
+        toggle.Text(tr(playing ? L"Tip_Pause" : L"Tip_Play"));
+        toggle.Icon(glyph(playing ? L"\xE769" : L"\xE768"));
+        toggle.Click([this, id, playing](auto&&, auto&&) {
+            Command command;
+            command.kind = playing ? CommandKind::Pause : CommandKind::Play;
+            command.zone = id;
+            submitCommand(std::move(command));
+        });
+        menu.Items().Append(toggle);
+    }
     if (id == snapshot.selectedZone) {
         MenuFlyoutSubItem transfer;
         transfer.Text(tr(L"Zone_Transfer"));
@@ -1424,14 +1449,13 @@ void MainWindow::showZoneRows(const Snapshot& snapshot) {
         row.title.Text(name);
         row.detail.Text(detail);
         row.detail.Visibility(detail.empty() ? Visibility::Collapsed : Visibility::Visible);
+        // A zone in use elsewhere stays usable and says why, so it is drawn readable rather than disabled.
         const auto* tone = selected      ? L"AccentTextFillColorPrimaryBrush"
-                           : unavailable ? L"TextFillColorDisabledBrush"
+                           : unavailable ? L"TextFillColorSecondaryBrush"
                                          : L"TextFillColorPrimaryBrush";
         row.title.Foreground(themeBrush(tone));
         row.icon.Foreground(themeBrush(tone));
-        row.detail.Foreground(themeBrush(selected      ? L"AccentTextFillColorPrimaryBrush"
-                                         : unavailable ? L"TextFillColorDisabledBrush"
-                                                       : L"TextFillColorSecondaryBrush"));
+        row.detail.Foreground(themeBrush(selected ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorSecondaryBrush"));
         row.select.IsEnabled(row.output.connected);
         Automation::AutomationProperties::SetName(
             row.select, ui::format(selected ? L"Zone_RowSelectedName" : L"Zone_RowName",

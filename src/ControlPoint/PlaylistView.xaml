@@ -43,8 +43,9 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
                             PointerPressed="OnMarksPointer" PointerReleased="OnMarksPointer" DoubleTapped="OnMarksDoubleTapped">
-                    <Button x:Uid="Marks_FavoriteButton" Click="OnFavoriteClick" Padding="6,4" VerticalAlignment="Center"
-                            Background="Transparent" BorderThickness="0">
+                    <Button Click="OnFavoriteClick" Padding="6,4" VerticalAlignment="Center"
+                            Background="Transparent" BorderThickness="0" AutomationProperties.Name="{x:Bind FavoriteName, Mode=OneWay}"
+                            ToolTipService.ToolTip="{x:Bind FavoriteName, Mode=OneWay}">
                         <FontIcon Glyph="{x:Bind FavoriteGlyph, Mode=OneWay}" FontSize="14" />
                     </Button>
                 </StackPanel>
@@ -95,10 +96,11 @@
                         <TextBlock x:Uid="Playlist_Rename" />
                     </StackPanel>
                 </Button>
-                <Button Click="OnExportClick">
+                <Button x:Name="ExportButton" Click="OnExportClick">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xEDE1;" FontSize="14" />
                         <TextBlock x:Uid="Playlist_Export" />
+                        <ProgressRing x:Name="ExportRing" IsActive="False" Width="14" Height="14" Visibility="Collapsed" />
                     </StackPanel>
                 </Button>
                 <Button Click="OnDeleteClick">
@@ -112,6 +114,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon Glyph="&#xE8B5;" FontSize="14" />
                     <TextBlock x:Uid="Playlist_Import" />
+                    <ProgressRing x:Name="ImportRing" IsActive="False" Width="14" Height="14" Visibility="Collapsed" />
                 </StackPanel>
             </Button>
         </Grid>
@@ -158,12 +161,15 @@
             <local:ColumnDivider Grid.Column="3" Boundary="1" HorizontalAlignment="Left" Margin="-16,0,0,0" />
         </Grid>
 
-        <ListView x:Name="EntryList" Grid.Row="2" ItemTemplate="{StaticResource EntryTemplate}" SelectionMode="Extended"
+        <ListView x:Name="EntryList" AutomationProperties.LabeledBy="{x:Bind HeaderTitle}" Grid.Row="2" ItemTemplate="{StaticResource EntryTemplate}" SelectionMode="Extended"
                   CanDragItems="True" CanReorderItems="True" AllowDrop="True" DragItemsCompleted="OnEntryDragCompleted"
-                  DoubleTapped="OnEntryDoubleTapped" KeyDown="OnEntryKeyDown" />
-        <ListView x:Name="PlaylistList" Grid.Row="1" Grid.RowSpan="2" ItemTemplate="{StaticResource PlaylistTemplate}"
+                  DoubleTapped="OnEntryDoubleTapped" KeyDown="OnEntryKeyDown"
+                  PreviewKeyDown="OnEntryPreviewKeyDown" />
+        <ListView x:Name="PlaylistList" AutomationProperties.LabeledBy="{x:Bind HeaderTitle}" Grid.Row="1" Grid.RowSpan="2" ItemTemplate="{StaticResource PlaylistTemplate}"
                   SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnPlaylistClick" />
         <TextBlock x:Name="EmptyText" Grid.Row="2" TextWrapping="Wrap" Visibility="Collapsed"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        <ProgressRing x:Name="LoadingIndicator" x:Uid="Library_Loading" Grid.Row="2" IsActive="False" Visibility="Collapsed"
+                      HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Grid>
 </UserControl>

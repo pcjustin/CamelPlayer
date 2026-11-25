@@ -42,7 +42,7 @@
                     <Border Width="32" Height="32" CornerRadius="16" Margin="0,0,12,0" Background="{x:Bind AvatarBrush, Mode=OneWay}"
                             Visibility="{x:Bind HasAvatar, Mode=OneWay}">
                         <Grid>
-                            <TextBlock Text="{x:Bind Initial, Mode=OneWay}" FontSize="14" FontWeight="SemiBold" Foreground="White"
+                            <TextBlock Text="{x:Bind Initial, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" Foreground="White"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                             <Image x:Name="ArtistAvatar" Stretch="UniformToFill" Loaded="OnArtworkLoaded" Unloaded="OnArtworkUnloaded"
                                    DataContextChanged="OnArtworkContextChanged" />
@@ -71,8 +71,9 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsTextTrimmedChanged="OnTextTrimmedChanged" />
                 <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" Visibility="{x:Bind HasMarks, Mode=OneWay}"
                             PointerPressed="OnMarksPointer" PointerReleased="OnMarksPointer" DoubleTapped="OnMarksDoubleTapped">
-                    <Button x:Uid="Marks_FavoriteButton" Click="OnFavoriteClick" Width="32" Padding="6,4" VerticalAlignment="Center"
-                            Background="Transparent" BorderThickness="0">
+                    <Button Click="OnFavoriteClick" Width="32" Padding="6,4" VerticalAlignment="Center"
+                            Background="Transparent" BorderThickness="0" AutomationProperties.Name="{x:Bind FavoriteName, Mode=OneWay}"
+                            ToolTipService.ToolTip="{x:Bind FavoriteName, Mode=OneWay}">
                         <FontIcon Glyph="{x:Bind FavoriteGlyph, Mode=OneWay}" FontSize="14" />
                     </Button>
                 </StackPanel>
@@ -390,7 +391,7 @@
             </Button>
         </Grid>
 
-        <GridView x:Name="AlbumGrid" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"
+        <GridView x:Name="AlbumGrid" AutomationProperties.LabeledBy="{x:Bind HeaderTitle}" Grid.Row="1" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Visibility="Collapsed" SizeChanged="OnAlbumGridSizeChanged" />
         <!-- The track list's column headers sort it as the sort list does: a header sorts by its column, again the other way. -->
         <Grid Grid.Row="1">
@@ -438,7 +439,7 @@
                 <local:ColumnDivider Grid.Column="1" Boundary="0" HorizontalAlignment="Left" Margin="-16,0,0,0" />
                 <local:ColumnDivider Grid.Column="2" Boundary="1" HorizontalAlignment="Left" Margin="-16,0,0,0" />
             </Grid>
-            <ListView x:Name="RowList" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
+            <ListView x:Name="RowList" AutomationProperties.LabeledBy="{x:Bind HeaderTitle}" Grid.Row="1" ItemTemplate="{StaticResource RowTemplate}" SelectionMode="Extended"
                       IsItemClickEnabled="True" ItemClick="OnRowClick" Visibility="Collapsed"
                       ContainerContentChanging="OnRowContainerContentChanging">
                 <ListView.Resources>
@@ -461,7 +462,7 @@
                     <StackPanel>
                         <!-- Search results (docs/Plan.md §8.2): album covers and artists above the matching tracks. -->
                         <StackPanel x:Name="SearchGroups" Spacing="8" Padding="0,0,20,8" Visibility="Collapsed">
-                            <Grid ColumnSpacing="4">
+                            <Grid x:Name="SearchAlbumsBar" ColumnSpacing="4">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
@@ -475,7 +476,7 @@
                                     <FontIcon Glyph="&#xE76C;" FontSize="12" />
                                 </Button>
                             </Grid>
-                            <GridView x:Name="SearchAlbums" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                            <GridView x:Name="SearchAlbums" AutomationProperties.LabeledBy="{x:Bind SearchAlbumsHeader}" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
                                       IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
                                       ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                       ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -485,7 +486,7 @@
                                     </ItemsPanelTemplate>
                                 </GridView.ItemsPanel>
                             </GridView>
-                            <Grid ColumnSpacing="4">
+                            <Grid x:Name="SearchArtistsBar" ColumnSpacing="4">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
@@ -499,7 +500,7 @@
                                     <FontIcon Glyph="&#xE76C;" FontSize="12" />
                                 </Button>
                             </Grid>
-                            <ListView x:Name="SearchArtists" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnSearchArtistClick"
+                            <ListView x:Name="SearchArtists" AutomationProperties.LabeledBy="{x:Bind SearchArtistsHeader}" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnSearchArtistClick"
                                       ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                       ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
                                 <ListView.ItemsPanel>
@@ -569,7 +570,7 @@
                             </Button>
                             <HyperlinkButton x:Name="ArtistOwnAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="own" Click="OnArtistViewAllClick" />
                         </Grid>
-                        <GridView x:Name="ArtistOwn" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                        <GridView x:Name="ArtistOwn" AutomationProperties.LabeledBy="{x:Bind ArtistOwnTitle}" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
                                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
                                   ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                   ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -595,7 +596,7 @@
                             </Button>
                             <HyperlinkButton x:Name="ArtistGuestAll" Grid.Column="3" x:Uid="Home_ViewAll" Tag="guest" Click="OnArtistViewAllClick" />
                         </Grid>
-                        <GridView x:Name="ArtistGuest" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
+                        <GridView x:Name="ArtistGuest" AutomationProperties.LabeledBy="{x:Bind ArtistGuestTitle}" ItemTemplate="{StaticResource AlbumTemplate}" SelectionMode="None"
                                   IsItemClickEnabled="True" ItemClick="OnAlbumClick" Height="250"
                                   ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                   ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
@@ -609,9 +610,9 @@
                 </ListView.Footer>
             </ListView>
         </Grid>
-        <ListView x:Name="FolderList" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="Extended"
+        <ListView x:Name="FolderList" AutomationProperties.LabeledBy="{x:Bind HeaderTitle}" Grid.Row="1" ItemTemplate="{StaticResource FolderRowTemplate}" SelectionMode="Extended"
                   IsItemClickEnabled="True" ItemClick="OnFolderItemClick" Visibility="Collapsed" />
-        <ListView x:Name="FolderTree" Grid.Row="1" ItemTemplate="{StaticResource FolderTreeTemplate}" SelectionMode="Extended"
+        <ListView x:Name="FolderTree" AutomationProperties.LabeledBy="{x:Bind HeaderTitle}" Grid.Row="1" ItemTemplate="{StaticResource FolderTreeTemplate}" SelectionMode="Extended"
                   Visibility="Collapsed" PreviewKeyDown="OnTreeKeyDown">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
@@ -621,6 +622,8 @@
         </ListView>
         <TextBlock x:Name="EmptyText" Grid.Row="1" TextWrapping="Wrap" Visibility="Collapsed"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        <ProgressRing x:Name="LoadingIndicator" x:Uid="Library_Loading" Grid.Row="1" IsActive="False" Visibility="Collapsed"
+                      HorizontalAlignment="Center" VerticalAlignment="Center" />
         <!-- The jump bar beside a whole list: #, A–Z, kana and Han, the ones without names dimmed. -->
         <Grid x:Name="InitialsBar" Grid.Row="1" Grid.Column="1" Width="28" Margin="8,0,0,0" Visibility="Collapsed"
               TabFocusNavigation="Once" XYFocusKeyboardNavigation="Enabled"

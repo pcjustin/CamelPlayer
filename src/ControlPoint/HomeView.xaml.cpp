@@ -186,6 +186,7 @@ struct PeriodData {
 void HomeView::attach(std::shared_ptr<IServer> server, Handlers handlers) {
     server_ = std::move(server);
     handlers_ = std::move(handlers);
+    loading_.attach(LoadingIndicator());
     // Colors set from code follow a change of theme.
     ActualThemeChanged([this](auto&&, auto&&) {
         showTiles();
@@ -253,6 +254,7 @@ winrt::fire_and_forget HomeView::refresh() {
     auto weak = get_weak();
     auto server = server_;
     auto queue = DispatcherQueue();
+    loading_.start();
     co_await winrt::resume_background();
     const auto queryStart = camel::measure::now();
     auto data = std::make_shared<HomeData>();
@@ -288,6 +290,9 @@ winrt::fire_and_forget HomeView::refresh() {
         data->tracks = tracks.get();
         data->artists = artists.get();
     } catch (const std::exception&) {
+        queue.TryEnqueue([weak, generation] {
+            if (auto self = weak.get(); self && generation == self->generation_) self->loading_.stop();
+        });
         co_return; // no library yet, or it changed while reading; the next visit rereads
     }
     if (camel::measure::measuring())
@@ -296,6 +301,7 @@ winrt::fire_and_forget HomeView::refresh() {
     queue.TryEnqueue([weak, generation, data] {
         auto self = weak.get();
         if (!self || generation != self->generation_) return;
+        self->loading_.stop();
         self->revision_ = data->added.revision;
         self->TodayTime().Text(listeningTime(data->today.listenedMs));
         self->TodayPlays().Text(plays(data->today.plays));
@@ -485,10 +491,12 @@ void HomeView::drawChart() {
     const auto accent = ui::themeBrush(ActualTheme(), L"AccentFillColorDefaultBrush");
     const auto secondary = ui::themeBrush(ActualTheme(), L"TextFillColorSecondaryBrush");
     const auto divider = ui::themeBrush(ActualTheme(), L"DividerStrokeColorDefaultBrush");
+    const auto caption =
+        Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Microsoft::UI::Xaml::Style>();
     const auto text = [&](std::wstring_view value) {
         TextBlock block;
-        // The caption size, with a fixed line height: a block not yet shown measures its width but not its height.
-        block.FontSize(12);
+        // The caption style, with a fixed line height: a block not yet shown measures its width but not its height.
+        block.Style(caption);
         block.LineHeight(16);
         block.LineStackingStrategy(LineStackingStrategy::BlockLineHeight);
         block.Foreground(secondary);

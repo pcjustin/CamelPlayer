@@ -137,6 +137,7 @@ winrt::fire_and_forget MainWindow::askNewPlaylist(ui::SourceFetch fetch) {
     ui::placeDialog(dialog, ContentLayout().XamlRoot());
     dialog.Title(box_value(tr(L"Playlist_NewTitle")));
     TextBox name;
+    name.Header(box_value(tr(L"Playlist_NameLabel")));
     name.PlaceholderText(tr(L"Playlist_NamePlaceholder"));
     dialog.Content(name);
     dialog.PrimaryButtonText(tr(L"Playlist_ConfirmCreate"));
@@ -294,6 +295,7 @@ void MainWindow::renameInNavigation(int64_t playlist) {
     // The box sits in a flyout beside the item: inside the item, Enter would also open the playlist.
     const auto name = unbox_value_or<hstring>(item.Content(), L"");
     TextBox box;
+    box.Header(box_value(tr(L"Playlist_NameLabel")));
     box.Text(name);
     box.MinWidth(240);
     Flyout flyout;

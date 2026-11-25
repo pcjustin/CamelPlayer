@@ -56,6 +56,12 @@ std::wstring lines(const std::vector<std::wstring>& names) {
     return list;
 }
 
+// A closed notice still takes its share of the card's spacing, so it is collapsed while closed.
+void showNotice(InfoBar const& notice, bool open) {
+    notice.IsOpen(open);
+    notice.Visibility(open ? Visibility::Visible : Visibility::Collapsed);
+}
+
 std::wstring trimmed(hstring const& text) {
     std::wstring s(text);
     s.erase(0, s.find_first_not_of(L" \t"));
@@ -460,8 +466,8 @@ void MainWindow::populateComputers() {
     if (!settings_.allowControl) {
         AllowControlText().Visibility(Visibility::Collapsed);
         PairedPanel().Visibility(Visibility::Collapsed);
-        ControlFirewallNotice().IsOpen(false);
-        PublicNetworkNotice().IsOpen(false);
+        showNotice(ControlFirewallNotice(), false);
+        showNotice(PublicNetworkNotice(), false);
         return;
     }
     refreshComputers();
@@ -506,12 +512,12 @@ winrt::fire_and_forget MainWindow::refreshComputers() {
         AllowControlText().Visibility(Visibility::Visible);
     }
     if (access) firewallRule_ = rule;
-    ControlFirewallNotice().IsOpen(access && !rule);
+    showNotice(ControlFirewallNotice(), access && !rule);
     RenamePanel().Visibility(ownName.empty() ? Visibility::Collapsed : Visibility::Visible);
     if (const auto root = Content().XamlRoot();
         !ownName.empty() && (!root || Input::FocusManager::GetFocusedElement(root) != DeviceNameBox()))
         DeviceNameBox().Text(toWide(ownName));
-    PublicNetworkNotice().IsOpen(onPublic);
+    showNotice(PublicNetworkNotice(), onPublic);
     auto rows = PairedDeviceRows().Children();
     rows.Clear();
     if (devices.empty()) {
@@ -674,7 +680,7 @@ winrt::fire_and_forget MainWindow::OnShowPairingCodeClick(Windows::Foundation::I
     if (!code.empty()) {
         TextBlock digits;
         digits.Text(toWide(code.substr(0, 3) + " " + code.substr(3)));
-        digits.FontSize(40);
+        digits.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
         digits.IsTextSelectionEnabled(true);
         Automation::AutomationProperties::SetName(digits, toWide(code).c_str());
         content.Children().Append(digits);

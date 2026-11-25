@@ -19,6 +19,8 @@
 #include <propvarutil.h>
 
 #pragma comment(lib, "propsys.lib")
+#include <ranges>
+#include <string_view>
 #include <utility>
 #include <winrt/Microsoft.UI.Interop.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
@@ -115,6 +117,23 @@ hstring decibels(double db) {
     wchar_t text[32];
     swprintf_s(text, L"%.1f dB", db);
     return text;
+}
+
+// An output's mode as its driver words it ("WASAPI shared · event"), in the window's language.
+hstring outputModeText(const std::string& mode) {
+    static constexpr std::pair<std::string_view, const wchar_t*> kWords[] = {
+        {"WASAPI shared", L"SignalPath_ModeShared"}, {"WASAPI exclusive", L"SignalPath_ModeExclusive"},
+        {"event", L"SignalPath_ModeEvent"},          {"polling", L"SignalPath_ModePolling"},
+        {"WaveRT event", L"KsMode_RtEvent"},         {"WaveRT polling", L"KsMode_RtPoll"},
+        {"standard streaming", L"KsMode_Standard"},  {"native DSD", L"Dsd_Native"}};
+    std::wstring out;
+    for (const auto part : std::views::split(std::string_view(mode), std::string_view(" · "))) {
+        const std::string_view word(part.begin(), part.end());
+        const auto known = std::ranges::find(kWords, word, &std::pair<std::string_view, const wchar_t*>::first);
+        if (!out.empty()) out += L" · ";
+        out += known == std::end(kWords) ? std::wstring(ui::utf8(std::string(word))) : std::wstring(tr(known->second));
+    }
+    return hstring(out);
 }
 
 } // namespace mainwindow
@@ -265,7 +284,10 @@ void MainWindow::InitializeComponent() {
     get_self<LibraryView>(Library())->setBackChanged([this](bool) { showTitleBack(); });
     Library().RegisterPropertyChangedCallback(UIElement::VisibilityProperty(), [this](auto&&, auto&&) { showTitleBack(); });
     addSettingsLinks();
-    SettingsScroller().SizeChanged([this](auto&&, auto&&) { markSettingsSection(); });
+    SettingsScroller().SizeChanged([this](auto&&, SizeChangedEventArgs const& e) {
+        if (e.PreviousSize().Width != e.NewSize().Width) wrapSettingsLinks();
+        markSettingsSection();
+    });
     waveformBar_ = std::make_unique<ui::WaveformBar>(WaveformLayer(), PositionSlider());
     // Resting the pointer on the position slider shows the time there.
     positionTip_ = ToolTip();
@@ -708,8 +730,8 @@ void MainWindow::showScanProgress() {
     ScanText().Visibility(text.empty() ? Visibility::Collapsed : Visibility::Visible);
 }
 
-void MainWindow::submitCommand(Command command) {
-    if (!server_) return;
+uint64_t MainWindow::submitCommand(Command command) {
+    if (!server_) return 0;
     if (command.kind == CommandKind::QueueReplace || command.kind == CommandKind::OpenAndPlay) {
         const TrackSource* chosen = command.source                           ? &*command.source
                                     : command.index < command.sources.size() ? &command.sources[command.index]
@@ -717,15 +739,16 @@ void MainWindow::submitCommand(Command command) {
         if (repeatedPlay_.repeated(
                 {command.kind, command.index, command.sources.size(), chosen ? chosen->pathUtf8() : std::string{}},
                 std::chrono::steady_clock::now(), std::chrono::milliseconds(GetDoubleClickTime())))
-            return;
+            return 0;
     } else {
         repeatedPlay_.other();
     }
     const bool settings = command.kind == CommandKind::ApplySettings;
-    if (const auto stamp = ui::submitChecked(*server_, std::move(command))) {
-        cursor_.expect(*stamp);
-        if (settings) settingsStamp_ = stamp->id;
-    }
+    const auto stamp = ui::submitChecked(*server_, std::move(command));
+    if (!stamp) return 0;
+    cursor_.expect(*stamp);
+    if (settings) settingsStamp_ = stamp->id;
+    return stamp->id;
 }
 
 bool MainWindow::movesOnlyThePosition(const Snapshot& snapshot) const {
@@ -784,6 +807,11 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         snapshot.settings.airplay.deviceId != settings_.airplay.deviceId) {
         shownDevicesRevision_ = snapshot.devices.revision;
         showOutputsOf(snapshot.settings);
+    }
+    if (refreshStamp_ && (snapshot.command.id >= refreshStamp_ || snapshot.run != refreshRun_)) {
+        refreshStamp_ = 0;
+        RefreshDevicesButton().IsEnabled(true);
+        RefreshDevicesRing().IsActive(false);
     }
     showChanges(snapshot);
     // A setting changed on another computer shows on every page open (docs/Plan.md §17.8), once the Server has taken
@@ -974,12 +1002,13 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                (plan.dsd != DsdPath::None ? L""
                                 : lossy                   ? L" → " + to_hstring(s.source->bitsPerSample) + L"-bit PCM"
                                                           : L" " + to_hstring(s.source->bitsPerSample) + L"-bit");
-        PathRouteText().Text(source + L" → " + ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)));
+        const hstring mode = outputModeText(s.outputMode);
+        PathRouteText().Text(source + L" → " + mode + L" · " + ui::utf8(describe(*s.output)));
         // One row per step that changes or carries the signal, in the Engine's order (docs/Plan.md §8.1).
         std::vector<PathStep> steps;
         PathStage stage = PathStage::Source;
-        const auto add = [&](hstring name, hstring detail, PathState state) {
-            steps.push_back({std::move(name), std::move(detail), state, stage});
+        const auto add = [&](hstring name, hstring detail, PathState state, hstring device = {}) {
+            steps.push_back({std::move(name), std::move(detail), state, stage, std::move(device)});
         };
         wchar_t text[128];
         const uint32_t bits = s.source->bitsPerSample;
@@ -995,7 +1024,8 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
         const PathState sourceState = lossy ? PathState::Lossy : PathState::BitPerfect;
         add(tr(L"SignalPath_File"), text, sourceState);
         // The WAVE decoders read a DTS-CD bitstream that the Rust DTS core then decodes.
-        const hstring reader = s.format == AudioFormat::Dts ? decoder + L" → DTS core" : decoder;
+        const hstring reader =
+            s.format == AudioFormat::Dts ? ui::format(L"SignalPath_DtsCore", {std::wstring(decoder)}) : decoder;
         add(tr(L"SignalPath_Decoder"), lossy ? reader + L" · " + to_hstring(bits) + L"-bit PCM" : reader, sourceState);
         stage = PathStage::Processing;
         if (plan.duplicate) add(tr(L"SignalPath_Duplicate"), L"2 ch", PathState::BitPerfect);
@@ -1071,9 +1101,12 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                                   : plan.state == PipelineState::LosslessConversion ? PathState::Lossless
                                   : plan.state == PipelineState::LossySource        ? PathState::Lossy
                                                                                     : PathState::Processed;
+        // A device's or receiver's own name goes on its own line, so that a long one leaves the steps' names short.
+        size_t group = 0;
         if (s.backend == Backend::AirPlay && !s.receivers.empty()) {
+            group = s.receivers.size();
             for (const auto& receiver : s.receivers) {
-                add(tr(L"SignalPath_Receiver"), ui::utf8(receiver.name) + L" · " + ui::utf8(describe(*s.output)), reached);
+                add(tr(L"SignalPath_Receiver"), ui::utf8(describe(*s.output)), reached, ui::utf8(receiver.name));
                 if (receiver.channels != AirPlayChannels::Stereo)
                     add(tr(L"SignalPath_OneChannel"),
                         tr(receiver.channels == AirPlayChannels::Left ? L"Channels_LeftBoth" : L"Channels_RightBoth"),
@@ -1081,19 +1114,22 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
             }
         } else if (s.backend == Backend::HQPlayer) {
             // What leaves CamelPlayer, then what HQPlayer makes of it (docs/Plan.md §5.11).
-            add(tr(L"SignalPath_ToHQPlayer"), ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
+            add(tr(L"SignalPath_ToHQPlayer"), mode + L" · " + ui::utf8(describe(*s.output)), reached);
             add(tr(L"SignalPath_HQPlayer"),
                 s.outputDetail.empty() ? tr(L"SignalPath_HQPlayerProcessed") : ui::utf8(s.outputDetail), PathState::Processed);
             add(tr(L"SignalPath_HQPlayerGapless"), tr(L"SignalPath_HQPlayerRateChange"), PathState::AtTrackChanges);
         } else {
+            // A group of this computer's outputs: the device the zone plays through is its clock; every other member keeps
+            // to it through drift correction, so none of them is bit-perfect (MZ-R25).
+            const auto clock = std::ranges::find_if(s.members, [](const auto& member) { return member.clock; });
+            group = s.members.size();
             add(tr(s.backend == Backend::Network ? L"SignalPath_Renderer" : L"SignalPath_Device"),
-                ui::utf8(s.outputMode) + L" · " + ui::utf8(describe(*s.output)), reached);
-            // A group of this computer's outputs: the device above is its clock; every other member keeps to it through
-            // drift correction, so none of them is bit-perfect (MZ-R25).
+                mode + L" · " + ui::utf8(describe(*s.output)), reached,
+                clock == s.members.end() ? hstring{} : memberLabel(snapshot, clock->id) + L" · " + tr(L"SignalPath_GroupClock"));
             for (const auto& member : s.members)
                 if (!member.clock)
-                    add(memberLabel(server_->snapshot(), member.id),
-                        member.lost ? ui::errorTitle(*member.lost) : tr(L"SignalPath_DriftCorrection"), PathState::Processed);
+                    add(tr(L"SignalPath_Device"), member.lost ? ui::errorTitle(*member.lost) : tr(L"SignalPath_DriftCorrection"),
+                        PathState::Processed, memberLabel(snapshot, member.id));
         }
         if (s.backend == Backend::Network && !settings_.network.gapless)
             add(tr(L"SignalPath_GaplessOff"), {}, PathState::AtTrackChanges);
@@ -1103,7 +1139,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
                 : s.playerVolumeDb ? decibels(*s.playerVolumeDb)
                                    : to_hstring(*s.playerVolume),
                 reached);
-        showSignalPath(std::move(steps));
+        showSignalPath(std::move(steps), group);
         dspActive = processed;
     } else {
         lampColor_ = L"ControlStrongFillColorDisabledBrush";
@@ -1121,6 +1157,10 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     Automation::AutomationProperties::SetName(LampButton(), LampText().Text());
     dspColor_ = dspActive ? L"AccentTextFillColorPrimaryBrush" : L"TextFillColorPrimaryBrush";
     DspButtonText().Foreground(themeBrush(dspColor_));
+    if (dspActive != dspActive_) {
+        dspActive_ = dspActive;
+        nameDspButton();
+    }
     // Badge tooltips need a pointer; the signal path panel repeats them for keyboard and touch, with why the change into
     // the track did not crossfade.
     std::wstring note = BypassBadge().Visibility() == Visibility::Visible && s.plan ? std::wstring(tr(bypassTip(*s.plan))) : L"";
@@ -1184,7 +1224,7 @@ void MainWindow::applySnapshot(const Snapshot& snapshot) {
     StatusIdleText().Text(tr(L"Status_Idle"));
     if (s.output) {
         StatusOutputText().Text(ui::utf8(describe(*s.output)));
-        StatusModeText().Text(ui::utf8(s.outputMode));
+        StatusModeText().Text(outputModeText(s.outputMode));
         wchar_t ms[32];
         swprintf(ms, 32, L"%.1f", s.output->sampleRate ? 1000.0 * s.bufferFrames / s.output->sampleRate : 0.0);
         StatusBufferText().Text(ui::format(L"Status_BufferValue", {std::to_wstring(s.bufferFrames), ms}));
@@ -1534,17 +1574,20 @@ void MainWindow::showHotkeys() {
         label.VerticalAlignment(VerticalAlignment::Center);
         row.Children().Append(label);
 
+        // Each row's buttons say the action they belong to, which their text leaves out.
+        const auto show = [named = std::wstring(tr(names[i]))](Button const& button, hstring const& text) {
+            button.Content(box_value(text));
+            Automation::AutomationProperties::SetName(button, ui::format(L"Hotkey_Named", {named, std::wstring(text)}));
+        };
         Button combination;
         const auto current = ui::GlobalHotkeys::describe(ui::GlobalHotkeys::of(settings_.hotkeys, action));
-        combination.Content(box_value(capturing_ == action ? tr(L"Hotkey_Press")
-                                      : current.empty()    ? tr(L"Hotkey_None")
-                                                           : hstring(current)));
+        show(combination, capturing_ == action ? tr(L"Hotkey_Press") : current.empty() ? tr(L"Hotkey_None") : hstring(current));
         combination.HorizontalAlignment(HorizontalAlignment::Stretch);
         Grid::SetColumn(combination, 1);
-        combination.Click([this, action](auto&& sender, auto&&) {
+        combination.Click([this, action, show](auto&& sender, auto&&) {
             capturing_ = action;
             hotkeys_->suspend(); // pressing a current combination must reach the box, not play or skip
-            sender.template as<Button>().Content(box_value(tr(L"Hotkey_Press")));
+            show(sender.template as<Button>(), tr(L"Hotkey_Press"));
         });
         combination.PreviewKeyDown([this, action](auto&&, Input::KeyRoutedEventArgs const& e) {
             if (capturing_ != action) return;
@@ -1575,17 +1618,18 @@ void MainWindow::showHotkeys() {
         });
         // Only this box changes back: rebuilding the rows here, while another box is pressed, would take that box away
         // before its click.
-        combination.LostFocus([this, action](auto&& sender, auto&&) {
+        combination.LostFocus([this, action, show](auto&& sender, auto&&) {
             if (capturing_ != action) return;
             capturing_.reset();
             hotkeysTaken_ = hotkeys_->apply(settings_.hotkeys);
             const auto text = ui::GlobalHotkeys::describe(ui::GlobalHotkeys::of(settings_.hotkeys, action));
-            sender.template as<Button>().Content(box_value(text.empty() ? tr(L"Hotkey_None") : hstring(text)));
+            show(sender.template as<Button>(), text.empty() ? tr(L"Hotkey_None") : hstring(text));
         });
         row.Children().Append(combination);
 
         Button clear;
         clear.Content(box_value(tr(L"Hotkey_Clear")));
+        Automation::AutomationProperties::SetName(clear, ui::format(L"Hotkey_ClearNamed", {std::wstring(tr(names[i]))}));
         clear.IsEnabled(!current.empty());
         Grid::SetColumn(clear, 2);
         clear.Click([this, action](auto&&, auto&&) {
@@ -1729,7 +1773,7 @@ void MainWindow::repaintTheme() {
     PathVerdictDot().Fill(themeBrush(lampColor_));
     DspButtonText().Foreground(themeBrush(dspColor_));
     if (playbackFavorite_) PlaybackFavoriteIcon().Foreground(themeBrush(L"AccentTextFillColorPrimaryBrush"));
-    showSignalPath(std::exchange(shownPath_, {}));
+    showSignalPath(std::exchange(shownPath_, {}), shownPathGroup_);
     showHotkeys();
     showRoots(RootList());
     if (eqEditor_) eqEditor_->repaint();
@@ -1765,8 +1809,47 @@ void MainWindow::addSettingsLinks() {
             options.AnimationDesired(true);
             card.StartBringIntoView(options);
         });
-        SettingsLinks().Children().Append(link);
+        // A link has its width only once it is in the window, so the rows are made again when the links get there.
+        link.Loaded([this](auto&&, auto&&) { wrapSettingsLinks(); });
         settingsLinks_.emplace_back(card, link);
+    }
+}
+
+// The links in rows no wider than the cards below them, so that none is cut off with the queue open or in a longer
+// language.
+void MainWindow::wrapSettingsLinks() {
+    const double width = std::min(820.0, SettingsScroller().ActualWidth());
+    if (width <= 0) return;
+    constexpr double kSpacing = 20;
+    std::vector<size_t> rowOf;
+    double used = 0;
+    for (const auto& [card, link] : settingsLinks_) {
+        link.Measure({std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()});
+        const double linkWidth = link.DesiredSize().Width;
+        if (rowOf.empty()) {
+            rowOf.push_back(0);
+            used = linkWidth;
+        } else if (used + kSpacing + linkWidth > width) {
+            rowOf.push_back(rowOf.back() + 1);
+            used = linkWidth;
+        } else {
+            rowOf.push_back(rowOf.back());
+            used += kSpacing + linkWidth;
+        }
+    }
+    if (rowOf == settingsLinkRows_) return;
+    settingsLinkRows_ = rowOf;
+    auto rows = SettingsLinks().Children();
+    for (const auto& row : rows) row.as<StackPanel>().Children().Clear();
+    rows.Clear();
+    for (size_t i = 0; i < settingsLinks_.size(); ++i) {
+        if (rows.Size() <= rowOf[i]) {
+            StackPanel row;
+            row.Orientation(Orientation::Horizontal);
+            row.Spacing(kSpacing);
+            rows.Append(row);
+        }
+        rows.GetAt(static_cast<uint32_t>(rowOf[i])).as<StackPanel>().Children().Append(settingsLinks_[i].second);
     }
 }
 
@@ -2427,11 +2510,28 @@ void MainWindow::fitStatus() {
     const auto sides = [this](double width) {
         for (const auto& button : {LampButton(), DspButton()}) button.Padding(ThicknessHelper::FromLengths(width, 2, width, 2));
     };
-    LampText().Visibility(Visibility::Visible);
+    const auto shown = [this](bool text) {
+        LampText().Visibility(text ? Visibility::Visible : Visibility::Collapsed);
+        // A lamp without its words says them in its tooltip.
+        const hstring tip = tr(L"SignalPath_Lamp/ToolTipService/ToolTip");
+        ToolTipService::SetToolTip(
+            LampButton(),
+            box_value(text || LampText().Text().empty()
+                          ? tip
+                          : ui::format(L"SignalPath_LampTip", {std::wstring(LampText().Text()), std::wstring(tip)})));
+    };
+    shown(true);
     sides(10);
     if (StatusArea().ActualWidth() == 0 || fits()) return;
-    LampText().Visibility(Visibility::Collapsed);
+    shown(false);
     if (!fits()) sides(4);
+}
+
+// The DSP button's name and tooltip say when DSP changes the signal, which the accent colour of its text shows.
+void MainWindow::nameDspButton() {
+    if (dspButtonName_.empty()) dspButtonName_ = Automation::AutomationProperties::GetName(DspButton());
+    const hstring name = dspActive_ ? ui::format(L"Dsp_ButtonActive", {std::wstring(dspButtonName_)}) : dspButtonName_;
+    setBadgeTip(DspButton(), name, name);
 }
 
 void MainWindow::OnTextTrimmedChanged(TextBlock const& text, IsTextTrimmedChangedEventArgs const&) {
