@@ -45,7 +45,11 @@ void usage() {
         "  bench-one <decoder> <file>\n"
         "      decode one file with one decoder and print its time and memory as JSON, as bench-decoders runs it\n"
         "  scan-bench <folder> [--data <dir>]\n"
-        "      build a fresh library of a folder as the player does (scan, fingerprints, covers, search text) and time it\n");
+        "      build a fresh library of a folder as the player does (scan, fingerprints, covers, search text) and time it\n"
+        "  load --host <address> [--port 9440] [--code <code>] [--clients 9] [--seconds 300] [--out <dir>]\n"
+        "       [--toggle <zone> [--every 10]]\n"
+        "      Control points browsing, searching and fetching covers on a Server at once, every call timed; with\n"
+        "      --toggle, the first pauses and plays that zone again and each records when it shows it\n");
 }
 
 } // namespace
@@ -75,6 +79,7 @@ int wmain(int argc, wchar_t** argv) {
         if (cmd == L"bench-one") return camelcli::cmdBenchOne(args);
         if (cmd == L"bench-decoders") return camelcli::cmdBenchDecoders(args);
         if (cmd == L"scan-bench") return camelcli::cmdScanBench(args);
+        if (cmd == L"load") return camelcli::cmdLoad(args);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;

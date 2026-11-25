@@ -27,5 +27,6 @@ int cmdGenLibrary(const Args& args);
 int cmdBenchOne(const Args& args);
 int cmdBenchDecoders(const Args& args);
 int cmdScanBench(const Args& args);
+int cmdLoad(const Args& args);
 
 } // namespace camelcli
