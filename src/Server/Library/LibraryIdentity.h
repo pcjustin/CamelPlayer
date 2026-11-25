@@ -22,8 +22,14 @@ struct FileVersion {
 struct DirectoryEntry {
     std::wstring name;
     uint32_t attributes = 0;
-    FileVersion version; // files only
+    uint32_t reparseTag = 0; // of a reparse point
+    FileVersion version;     // files only
 };
+
+// A reparse point that stands for another path, as a symbolic link, junction or mount point does, which a scan does not
+// follow. Any other is the file or folder itself: a cloud sync client's placeholder, which a share shows as a reparse
+// point, or a deduplicated or compressed file.
+bool isLink(uint32_t attributes, uint32_t reparseTag);
 
 FileVersion fileVersion(const std::filesystem::path& path);
 // Enumerates an open directory handle with its file IDs; a null result requests FindFirstFileExW and per-file queries.

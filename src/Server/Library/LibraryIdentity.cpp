@@ -63,10 +63,18 @@ std::string localVolumeKey(DWORD serial, const std::filesystem::path& path) {
     return key;
 }
 
+// Whether an open file or folder is a link (isLink).
+bool linkOpened(HANDLE handle) {
+    FILE_ATTRIBUTE_TAG_INFO tag{};
+    return GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tag, sizeof(tag)) &&
+           isLink(tag.FileAttributes, tag.ReparseTag);
+}
+
 FileVersion version(HANDLE handle, const std::filesystem::path& path) {
     BY_HANDLE_FILE_INFORMATION info{};
     if (!GetFileInformationByHandle(handle, &info)) throw std::runtime_error("cannot read file identity");
-    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) throw std::runtime_error("reparse point is not a file identity");
+    if ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && linkOpened(handle))
+        throw std::runtime_error("a link is not a file identity");
     const uint64_t index = (uint64_t(info.nFileIndexHigh) << 32) | info.nFileIndexLow;
     FileVersion out{int64_t((uint64_t(info.nFileSizeHigh) << 32) | info.nFileSizeLow),
                     int64_t((uint64_t(info.ftLastWriteTime.dwHighDateTime) << 32) | info.ftLastWriteTime.dwLowDateTime),
@@ -94,7 +102,7 @@ bool sourceGone(const std::string& source, const std::string& destination, const
     if (!length || length >= std::size(resolved) || _wcsicmp(rootPath.c_str(), resolved) != 0) return false;
     BY_HANDLE_FILE_INFORMATION rootInfo{};
     if (!GetFileInformationByHandle(rootHandle.get(), &rootInfo) || !(rootInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
-        (rootInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+        ((rootInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && linkOpened(rootHandle.get())))
         return false;
     if (source == destination) return true;
     const auto sourcePath = std::filesystem::path(toWide(source));
@@ -182,6 +190,10 @@ bool FileVersion::sameFile(const FileVersion& other) const {
     return volume == other.volume && index == other.index && created == other.created && volumeKey == other.volumeKey;
 }
 
+bool isLink(uint32_t attributes, uint32_t reparseTag) {
+    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) && IsReparseTagNameSurrogate(reparseTag);
+}
+
 FileVersion fileVersion(const std::filesystem::path& path) {
     auto handle = open(path);
     if (!handle) throw std::runtime_error("cannot read file identity: " + toUtf8(path.wstring()));
@@ -190,7 +202,8 @@ FileVersion fileVersion(const std::filesystem::path& path) {
 
 std::optional<std::vector<DirectoryEntry>> directoryEntries(void* handle, const CancellationToken& token) {
     BY_HANDLE_FILE_INFORMATION directory{};
-    if (!GetFileInformationByHandle(handle, &directory) || (directory.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    if (!GetFileInformationByHandle(handle, &directory) ||
+        ((directory.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && linkOpened(handle)))
         return std::nullopt;
     alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, size_t{64} * 1024> buffer;
     std::vector<DirectoryEntry> result;
@@ -210,7 +223,9 @@ std::optional<std::vector<DirectoryEntry>> directoryEntries(void* handle, const 
             if (entry->FileNameLength % sizeof(wchar_t) || entry->FileNameLength > buffer.size() - offset - header)
                 return std::nullopt;
             DirectoryEntry item{std::wstring(entry->FileName, entry->FileNameLength / sizeof(wchar_t)), entry->FileAttributes};
-            if (!(entry->FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+            // A reparse point's tag is where its extended attributes' size would be.
+            if (entry->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) item.reparseTag = entry->EaSize;
+            if (!(entry->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !isLink(item.attributes, item.reparseTag)) {
                 item.version = {entry->EndOfFile.QuadPart,
                                 entry->LastWriteTime.QuadPart,
                                 directory.dwVolumeSerialNumber,

@@ -10,6 +10,9 @@
 #include <thread>
 #include <wil/resource.h>
 #include <aclapi.h>
+#include <cfapi.h>
+
+#pragma comment(lib, "cldapi.lib")
 
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
@@ -1163,6 +1166,51 @@ TEST_F(LibraryScannerTest, ReparseDirectoriesDoNotEscapeOrLoop) {
     fs::rename(dir / "music", dir / "original");
     ASSERT_TRUE(junction(dir / "music", dir / "outside"));
     EXPECT_FALSE(scanner.scan(root).complete);
+    EXPECT_EQ(count(store), 1);
+    EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
+}
+
+// A cloud sync client's placeholder (OneDrive, Synology Drive) is a reparse point that is the file or folder itself, not
+// a link to another path. Windows hides it from programs on the computer that holds it, but a share shows it as one: a
+// reporter's library folder on a share lost its 43 placeholders, passed over as links.
+TEST_F(LibraryScannerTest, CloudPlaceholdersOnAShareAreScannedAsTheFilesAndFoldersTheyAre) {
+    const auto cloud = dir / "cloud";
+    const fs::path share = L"\\\\localhost\\C$" + cloud.wstring().substr(2);
+    if (cloud.wstring().substr(1, 2) != L":\\" || !fs::exists(share.parent_path()))
+        GTEST_SKIP() << "the test folder is not reachable through this computer's C$ share";
+    fs::create_directories(cloud / "music" / "album");
+    fs::copy_file(testutil::testFile("16-44.1k"), cloud / "music" / "album" / "placeholder.flac");
+    CF_SYNC_REGISTRATION registration{sizeof(registration)};
+    registration.ProviderName = L"CamelPlayer tests";
+    registration.ProviderVersion = L"1";
+    registration.ProviderId = {0x6b1e3c52, 0x0d4f, 0x4a8e, {0x9c, 0x31, 0x5e, 0x27, 0x8a, 0x40, 0x11, 0xd3}};
+    CF_SYNC_POLICIES policies{sizeof(policies)};
+    policies.Hydration.Primary = CF_HYDRATION_POLICY_FULL;
+    policies.Population.Primary = CF_POPULATION_POLICY_ALWAYS_FULL;
+    ASSERT_EQ(CfRegisterSyncRoot(cloud.c_str(), &registration, &policies, CF_REGISTER_FLAG_NONE), S_OK);
+    auto unregister = wil::scope_exit([&] { CfUnregisterSyncRoot(cloud.c_str()); });
+    for (const auto& path : {cloud / "music", cloud / "music" / "album", cloud / "music" / "album" / "placeholder.flac"}) {
+        wil::unique_handle handle(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                              FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+        ASSERT_TRUE(handle) << path.string();
+        const std::string identity = path.filename().string();
+        ASSERT_EQ(CfConvertToPlaceholder(handle.get(), identity.data(), DWORD(identity.size()), CF_CONVERT_FLAG_MARK_IN_SYNC,
+                                         nullptr, nullptr),
+                  S_OK)
+            << path.string();
+    }
+    WIN32_FIND_DATAW found{};
+    wil::unique_hfind find(FindFirstFileExW((share / "music" / "album" / "placeholder.flac").c_str(), FindExInfoBasic, &found,
+                                            FindExSearchNameMatch, nullptr, 0));
+    ASSERT_TRUE(find);
+    ASSERT_TRUE(found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) << "the share shows the placeholder as one";
+    EXPECT_EQ(found.dwReserved0 & 0xFFFF0FFF, 0x9000001AU) << "IO_REPARSE_TAG_CLOUD_n, as the reporter's 0x9000201A";
+
+    LibraryStore store(dir / "db");
+    LibraryScanner scanner(store);
+    const auto report = scanner.scan(scanner.addRoot(share / "music"));
+    EXPECT_TRUE(report.complete) << (report.diagnostics.empty() ? "" : report.diagnostics.front());
+    EXPECT_EQ(report.linksPassedOver, 0u);
     EXPECT_EQ(count(store), 1);
     EXPECT_EQ(count(store, "SELECT COUNT(*) FROM tracks"), 1);
 }

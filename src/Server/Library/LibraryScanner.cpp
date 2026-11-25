@@ -472,7 +472,7 @@ struct Listing {
     Path path;
     std::vector<Path> children;
     std::vector<Entry> files;
-    size_t links = 0; // reparse points passed over
+    size_t links = 0; // links passed over
     bool complete = true;
     bool refused = false; // this user may not list it: what it held stays as it was
     bool deferred = false;
@@ -795,7 +795,7 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
                     break;
                 }
                 if (item.name == L"." || item.name == L"..") continue;
-                if (item.attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                if (library::isLink(item.attributes, item.reparseTag)) {
                     ++out.links;
                     continue;
                 }
@@ -855,8 +855,8 @@ Listing list(const Path& path, const CancellationToken& token, bool network, std
                 break;
             }
             if (wcscmp(data.cFileName, L".") == 0 || wcscmp(data.cFileName, L"..") == 0) continue;
-            // Never traverse reparse points: this also prevents cycles and escapes from a registered root.
-            if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            // Never traverse links: this also prevents cycles and escapes from a registered root.
+            if (library::isLink(data.dwFileAttributes, data.dwReserved0)) {
                 ++out.links;
                 continue;
             }
