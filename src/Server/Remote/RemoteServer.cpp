@@ -108,8 +108,23 @@ struct RemoteServer::Impl {
     uint64_t followSerial = 0;         // follow calls sent, for the Server to keep the last
     bool told = false;                 // this connection's Server knows the zone followed
     uint64_t transfers = UINT64_MAX;   // the last Transfer to… taken into account; none before the first snapshot
+    // Covers fetched before, by what was asked, with the library's revision then: one asked for again while the library is
+    // as it was is read from the disk cache with no request (docs/Plan.md §17.8). Albums' and folders' only, which change
+    // with the library; an artist's picture or a playing file's can change without it.
+    struct KeptCover {
+        std::string key;
+        uint64_t library = 0;
+    };
+    std::mutex coversMutex;
+    std::map<std::string, KeptCover> covers;
+    std::atomic<uint64_t> library = 0; // the library's revision, as the last page showed it
     // A Control point's own Discord, from the zone it follows; last, so it goes first, its cover loads with it.
     std::unique_ptr<DiscordPresence> discord;
+
+    template <class Page> Page sawLibrary(Page page) {
+        library = page.revision;
+        return page;
+    }
 
     // The Control point's Discord shows on its own computer: the zone it follows, its own settings and its own cover
     // tunnel, the covers coming from the Server (docs/Plan.md §17.8).
@@ -728,18 +743,19 @@ void RemoteServer::waitIdle() {
 
 LibraryTrackPage RemoteServer::browseTracks(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                             const CancellationToken& token) const {
-    return as<LibraryTrackPage>(impl_->call("browseTracks", args(offset, limit, revision), token));
+    return impl_->sawLibrary(as<LibraryTrackPage>(impl_->call("browseTracks", args(offset, limit, revision), token)));
 }
 
 LibraryTrackPage RemoteServer::searchTracks(std::string query, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                             const CancellationToken& token) const {
-    return as<LibraryTrackPage>(impl_->call("searchTracks", args(query, offset, limit, revision), token));
+    return impl_->sawLibrary(as<LibraryTrackPage>(impl_->call("searchTracks", args(query, offset, limit, revision), token)));
 }
 
 LibrarySearchResults RemoteServer::searchLibrary(std::string query, int64_t offset, int64_t limit,
                                                  std::optional<uint64_t> revision, const CancellationToken& token,
                                                  bool totals) const {
-    return as<LibrarySearchResults>(impl_->call("searchLibrary", args(query, offset, limit, revision, totals), token));
+    return impl_->sawLibrary(
+        as<LibrarySearchResults>(impl_->call("searchLibrary", args(query, offset, limit, revision, totals), token)));
 }
 
 PlayStatistics RemoteServer::playStatistics(const PlayStatisticsQuery& query, const CancellationToken& token) const {
@@ -769,12 +785,14 @@ LibraryAlbumPage RemoteServer::recentlyPlayedAlbums(int64_t offset, int64_t limi
 LibraryAlbumPage RemoteServer::browseAlbums(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter, int64_t offset,
                                             int64_t limit, std::optional<uint64_t> revision,
                                             const CancellationToken& token) const {
-    return as<LibraryAlbumPage>(impl_->call("browseAlbums", args(sort, filter, offset, limit, revision), token));
+    return impl_->sawLibrary(
+        as<LibraryAlbumPage>(impl_->call("browseAlbums", args(sort, filter, offset, limit, revision), token)));
 }
 
 LibraryGroupPage RemoteServer::browseGroups(LibraryGroupField field, bool favoritesOnly, int64_t offset, int64_t limit,
                                             std::optional<uint64_t> revision, const CancellationToken& token) const {
-    return as<LibraryGroupPage>(impl_->call("browseGroups", args(field, favoritesOnly, offset, limit, revision), token));
+    return impl_->sawLibrary(
+        as<LibraryGroupPage>(impl_->call("browseGroups", args(field, favoritesOnly, offset, limit, revision), token)));
 }
 
 std::vector<LibraryInitial> RemoteServer::groupInitials(LibraryGroupField field, const CancellationToken& token) const {
@@ -793,8 +811,8 @@ std::vector<std::vector<LibraryNamePart>> RemoteServer::creditParts(const std::v
 LibraryTrackRowPage RemoteServer::browseTrackRows(TrackSort sort, bool descending,
                                                   const std::optional<LibraryGroupFilter>& filter, int64_t offset, int64_t limit,
                                                   std::optional<uint64_t> revision, const CancellationToken& token) const {
-    return as<LibraryTrackRowPage>(
-        impl_->call("browseTrackRows", args(sort, descending, filter, offset, limit, revision), token));
+    return impl_->sawLibrary(
+        as<LibraryTrackRowPage>(impl_->call("browseTrackRows", args(sort, descending, filter, offset, limit, revision), token)));
 }
 
 std::optional<int64_t> RemoteServer::albumPosition(AlbumSort sort, const std::optional<LibraryGroupFilter>& filter,
@@ -814,29 +832,46 @@ LibraryArtistPage RemoteServer::artistPage(const LibraryGroupFilter& artist, con
 
 LibraryTrackRowPage RemoteServer::smartTracks(SmartList list, int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                               const CancellationToken& token) const {
-    return as<LibraryTrackRowPage>(impl_->call("smartTracks", args(list, offset, limit, revision), token));
+    return impl_->sawLibrary(as<LibraryTrackRowPage>(impl_->call("smartTracks", args(list, offset, limit, revision), token)));
 }
 
 LibraryAlbumPage RemoteServer::favoriteAlbums(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                               const CancellationToken& token) const {
-    return as<LibraryAlbumPage>(impl_->call("favoriteAlbums", args(offset, limit, revision), token));
+    return impl_->sawLibrary(as<LibraryAlbumPage>(impl_->call("favoriteAlbums", args(offset, limit, revision), token)));
 }
 
 LibraryGroupPage RemoteServer::favoriteArtists(int64_t offset, int64_t limit, std::optional<uint64_t> revision,
                                                const CancellationToken& token) const {
-    return as<LibraryGroupPage>(impl_->call("favoriteArtists", args(offset, limit, revision), token));
+    return impl_->sawLibrary(as<LibraryGroupPage>(impl_->call("favoriteArtists", args(offset, limit, revision), token)));
 }
 
 // The cover comes over HTTP and is kept by its key in the cache folder, where the window reads it as its own.
 std::optional<ArtworkReference> RemoteServer::artwork(const ArtworkRequest& request, const CancellationToken& token) const {
     if (token.cancelled()) return std::nullopt;
-    const auto reply =
-        impl_->http("GET", "/artwork?kind=" + json(request.kind).get<std::string>() + "&id=" + std::to_string(request.id) +
-                               "&path=" + websocket::percentEncode(request.path) +
-                               "&name=" + websocket::percentEncode(request.name) + "&pixels=" + std::to_string(request.pixels));
+    const auto target = "/artwork?kind=" + json(request.kind).get<std::string>() + "&id=" + std::to_string(request.id) +
+                        "&path=" + websocket::percentEncode(request.path) + "&name=" + websocket::percentEncode(request.name) +
+                        "&pixels=" + std::to_string(request.pixels);
+    const bool keep = request.kind == ArtworkKind::Album || request.kind == ArtworkKind::Folder;
+    const uint64_t library = impl_->library;
+    if (keep) {
+        std::string kept;
+        {
+            std::scoped_lock lock(impl_->coversMutex);
+            if (const auto found = impl_->covers.find(target); found != impl_->covers.end() && found->second.library == library)
+                kept = found->second.key;
+        }
+        std::error_code ec;
+        if (const auto file = impl_->cacheFolder() / (toWide(kept) + L".jpg"); !kept.empty() && std::filesystem::exists(file, ec))
+            return ArtworkReference{kept, file};
+    }
+    const auto reply = impl_->http("GET", target);
     if (reply.status != 200) return std::nullopt;
     const auto key = reply.head.header("x-artwork-key");
     if (key.empty() || key.find_first_of("/\\:.") != std::string::npos) return std::nullopt;
+    if (keep) {
+        std::scoped_lock lock(impl_->coversMutex);
+        impl_->covers[target] = {key, library};
+    }
     const auto folder = impl_->cacheFolder();
     std::filesystem::create_directories(folder);
     const auto file = folder / (toWide(key) + L".jpg");

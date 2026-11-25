@@ -14,11 +14,13 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "Server/Api/ApiCalls.h"
 #include "Server/Api/ApiJson.h"
 #include "Server/Api/ApiTypesJson.h"
+#include "Server/Artwork/ArtworkCache.h"
 #include "Server/Library/LibraryScanner.h"
 #include "Server/Network/SocketWait.h"
 #include "Server/Remote/ApiServer.h"
@@ -249,6 +251,55 @@ TEST_F(RemoteServerTest, AQueueArrivesWholeOnceAndThenAsWhatChanged) {
     EXPECT_EQ(shorter, expected);
     auto broken = json{{"zones", json::array({{{"id", "x"}, {"queue", {{"keep", {1, 1}}, {"entries", json::array()}}}}})}};
     EXPECT_THROW(api::QueueDecoder().decode(broken), std::invalid_argument);
+}
+
+namespace {
+
+// A picture for the folder of the fixture's albums, its colour telling one from another, and the library scanned again
+// until the Control point sees the change; the album's ID.
+int64_t coverFolder(RemoteServer& remote, LocalServer& local, const std::filesystem::path& music, uint8_t colour) {
+    std::vector<uint8_t> image = {'B', 'M', 70, 0, 0, 0, 0, 0,  0, 0, 54, 0, 0, 0, 40, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 1,
+                                  0,   24,  0,  0, 0, 0, 0, 16, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    image.resize(70, colour);
+    const auto jpeg = squarePicture(image, 32 + colour % 16);
+    const auto before = remote.browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt).revision;
+    std::ofstream(music / "cover.jpg", std::ios::binary)
+        .write(reinterpret_cast<const char*>(jpeg.data()), std::streamsize(jpeg.size()));
+    local.scanLibraryNow(std::nullopt);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto page = remote.browseAlbums(AlbumSort::Title, std::nullopt, 0, 10, std::nullopt);
+        if (page.revision != before && local.libraryScanProgress().scans == 0) return page.albums.at(0).id;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    ADD_FAILURE() << "the library never changed";
+    return 0;
+}
+
+} // namespace
+
+// A cover shown again is read from the Control point's disk cache with no request, here with the Server's API gone
+// (docs/Plan.md §17.8, TC-R06).
+TEST_F(RemoteServerTest, ACoverShownAgainIsReadFromTheDiskCacheWithNoRequest) {
+    const auto album = coverFolder(*remote, *local, dir / "music", 0x40);
+    const auto first = remote->artwork({ArtworkKind::Album, album});
+    ASSERT_TRUE(first);
+    api.reset();
+    std::optional<ArtworkReference> again;
+    EXPECT_NO_THROW(again = remote->artwork({ArtworkKind::Album, album}));
+    ASSERT_TRUE(again);
+    EXPECT_EQ(again->path, first->path);
+}
+
+// What the Control point remembers holds while the library stays as it was: a cover changed is asked for again.
+TEST_F(RemoteServerTest, ACoverChangedInTheLibraryIsAskedForAgain) {
+    const auto album = coverFolder(*remote, *local, dir / "music", 0x40);
+    const auto first = remote->artwork({ArtworkKind::Album, album});
+    ASSERT_TRUE(first);
+    coverFolder(*remote, *local, dir / "music", 0xC3);
+    const auto changed = remote->artwork({ArtworkKind::Album, album});
+    ASSERT_TRUE(changed);
+    EXPECT_NE(changed->key, first->key);
 }
 
 TEST_F(RemoteServerTest, FilesGoOverHttp) {
