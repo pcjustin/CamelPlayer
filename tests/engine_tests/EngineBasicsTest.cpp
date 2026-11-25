@@ -8,6 +8,7 @@
 
 #include <fstream>
 #include <random>
+#include <sstream>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -330,6 +331,30 @@ TEST(Settings, OpeningKeepsALastGoodCopyThatReplacesACorruptFile) {
     EXPECT_EQ(openSettings(p, recovery).backend, Backend::Wasapi) << "a missing file is not a damaged one";
     EXPECT_EQ(recovery, SettingsRecovery::None);
     for (const auto& f : {p, lastGood, bad}) std::filesystem::remove(f);
+}
+
+// An older version refuses settings a newer one wrote, so the file as the older version left it is kept for going back.
+TEST(Settings, AnUpgradeKeepsTheOlderFile) {
+    const auto p = testutil::tempDir() / L"settings-upgrade.json";
+    const auto copy = std::filesystem::path(p).concat(L".v4.bak");
+    const auto lastGood = std::filesystem::path(p).concat(L".last-good");
+    for (const auto& f : {p, copy, lastGood}) std::filesystem::remove(f);
+    const std::string older = R"({"schema":4,"backend":"asio"})";
+    std::ofstream(p, std::ios::binary | std::ios::trunc) << older;
+    EXPECT_EQ(readSettingsForTool(p).backend, Backend::Asio);
+    EXPECT_FALSE(std::filesystem::exists(copy)) << "a tool changes nothing";
+    auto recovery = SettingsRecovery::Reset;
+    EXPECT_EQ(openSettings(p, recovery).backend, Backend::Asio);
+    ASSERT_TRUE(std::filesystem::exists(copy));
+    std::stringstream kept;
+    kept << std::ifstream(copy, std::ios::binary).rdbuf();
+    EXPECT_EQ(kept.str(), older);
+    EXPECT_EQ(nlohmann::json::parse(std::ifstream(p))["schema"], Settings::kSchemaVersion);
+
+    std::filesystem::remove(copy);
+    EXPECT_EQ(openSettings(p, recovery).backend, Backend::Asio);
+    EXPECT_FALSE(std::filesystem::exists(copy)) << "a current file is not copied";
+    for (const auto& f : {p, copy, lastGood}) std::filesystem::remove(f);
 }
 
 TEST(Settings, ANewerSchemaIsNeitherReadNorMovedAside) {

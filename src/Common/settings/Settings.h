@@ -590,7 +590,8 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-// Missing or corrupt file -> defaults (the corrupt file is kept as settings.json.bad). Throws NewerSettingsError,
+// Missing or corrupt file -> defaults (the corrupt file is kept as settings.json.bad). A file of an older schema is
+// rewritten in the current one after a copy as settings.json.v<schema>.bak. Throws NewerSettingsError,
 // and SettingsUnavailableError once a file that cannot be opened or read has been tried again for a moment.
 Settings loadSettings(const std::filesystem::path& path = settingsPath());
 // The settings as a tool such as camelcli reads them, beside a player that may be running: never written, migrated or

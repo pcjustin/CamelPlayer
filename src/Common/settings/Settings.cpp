@@ -1160,6 +1160,11 @@ std::optional<Settings> readSettings(const std::filesystem::path& path, bool mig
     }
     const int schema = parsed.value("schema", 0);
     if (migrate && schema < Settings::kSchemaVersion) {
+        // The version that wrote it may refuse the migrated file; going back to it would use this copy.
+        const auto older = std::filesystem::path(path).concat(L".v" + std::to_wstring(schema) + L".bak");
+        if (std::error_code error;
+            !std::filesystem::copy_file(path, older, std::filesystem::copy_options::overwrite_existing, error))
+            log::warn("settings: could not keep a copy of schema %d (%s)", schema, error.message().c_str());
         try {
             saveSettings(settings, path);
         } catch (const std::exception& e) {
