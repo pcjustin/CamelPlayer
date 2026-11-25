@@ -72,6 +72,8 @@ int cmdScanBench(const Args& args) {
         std::printf("%-12s %7.2f s  %s\n", what, seconds(at), result.c_str());
         std::fflush(stdout);
     };
+    // A folder just added is scanned as one the user asked for, at High, and the work following it until it catches up.
+    store.userScanStarted();
     step("scan", [&] {
         const auto report = scanner.scan(root);
         auto db = store.openReader();
@@ -81,6 +83,7 @@ int cmdScanBench(const Args& args) {
                std::to_string(db.scalar("SELECT COUNT(*) FROM albums").value_or(0)) + " albums, " +
                std::to_string(db.scalar("SELECT COUNT(*) FROM albums WHERE cover_id IS NOT NULL").value_or(0)) + " with covers";
     });
+    store.userScanEnded();
     step("fingerprint", [&] {
         const auto report = scanner.fingerprint(root);
         return "complete=" + std::to_string(report.complete) + ", " + std::to_string(report.hashed) + " files";
