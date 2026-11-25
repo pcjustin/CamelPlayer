@@ -538,8 +538,9 @@ winrt::fire_and_forget MainWindow::refreshComputers() {
         text.VerticalAlignment(VerticalAlignment::Center);
         text.TextWrapping(TextWrapping::Wrap);
         text.Text(!connected ? ui::format(L"Paired_Since", {name, dateOf(device.value("paired", int64_t{0}))})
-                  : followed != snapshot.zones.end() ? ui::format(L"Paired_ConnectedZone", {name, toWide(followed->name)})
-                                                     : ui::format(L"Paired_Connected", {name}));
+                  : followed != snapshot.zones.end()
+                      ? ui::format(L"Paired_ConnectedZone", {name, std::wstring(zoneLabel(snapshot, *followed))})
+                      : ui::format(L"Paired_Connected", {name}));
         row.Children().Append(text);
         Button revoke;
         revoke.Content(box_value(tr(L"Paired_Revoke")));
