@@ -4,6 +4,7 @@
 
 #include "Server/Library/LibrarySchema.h"
 
+#include <format>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -526,6 +527,33 @@ INSERT INTO track_tags(track_id,field,position,value,sort_source)
         // One or two characters, which the full-text index cannot look up, are looked for in the names alone: reading
         // every track's row took 200 ms of a search over 93,149 tracks, these columns a third of it.
         [](sqlite::Database& db) { db.exec("CREATE INDEX tracks_search_text ON tracks(title_norm,artist_norm,album_norm);"); },
+        // One or two Han, kana or Hangul characters still read every track's names in that index, 63 to 92 ms over
+        // 93,149 tracks: each track's characters and character pairs in those scripts are kept to be looked up instead.
+        [](sqlite::Database& db) {
+            const auto grams = [](const char* row) {
+                return std::format("json_each(cjk_grams(coalesce({0}.title_norm,''),coalesce({0}.artist_norm,''),"
+                                   "coalesce({0}.album_norm,'')))",
+                                   row);
+            };
+            db.exec("CREATE TABLE track_pairs(gram TEXT NOT NULL, track_id INTEGER NOT NULL, PRIMARY KEY(gram,track_id)) "
+                    "WITHOUT ROWID;"
+                    "INSERT OR IGNORE INTO track_pairs SELECT g.value,t.id FROM tracks t," +
+                    grams("t") +
+                    " g;"
+                    "CREATE TRIGGER track_pairs_insert AFTER INSERT ON tracks BEGIN "
+                    "INSERT OR IGNORE INTO track_pairs SELECT value,new.id FROM " +
+                    grams("new") +
+                    "; END;"
+                    "CREATE TRIGGER track_pairs_update AFTER UPDATE OF title_norm,artist_norm,album_norm ON tracks "
+                    "WHEN old.title_norm IS NOT new.title_norm OR old.artist_norm IS NOT new.artist_norm "
+                    "OR old.album_norm IS NOT new.album_norm BEGIN "
+                    "DELETE FROM track_pairs WHERE track_id=old.id AND gram IN (SELECT value FROM " +
+                    grams("old") + "); INSERT OR IGNORE INTO track_pairs SELECT value,new.id FROM " + grams("new") +
+                    "; END;"
+                    "CREATE TRIGGER track_pairs_delete AFTER DELETE ON tracks BEGIN "
+                    "DELETE FROM track_pairs WHERE track_id=old.id AND gram IN (SELECT value FROM " +
+                    grams("old") + "); END;");
+        },
     };
     return migrations;
 }

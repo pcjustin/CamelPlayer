@@ -82,9 +82,10 @@ TEST(LibraryStore, CreatesCurrentSchemaWithWalAndForeignKeys) {
     EXPECT_EQ(
         tables(db),
         (std::set<std::string>{
-            "albums",  "app_state",         "artist_pictures", "change_log",     "covers",    "favorite_names", "files",
-            "folders", "library_revision",  "play_events",     "playlist_items", "playlists", "queue",          "roots",
-            "stats",   "track_artists_fts", "track_tags",      "track_values",   "tracks",    "tracks_fts",     "waveforms"}));
+            "albums",   "app_state",         "artist_pictures", "change_log",     "covers",       "favorite_names", "files",
+            "folders",  "library_revision",  "play_events",     "playlist_items", "playlists",    "queue",          "roots",
+            "stats",    "track_artists_fts", "track_pairs",     "track_tags",     "track_values", "tracks",         "tracks_fts",
+            "waveforms"}));
     auto mode = db.prepare("PRAGMA journal_mode");
     ASSERT_TRUE(mode.step());
     EXPECT_EQ(mode.text(0), "wal");

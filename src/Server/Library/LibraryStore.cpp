@@ -15,9 +15,12 @@
 #include <fstream>
 #include <utility>
 
+#include <nlohmann/json.hpp>
+
 #include "Common/util/Log.h"
 #include "Common/util/Text.h"
 #include "Server/Library/LibraryIdentity.h"
+#include "Server/Library/LibraryText.h"
 
 #pragma comment(lib, "shlwapi.lib")
 
@@ -101,11 +104,27 @@ std::vector<std::filesystem::path> dailyBackups(const std::filesystem::path& db)
     return out;
 }
 
+// cjk_grams(names...): the Han, kana and Hangul characters and character pairs of a track's names, as a JSON array, which
+// track_pairs' triggers keep for each track.
+void cjkGramsOf(sqlite3_context* context, int count, sqlite3_value** values) {
+    std::vector<std::string> grams;
+    for (int i = 0; i < count; ++i)
+        if (const auto* text = sqlite3_value_text(values[i]))
+            for (auto& gram : cjkGrams(reinterpret_cast<const char*>(text))) grams.push_back(std::move(gram));
+    std::ranges::sort(grams);
+    grams.erase(std::ranges::unique(grams).begin(), grams.end());
+    const auto json = nlohmann::json(grams).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    sqlite3_result_text64(context, json.data(), json.size(), SQLITE_TRANSIENT, SQLITE_UTF8);
+}
+
 void configure(sqlite::Database& db) {
     // Scan batches touch FTS and index pages across the whole database; the default 2 MiB cache rereads them per row.
     // The WAL never shrinks by itself, and reading a large one is what makes opening the library slow.
     db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA cache_size = -65536; "
             "PRAGMA journal_size_limit = 67108864;");
+    if (sqlite3_create_function_v2(db.handle(), "cjk_grams", -1, SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS, nullptr,
+                                   cjkGramsOf, nullptr, nullptr, nullptr) != SQLITE_OK)
+        throw sqlite::Error(sqlite3_errcode(db.handle()), "library.db: cannot add cjk_grams");
 }
 
 } // namespace

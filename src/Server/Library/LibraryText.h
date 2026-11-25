@@ -21,6 +21,11 @@ class LibraryStore;
 // is dropped first.
 std::wstring normalizeKc(std::wstring_view text);
 std::string normalizeLibrarySearch(std::string_view text);
+// Whether `text` holds a Han, kana or Hangul character. Words in those scripts are often one or two characters, which the
+// trigram index cannot look up, so the library keeps each track's characters and character pairs holding one.
+bool hasCjkCharacter(std::string_view text);
+// The distinct characters and pairs of neighbouring characters in `text` that hold a Han, kana or Hangul character.
+std::vector<std::string> cjkGrams(std::string_view text);
 // What a name sorts by: its sort tag, unless the tag is empty, only question marks or holds two in a row, which is text
 // a wrong encoding lost.
 std::string librarySortSource(const std::string& tag, const std::string& name);

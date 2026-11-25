@@ -265,6 +265,58 @@ TEST(LibraryBrowse, WarmFirstPageMeetsOneHundredMillisecondTargetAtOneHundredTho
     EXPECT_EQ(db.scalar("SELECT COUNT(*) FROM tracks"), 100000);
 }
 
+// One or two Han, kana or Hangul characters, which the trigram index cannot look up, are found in the index of each
+// track's characters and character pairs rather than by reading every track's names.
+TEST(LibraryBrowse, OneOrTwoHanCharactersAreLookedUpAtOneHundredThousandTracks) {
+    const auto directory = testutil::tempDir() / "library-browse-han";
+    std::filesystem::remove_all(directory);
+    LibraryStore store(directory);
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("INSERT INTO roots(id,path,added) VALUES(1,'C:/corpus',0);"
+                    "INSERT INTO folders(id,root_id,path) VALUES(1,1,'C:/corpus');"
+                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) "
+                    "INSERT INTO files(id,folder_id,root_id,path,kind,size,mtime) "
+                    "SELECT x,1,1,'C:/corpus/'||x||'.flac','audio',100,1 FROM n;"
+                    "INSERT INTO tracks(id,file_id,title,title_norm,album,album_norm,artist,artist_norm,title_sort) "
+                    "SELECT id,id,t,t,'測試專輯','测试专辑',a,an,printf('%06d',id) FROM (SELECT id,"
+                    "printf('第%d首 ',id)||char(0x4e00+id%997)||char(0x4e00+id%991)||"
+                    "CASE WHEN id%1000=0 THEN ' 夜曲' ELSE '' END t,"
+                    "CASE WHEN id%2500=0 THEN 'ギター' ELSE '樂團' END a,"
+                    "CASE WHEN id%2500=0 THEN 'ぎたー' ELSE '乐团' END an FROM files);");
+        })
+        .get();
+    // Tracks updated and deleted after they were indexed are found by their new names alone.
+    store
+        .write([](sqlite::Database& db) {
+            db.exec("UPDATE tracks SET title_norm='第1首 夜曲',title='第1首 夜曲' WHERE id=1;"
+                    "UPDATE tracks SET title_norm='第1000首',title='第1000首' WHERE id=1000;"
+                    "DELETE FROM tracks WHERE id=2000;");
+        })
+        .get();
+    const auto night = searchLibrary(store, "夜曲", 0, 200);
+    EXPECT_EQ(night.tracks.total, 99);
+    EXPECT_EQ(night.tracks.tracks.front().id, 1);
+    EXPECT_EQ(searchLibrary(store, "ギ", 0, 50).artists, (std::vector<std::string>{"ギター"}));
+    const auto p95 = [&](const std::string& query) {
+        for (int i = 0; i < 5; ++i) searchLibrary(store, query, 0, 50, std::nullopt, {}, false);
+        std::vector<double> timings;
+        for (int i = 0; i < 30; ++i) {
+            const auto start = Clock::now();
+            searchLibrary(store, query, 0, 50, std::nullopt, {}, false);
+            timings.push_back(std::chrono::duration<double, std::milli>(Clock::now() - start).count());
+        }
+        std::sort(timings.begin(), timings.end());
+        return timings[timings.size() * 95 / 100];
+    };
+    const double fewP95 = p95("夜曲"), oneP95 = p95("夜"), manyP95 = p95("樂團");
+    RecordProperty("two_han_few_p95_ms", fewP95);
+    RecordProperty("one_han_p95_ms", oneP95);
+    RecordProperty("two_han_every_track_p95_ms", manyP95);
+    EXPECT_LT(fewP95, 25.0);
+    EXPECT_LT(oneP95, 25.0);
+}
+
 // Opt-in: CAMEL_SEARCH_INDEX names a folder holding an existing library.db (docs/Plan.md §12.1 UI measurements).
 TEST(LibraryBrowse, DISABLED_SearchTimingsOnAnExistingLibrary) {
     wchar_t folder[MAX_PATH]{};

@@ -96,6 +96,51 @@ std::string normalizeLibrarySearch(std::string_view text) {
     return converter.Convert(utf8);
 }
 
+namespace {
+
+bool cjk(char32_t code) {
+    return (code >= 0x3040 && code <= 0x30ff) || (code >= 0x3400 && code <= 0x4dbf) || (code >= 0x4e00 && code <= 0x9fff) ||
+           (code >= 0xac00 && code <= 0xd7af) || (code >= 0xf900 && code <= 0xfaff) || (code >= 0x20000 && code <= 0x3134f);
+}
+
+struct Character {
+    char32_t code;
+    size_t at, size; // its bytes in the UTF-8 text
+};
+
+std::vector<Character> charactersOf(std::string_view text) {
+    std::vector<Character> out;
+    for (size_t at = 0; at < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        const size_t size = std::min<size_t>(lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4, text.size() - at);
+        char32_t code = size == 1 ? lead : lead & (0x7fu >> size);
+        for (size_t i = 1; i < size; ++i) code = (code << 6) | (static_cast<unsigned char>(text[at + i]) & 0x3fu);
+        out.push_back({code, at, size});
+        at += size;
+    }
+    return out;
+}
+
+} // namespace
+
+bool hasCjkCharacter(std::string_view text) {
+    return std::ranges::any_of(charactersOf(text), [](const Character& c) { return cjk(c.code); });
+}
+
+std::vector<std::string> cjkGrams(std::string_view text) {
+    const auto characters = charactersOf(text);
+    std::vector<std::string> grams;
+    for (size_t i = 0; i < characters.size(); ++i) {
+        const auto& one = characters[i];
+        if (cjk(one.code)) grams.emplace_back(text.substr(one.at, one.size));
+        if (i + 1 < characters.size() && (cjk(one.code) || cjk(characters[i + 1].code)))
+            grams.emplace_back(text.substr(one.at, one.size + characters[i + 1].size));
+    }
+    std::ranges::sort(grams);
+    grams.erase(std::ranges::unique(grams).begin(), grams.end());
+    return grams;
+}
+
 std::string librarySortSource(const std::string& tag, const std::string& name) {
     const auto wide = toWide(tag);
     const auto question = [](wchar_t c) { return c == L'?' || c == 0xFF1F; };

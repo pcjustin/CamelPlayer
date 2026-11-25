@@ -108,11 +108,15 @@ Search plan(sqlite::Database& db, std::string_view filter, int64_t offset, int64
             search.pattern.push_back(c);
         }
         search.pattern.push_back('%');
-        // The few tracks such a query matches, as two Han characters most often are, are found in one pass over the names'
-        // own index; the page, the albums and the artists then read those alone rather than every track each.
-        auto rows = db.prepare("SELECT id FROM tracks INDEXED BY tracks_search_text WHERE title_norm LIKE ?1 ESCAPE '\\' "
-                               "OR artist_norm LIKE ?1 ESCAPE '\\' OR album_norm LIKE ?1 ESCAPE '\\' LIMIT ?2");
-        rows.bind(1, search.pattern).bind(2, kHits + 1);
+        // The few tracks such a query matches are looked up among the tracks' Han, kana and Hangul characters and pairs,
+        // or found in one pass over the names' own index; the page, the albums and the artists then read those alone
+        // rather than every track each.
+        const bool pairs = hasCjkCharacter(filter);
+        auto rows = db.prepare(pairs ? "SELECT track_id FROM track_pairs WHERE gram=?1 LIMIT ?2"
+                                     : "SELECT id FROM tracks INDEXED BY tracks_search_text WHERE title_norm LIKE ?1 "
+                                       "ESCAPE '\\' OR artist_norm LIKE ?1 ESCAPE '\\' OR album_norm LIKE ?1 ESCAPE '\\' "
+                                       "LIMIT ?2");
+        rows.bind(1, pairs ? filter : std::string_view(search.pattern)).bind(2, kHits + 1);
         std::string hits = "[";
         int64_t count = 0;
         while (rows.step()) {
