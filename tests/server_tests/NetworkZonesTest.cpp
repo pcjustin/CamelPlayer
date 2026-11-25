@@ -373,6 +373,7 @@ TEST_F(AirPlayZonesTest, ZonesGroupedPlayTheQueueOfTheFirstWhichKeepsItWhenUngro
     EXPECT_EQ(in(server->snapshot(), zoneA).queue.entries, before.queue.entries);
     EXPECT_EQ(in(server->snapshot(), zoneA).queueEntryId, before.queueEntryId);
 
+    const uint64_t groupedAt = in(server->snapshot(), zoneA).playback.position;
     server->submit(group(zoneA, {}));
     server->waitIdle();
     s = server->snapshot();
@@ -386,9 +387,13 @@ TEST_F(AirPlayZonesTest, ZonesGroupedPlayTheQueueOfTheFirstWhichKeepsItWhenUngro
     }
     const size_t aPackets = rtsp_[0].packetCount(), bPackets = rtsp_[1].packetCount();
     EXPECT_TRUE(waitFor([&] { return rtsp_[0].packetCount() > aPackets + 50; }));
-    const auto after = in(server->snapshot(), zoneA).playback;
-    EXPECT_TRUE(after.state == PlaybackState::Playing && after.position > 0)
-        << int(after.state) << " at " << after.position << ": " << after.errorDetail;
+    // The position is what the receiver has played, which stays 0 for the 2 s of its latency after the stream starts
+    // (kSyncLatency and kDefaultAudioLatency): zone A plays on past where it was, rather than at once above 0.
+    EXPECT_TRUE(waitFor([&] {
+        const auto after = in(server->snapshot(), zoneA).playback;
+        return after.state == PlaybackState::Playing && after.position > groupedAt;
+    })) << int(in(server->snapshot(), zoneA).playback.state)
+        << " at " << in(server->snapshot(), zoneA).playback.position << " after " << groupedAt;
     EXPECT_LT(rtsp_[1].packetCount(), bPackets + 10);
     server->shutdown();
 }
