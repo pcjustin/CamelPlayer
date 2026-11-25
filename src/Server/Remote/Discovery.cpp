@@ -11,6 +11,7 @@
 #include <cctype>
 #include <charconv>
 #include <map>
+#include <set>
 #include <thread>
 
 #include "Common/util/Log.h"
@@ -25,6 +26,7 @@ using Labels = std::vector<std::string>;
 
 constexpr uint16_t kMdnsPort = 5353;
 constexpr char kGroup[] = "224.0.0.251";
+constexpr auto kAddressesEvery = std::chrono::seconds(2);
 
 std::string lower(std::string text) {
     std::ranges::transform(text, text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
@@ -248,9 +250,12 @@ std::vector<FoundServer> serversIn(const std::vector<std::string>& messages) {
 } // namespace discovery
 
 struct ServerAnnouncer::Impl {
-    explicit Impl(ServerAnnouncement a) : announcement(std::move(a)), host(hostName()) {}
+    Impl(ServerAnnouncement a, std::function<std::vector<std::string>()> list)
+        : announcement(std::move(a)), host(hostName()), addresses(std::move(list)) {}
     ServerAnnouncement announcement;
     std::string host;
+    std::function<std::vector<std::string>()> addresses;
+    std::set<std::string> joined;
     WinsockScope winsock;
     SOCKET socket = INVALID_SOCKET;
     std::jthread thread;
@@ -259,13 +264,49 @@ struct ServerAnnouncer::Impl {
         return discovery::responseMessage(announcement, host, lanAddresses(), ttl, id, question);
     }
 
+    // The group joined on every address there is now, as an adapter can come or go while the Server runs: Wi-Fi
+    // joining as the wired one is unplugged. One gone is left, so that it is joined again if it comes back. True when
+    // one was joined.
+    bool join() {
+        const auto now = addresses();
+        const std::set<std::string> current(now.begin(), now.end());
+        const auto group = groupAddress();
+        ip_mreq membership{};
+        membership.imr_multiaddr = group.sin_addr;
+        for (auto it = joined.begin(); it != joined.end();) {
+            if (current.contains(*it)) {
+                ++it;
+                continue;
+            }
+            if (inet_pton(AF_INET, it->c_str(), &membership.imr_interface) == 1)
+                setsockopt(socket, IPPROTO_IP, IP_DROP_MEMBERSHIP, reinterpret_cast<const char*>(&membership),
+                           sizeof(membership));
+            it = joined.erase(it);
+        }
+        bool added = false;
+        for (const auto& text : current) {
+            if (joined.contains(text) || inet_pton(AF_INET, text.c_str(), &membership.imr_interface) != 1) continue;
+            if (setsockopt(socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, reinterpret_cast<const char*>(&membership),
+                           sizeof(membership)) != 0)
+                continue;
+            joined.insert(text);
+            added = true;
+        }
+        return added;
+    }
+
     void run(const std::stop_token& stop) {
         sendToGroup(socket, response(120));
         auto again = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        auto lookAgain = std::chrono::steady_clock::now() + kAddressesEvery;
         while (!stop.stop_requested()) {
             if (again.time_since_epoch().count() && std::chrono::steady_clock::now() >= again) {
                 sendToGroup(socket, response(120));
                 again = {};
+            }
+            if (std::chrono::steady_clock::now() >= lookAgain) {
+                lookAgain = std::chrono::steady_clock::now() + kAddressesEvery;
+                if (join()) sendToGroup(socket, response(120));
             }
             fd_set readable;
             FD_ZERO(&readable);
@@ -291,7 +332,8 @@ struct ServerAnnouncer::Impl {
     }
 };
 
-ServerAnnouncer::ServerAnnouncer(ServerAnnouncement announcement) : impl_(std::make_unique<Impl>(std::move(announcement))) {
+ServerAnnouncer::ServerAnnouncer(ServerAnnouncement announcement, std::function<std::vector<std::string>()> addresses)
+    : impl_(std::make_unique<Impl>(std::move(announcement), addresses ? std::move(addresses) : lanAddresses)) {
     impl_->socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     BOOL reuse = TRUE;
     setsockopt(impl_->socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
@@ -301,13 +343,7 @@ ServerAnnouncer::ServerAnnouncer(ServerAnnouncement announcement) : impl_(std::m
     any.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(impl_->socket, reinterpret_cast<sockaddr*>(&any), sizeof(any)) != 0)
         log::warn("Server API: mDNS port 5353 cannot be used (%d); this Server is found by its address alone", WSAGetLastError());
-    const auto group = groupAddress();
-    for (const auto& address : localAddresses()) {
-        ip_mreq membership{};
-        membership.imr_multiaddr = group.sin_addr;
-        membership.imr_interface = address;
-        setsockopt(impl_->socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, reinterpret_cast<const char*>(&membership), sizeof(membership));
-    }
+    impl_->join();
     impl_->thread = std::jthread([impl = impl_.get()](const std::stop_token& stop) { impl->run(stop); });
 }
 

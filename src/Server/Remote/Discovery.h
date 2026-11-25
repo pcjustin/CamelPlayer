@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -46,7 +47,8 @@ std::vector<FoundServer> serversIn(const std::vector<std::string>& messages);
 // goodbye at the end.
 class ServerAnnouncer {
 public:
-    explicit ServerAnnouncer(ServerAnnouncement announcement);
+    // `addresses` lists this computer's IPv4 addresses, lanAddresses() when empty; a test names others.
+    explicit ServerAnnouncer(ServerAnnouncement announcement, std::function<std::vector<std::string>()> addresses = {});
     ~ServerAnnouncer();
     ServerAnnouncer(const ServerAnnouncer&) = delete;
     ServerAnnouncer& operator=(const ServerAnnouncer&) = delete;

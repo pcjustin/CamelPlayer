@@ -6,6 +6,7 @@
 #include <winsock2.h>
 
 #include <algorithm>
+#include <atomic>
 #include <string>
 
 #include "Server/Network/AirPlay.h"
@@ -65,5 +66,22 @@ TEST(Discovery, AServerOnThisComputerIsFound) {
     const auto ours = std::ranges::find(found, "Test Server", [](const FoundServer& f) { return f.announced.name; });
     ASSERT_NE(ours, found.end());
     EXPECT_EQ(ours->announced.port, 9440);
+    WSACleanup();
+}
+
+// A network that comes after the Server started, as Wi-Fi joined and the wired adapter unplugged, finds it too.
+TEST(Discovery, AServerIsFoundOnANetworkThatCameAfterItStarted) {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    std::atomic<bool> networkUp = false;
+    ServerAnnouncer announcer({"discovery-late-" + std::to_string(GetCurrentProcessId()), "Late Server", 9441},
+                              [&] { return networkUp ? lanAddresses() : std::vector<std::string>{}; });
+    networkUp = true;
+    std::vector<FoundServer> found;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        found = findServers(std::chrono::milliseconds(800));
+        if (std::ranges::any_of(found, [](const FoundServer& f) { return f.announced.name == "Late Server"; })) break;
+    }
+    EXPECT_TRUE(std::ranges::any_of(found, [](const FoundServer& f) { return f.announced.name == "Late Server"; }));
     WSACleanup();
 }
