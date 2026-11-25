@@ -611,13 +611,16 @@ void MainWindow::hideToTray() {
     inTray_ = true;
     AppWindow().Hide();
     setRefreshing(false);
-    if (server_ && server_->filesHere() && server_->snapshot().playback.state == PlaybackState::Playing) {
+    // The music here pauses, unless other computers may control this one: it then plays on, as a Server.
+    const bool pauses = server_ && server_->filesHere() && !settings_.allowControl;
+    if (pauses && server_->snapshot().playback.state == PlaybackState::Playing) {
         Command pause;
         pause.kind = CommandKind::Pause;
         submitCommand(std::move(pause));
     }
     if (!settings_.trayNoticeShown && server_) {
-        tray_->notify(std::wstring(tr(L"Tray_NoticeTitle")), std::wstring(tr(L"Tray_NoticeText")));
+        tray_->notify(std::wstring(tr(L"Tray_NoticeTitle")),
+                      std::wstring(tr(pauses ? L"Tray_NoticeText" : L"Tray_NoticePlaysOn")));
         settings_.trayNoticeShown = true;
         Command command;
         command.kind = CommandKind::ApplySettings;
