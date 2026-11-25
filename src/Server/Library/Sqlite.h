@@ -6,6 +6,8 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -59,10 +61,14 @@ private:
     sqlite3_stmt* stmt_ = nullptr;
 };
 
+class ConnectionPool;
+
 class Database {
 public:
     enum class Mode : uint8_t { ReadWrite, ReadOnly };
     Database(const std::filesystem::path& path, Mode mode = Mode::ReadWrite);
+    // A connection `pool` gave, or that goes to it when destroyed rather than closing.
+    Database(sqlite3* db, std::shared_ptr<ConnectionPool> pool);
     ~Database();
     Database(Database&& other) noexcept;
     Database(const Database&) = delete;
@@ -79,9 +85,33 @@ public:
     // A consistent copy to `target` through the backup API; works while other connections read.
     void backupTo(const std::filesystem::path& target);
     sqlite3* handle() const { return db_; }
+    // From now on the connection goes to `pool` when destroyed.
+    void keepIn(std::shared_ptr<ConnectionPool> pool) { pool_ = std::move(pool); }
 
 private:
     sqlite3* db_ = nullptr;
+    std::shared_ptr<ConnectionPool> pool_;
+};
+
+// Open connections kept for the next user, who finds them with the schema parsed and the pages they read. A connection
+// comes back with no transaction and no progress handler; once the pool is closed, those that come back are closed.
+class ConnectionPool {
+public:
+    explicit ConnectionPool(size_t kept) : kept_(kept) {}
+    ~ConnectionPool() { close(); }
+    ConnectionPool(const ConnectionPool&) = delete;
+    ConnectionPool& operator=(const ConnectionPool&) = delete;
+
+    // A kept connection, or none.
+    sqlite3* take();
+    void give(sqlite3* db);
+    void close();
+
+private:
+    const size_t kept_;
+    std::mutex mutex_;
+    std::vector<sqlite3*> idle_;
+    bool closed_ = false;
 };
 
 // BEGIN IMMEDIATE on construction; rolls back unless commit() was called.

@@ -5,6 +5,7 @@
 // library.db (docs/Plan.md §7.6, M3-R01): schema migrations, identity rules, the single writer, migrations with backup and
 // restore, recovery from a damaged file, and refusal of network locations.
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -173,6 +174,47 @@ TEST(LibraryStore, ClosingEmptiesTheWriteAheadLogThoughAReaderOutlivesIt) {
     ASSERT_GT(std::filesystem::file_size(dir / "library.db-wal"), 0U);
     store.close();
     EXPECT_EQ(std::filesystem::file_size(dir / "library.db-wal"), 0U);
+}
+
+// A page read on a reader opened afresh took ten times one read on a kept reader, which has the schema parsed and the
+// pages it read: a reader given back is taken again.
+TEST(LibraryStore, AReaderGivenBackIsTakenAgainWithTheSchemaItRead) {
+    const auto dir = freshDir("reader-kept");
+    LibraryStore store(dir);
+    store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "One"); }).get();
+    ASSERT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks"), 1);
+    const auto again = store.openReader();
+    int schema = 0, highest = 0;
+    sqlite3_db_status(again.handle(), SQLITE_DBSTATUS_SCHEMA_USED, &schema, &highest, 0);
+    EXPECT_GT(schema, 0);
+}
+
+TEST(LibraryStore, AReaderTakenAgainCarriesNothingItsLastUserLeft) {
+    const auto dir = freshDir("reader-left");
+    LibraryStore store(dir);
+    store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "One"); }).get();
+    {
+        auto reader = store.openReader();
+        reader.exec("BEGIN");
+        ASSERT_EQ(reader.scalar("SELECT COUNT(*) FROM tracks"), 1);
+        sqlite3_progress_handler(reader.handle(), 1, [](void*) { return 1; }, nullptr);
+    }
+    store.write([](Database& db) { addTrack(db, "C:/music/album/02.flac", "Two"); }).get();
+    auto again = store.openReader();
+    EXPECT_NE(sqlite3_get_autocommit(again.handle()), 0);
+    EXPECT_EQ(again.scalar("SELECT COUNT(*) FROM tracks"), 2);
+}
+
+TEST(LibraryStore, ClosingClosesTheReadersItKept) {
+    const auto dir = freshDir("reader-closed");
+    {
+        LibraryStore store(dir);
+        store.write([](Database& db) { addTrack(db, "C:/music/album/01.flac", "One"); }).get();
+        ASSERT_EQ(store.openReader().scalar("SELECT COUNT(*) FROM tracks"), 1);
+    }
+    std::error_code ec;
+    std::filesystem::remove(dir / "library.db", ec);
+    EXPECT_FALSE(ec) << ec.message();
 }
 
 TEST(LibraryStore, OpeningEmptiesTheWriteAheadLogACrashLeft) {

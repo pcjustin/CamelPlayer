@@ -161,6 +161,8 @@ private:
     std::filesystem::path path_;
     OpenReport report_;
     std::optional<sqlite::Database> db_;
+    // Readers given back, about as many as read at once with ten Control points and the background work.
+    std::shared_ptr<sqlite::ConnectionPool> readers_ = std::make_shared<sqlite::ConnectionPool>(16);
     std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<std::packaged_task<void()>> queue_;

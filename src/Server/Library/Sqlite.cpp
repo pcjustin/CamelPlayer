@@ -112,11 +112,48 @@ Database::Database(const std::filesystem::path& path, Mode mode) {
     sqlite3_busy_timeout(db_, 5000);
 }
 
+Database::Database(sqlite3* db, std::shared_ptr<ConnectionPool> pool) : db_(db), pool_(std::move(pool)) {}
+
 Database::~Database() {
-    sqlite3_close(db_);
+    if (pool_ && db_)
+        pool_->give(db_);
+    else
+        sqlite3_close(db_);
 }
 
-Database::Database(Database&& other) noexcept : db_(std::exchange(other.db_, nullptr)) {}
+Database::Database(Database&& other) noexcept : db_(std::exchange(other.db_, nullptr)), pool_(std::move(other.pool_)) {}
+
+sqlite3* ConnectionPool::take() {
+    std::scoped_lock lock(mutex_);
+    if (idle_.empty()) return nullptr;
+    sqlite3* db = idle_.back();
+    idle_.pop_back();
+    return db;
+}
+
+void ConnectionPool::give(sqlite3* db) {
+    // What its user left: a read transaction would hold an old snapshot, a handler would call into a gone frame.
+    if (!sqlite3_get_autocommit(db)) sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr);
+    sqlite3_progress_handler(db, 0, nullptr, nullptr);
+    {
+        std::scoped_lock lock(mutex_);
+        if (!closed_ && idle_.size() < kept_ && sqlite3_get_autocommit(db) && !sqlite3_next_stmt(db, nullptr)) {
+            idle_.push_back(db);
+            return;
+        }
+    }
+    sqlite3_close(db);
+}
+
+void ConnectionPool::close() {
+    std::vector<sqlite3*> idle;
+    {
+        std::scoped_lock lock(mutex_);
+        closed_ = true;
+        idle.swap(idle_);
+    }
+    for (sqlite3* db : idle) sqlite3_close(db);
+}
 
 void Database::exec(std::string_view sql) {
     const std::string text(sql);

@@ -252,6 +252,7 @@ void LibraryStore::close() {
     }
     cv_.notify_all();
     if (writer_.joinable()) writer_.join();
+    readers_->close();
     if (db_) {
         // A reader that outlives this connection cannot remove the WAL, so it is emptied here. A busy one leaves it for
         // the next open, without holding up the exit.
@@ -338,8 +339,10 @@ bool LibraryStore::backupIfDue() {
 }
 
 sqlite::Database LibraryStore::openReader() const {
+    if (sqlite3* kept = readers_->take()) return {kept, readers_};
     sqlite::Database reader(path_, sqlite::Database::Mode::ReadOnly);
     reader.exec("PRAGMA query_only = ON");
+    reader.keepIn(readers_);
     return reader;
 }
 
