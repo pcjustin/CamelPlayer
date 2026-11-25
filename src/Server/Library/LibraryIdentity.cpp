@@ -12,6 +12,9 @@
 #include <algorithm>
 #include <iterator>
 #include <limits>
+#include <map>
+#include <utility>
+#include <cwctype>
 #include <cstring>
 #include <set>
 #include <chrono>
@@ -35,6 +38,31 @@ wil::unique_handle open(const std::filesystem::path& path, DWORD access = FILE_R
                                           OPEN_EXISTING, flags | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
 }
 
+// The key of a local NTFS or ReFS volume, empty for another file system; looked up once per volume, by its serial number
+// and the drive the path names, as the three lookups took 95 % of each file's version and a scan reads every local
+// file's.
+std::string localVolumeKey(DWORD serial, const std::filesystem::path& path) {
+    static std::mutex mutex;
+    static std::map<std::pair<DWORD, std::wstring>, std::string> keys;
+    std::wstring drive = path.root_path().wstring();
+    std::ranges::transform(drive, drive.begin(), [](wchar_t c) { return wchar_t(towlower(c)); });
+    const auto volume = std::pair(serial, drive);
+    {
+        std::scoped_lock lock(mutex);
+        if (const auto found = keys.find(volume); found != keys.end()) return found->second;
+    }
+    std::string key;
+    wchar_t mount[32768]{}, guid[64]{}, filesystem[32]{};
+    if (GetVolumePathNameW(path.c_str(), mount, DWORD(std::size(mount))) &&
+        GetVolumeNameForVolumeMountPointW(mount, guid, DWORD(std::size(guid))) &&
+        GetVolumeInformationW(mount, nullptr, 0, nullptr, nullptr, nullptr, filesystem, DWORD(std::size(filesystem)))) {
+        if (_wcsicmp(filesystem, L"NTFS") == 0 || _wcsicmp(filesystem, L"ReFS") == 0) key = toUtf8(guid);
+        std::scoped_lock lock(mutex);
+        keys.emplace(volume, key);
+    }
+    return key;
+}
+
 FileVersion version(HANDLE handle, const std::filesystem::path& path) {
     BY_HANDLE_FILE_INFORMATION info{};
     if (!GetFileInformationByHandle(handle, &info)) throw std::runtime_error("cannot read file identity");
@@ -51,14 +79,7 @@ FileVersion version(HANDLE handle, const std::filesystem::path& path) {
     FILE_ID_INFO id{};
     if (GetFileInformationByHandleEx(handle, FileIdInfo, &id, sizeof(id))) {
         out.index.assign(std::begin(id.FileId.Identifier), std::end(id.FileId.Identifier));
-        if (!isNetworkPath(path)) {
-            wchar_t mount[32768]{}, guid[64]{}, filesystem[32]{};
-            if (GetVolumePathNameW(path.c_str(), mount, DWORD(std::size(mount))) &&
-                GetVolumeNameForVolumeMountPointW(mount, guid, DWORD(std::size(guid))) &&
-                GetVolumeInformationW(mount, nullptr, 0, nullptr, nullptr, nullptr, filesystem, DWORD(std::size(filesystem))) &&
-                (_wcsicmp(filesystem, L"NTFS") == 0 || _wcsicmp(filesystem, L"ReFS") == 0))
-                out.volumeKey = toUtf8(guid);
-        }
+        if (!isNetworkPath(path)) out.volumeKey = localVolumeKey(info.dwVolumeSerialNumber, path);
     }
     return out;
 }

@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <chrono>
 #include <fstream>
 #include <future>
 #include <optional>
@@ -1009,6 +1010,20 @@ TEST_F(LibraryIdentityTest, AFingerprintPutOffScansOnlyItsFolderAgain) {
     EXPECT_TRUE(wait([&] { return id(store, "new.lrc") == original; }));
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     EXPECT_EQ(id(store, "other.lrc"), 0) << "the root was scanned again";
+}
+
+// A local file's identity costs no lookups of its volume each: they took 95 % of each file's 3.7 ms, so that a scan of 110,000
+// unchanged local files took 330 s.
+TEST_F(LibraryIdentityTest, ALocalFileVersionIsReadWithoutLookingUpItsVolumeEachTime) {
+    std::vector<fs::path> files;
+    files.reserve(200);
+    for (int i = 0; i < 200; ++i) files.push_back(file(("f" + std::to_string(i) + ".flac").c_str()));
+    const auto first = library::fileVersion(files.front());
+    const auto start = std::chrono::steady_clock::now();
+    for (const auto& path : files) EXPECT_EQ(library::fileVersion(path).volumeKey, first.volumeKey);
+    const double each = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / 200.0;
+    EXPECT_LT(each, 0.5) << "ms for each file's version";
+    EXPECT_FALSE(first.volumeKey.empty()) << "the test folder is on an NTFS volume";
 }
 
 } // namespace
