@@ -43,6 +43,18 @@ protected:
               (std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()) + "-" +
                std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
         std::filesystem::create_directories(dir);
+        startServer();
+        serve(0);
+    }
+
+    void TearDown() override {
+        points.clear();
+        api.reset();
+        if (local) local->shutdown();
+        local.reset();
+    }
+
+    void startServer() {
         Settings s;
         s.autoplay = false;
         s.wasapi.deviceId = "zone-1";
@@ -63,14 +75,6 @@ protected:
             return audio::createCaptureOutput(options);
         });
         local->waitIdle();
-        serve(0);
-    }
-
-    void TearDown() override {
-        points.clear();
-        api.reset();
-        if (local) local->shutdown();
-        local.reset();
     }
 
     void serve(uint16_t at) {
@@ -260,6 +264,32 @@ TEST_F(ControlPointsTest, AControlPointConnectsAgainOnceTheServerIsBack) {
         const auto devices = api->pairedDevices();
         return devices.size() == 1 && devices[0]["zone"] == point.snapshot().selectedZone;
     })) << "the Server it connected to again knows the zone it follows";
+}
+
+// A Server started again counts its revisions and commands from the start: the window's cursor, which took the first
+// Server's, takes the new one's snapshots too.
+TEST_F(ControlPointsTest, AWindowFollowsAServerStartedAgain) {
+    auto& point = connect();
+    SnapshotCursor cursor;
+    for (int i = 0; i < 5; ++i) {
+        play(point, 1);
+        Command stop;
+        stop.kind = CommandKind::Stop;
+        cursor.expect(point.submit(stop));
+        point.waitIdle();
+    }
+    ASSERT_TRUE(cursor.accept(point.snapshot()));
+    const auto at = port;
+    api.reset();
+    local->shutdown();
+    startServer();
+    serve(at);
+    EXPECT_TRUE(within([&] { return point.link() == IServer::Link::Connected; }, 15s));
+    play(*local, 2);
+    EXPECT_TRUE(within([&] {
+        cursor.accept(point.snapshot());
+        return cursor.current() && of(*cursor.current(), 2).playback.state == PlaybackState::Playing;
+    })) << "the window shows what the Server started again plays";
 }
 
 // A revoked Control point is told so rather than trying again.

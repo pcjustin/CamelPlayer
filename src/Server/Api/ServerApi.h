@@ -418,6 +418,7 @@ std::string zoneId(Backend backend, const std::string& output);
 
 struct Snapshot {
     uint32_t apiVersion = kApiVersion;
+    uint64_t run = 0; // this start of the Server, which counts its revisions and commands from the start
     uint64_t revision = 0;
     CommandStamp command;
     // The selected zone's, as `zones` has them: the zone the window follows.

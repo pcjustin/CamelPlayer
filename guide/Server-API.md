@@ -121,7 +121,7 @@ A notice is pushed the same way, as `{"notice": {"kind": "pairingStopped", "unti
 
 The event is `commandCompleted` when a command has finished. When several changes come while an event is still being sent, only the latest is sent, and it is marked `commandCompleted` if any of the ones it replaces was.
 
-The snapshot holds every zone with its playback and its queue, the selected zone, the settings and the devices. It is the same JSON as the `snapshot` call answers, except for the queues.
+The snapshot holds every zone with its playback and its queue, the selected zone, the settings and the devices. It is the same JSON as the `snapshot` call answers, except for the queues. Its `revision` grows with every change and its `command` with every command, counted again from the start each time the Server starts, whose `run` then differs: a snapshot of another `run` is not older than one seen before.
 
 Several devices may control the Server at once, and each may follow a zone of its own; the selected zone is the Server's own window's. To tell its users what another device did:
 

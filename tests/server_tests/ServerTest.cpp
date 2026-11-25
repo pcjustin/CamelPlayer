@@ -249,6 +249,22 @@ TEST(SnapshotCursorTest, RejectsStaleRevisionCommandGenerationQueueAndVersion) {
     EXPECT_EQ(cursor.current().value_or(Snapshot{}).revision, 10u);
 }
 
+TEST(SnapshotCursorTest, TakesTheSnapshotsOfAServerStartedAgain) {
+    SnapshotCursor cursor;
+    Snapshot s;
+    s.run = 1;
+    s.revision = 40;
+    s.command = {12, 3, 5};
+    cursor.expect(s.command);
+    EXPECT_TRUE(cursor.accept(s));
+    s.run = 2;
+    s.revision = 2;
+    s.command = {1, 1, 1};
+    EXPECT_TRUE(cursor.accept(s)) << "the Server started again counts from the start";
+    s.revision = 1;
+    EXPECT_FALSE(cursor.accept(s)) << "and its older snapshots are refused as before";
+}
+
 TEST_P(ServerTest, RejectsInvalidCommandsBeforeAllocatingIds) {
     Command c;
     c.apiVersion = kApiVersion + 1;

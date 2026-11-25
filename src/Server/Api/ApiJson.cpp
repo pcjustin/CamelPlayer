@@ -637,6 +637,7 @@ json toJson(const Snapshot& s) {
     json zones = json::array();
     for (const auto& z : s.zones) zones.push_back(toJson(z));
     json j = {{"apiVersion", s.apiVersion},
+              {"run", s.run},
               {"revision", s.revision},
               {"command", toJson(s.command)},
               {"zones", zones},
@@ -670,6 +671,7 @@ json toJson(const Snapshot& s) {
 Snapshot snapshotFromJson(const json& j) {
     Snapshot s;
     s.apiVersion = value<uint32_t>(j, "apiVersion");
+    s.run = value<uint64_t>(j, "run");
     s.revision = value<uint64_t>(j, "revision");
     s.command = commandStampFromJson(field(j, "command"));
     for (const auto& z : array(j, "zones")) s.zones.push_back(zoneFrom(z));

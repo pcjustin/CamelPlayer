@@ -269,6 +269,10 @@ void SnapshotCursor::expect(CommandStamp command) {
 }
 
 bool SnapshotCursor::accept(const Snapshot& s) {
+    if (current_ && s.run != current_->run) {
+        expected_ = {};
+        current_.reset();
+    }
     if (s.apiVersion != kApiVersion || !covers(s.command, expected_) ||
         (current_ && (s.revision <= current_->revision || !covers(s.command, current_->command))))
         return false;
@@ -295,6 +299,8 @@ public:
         for (auto& zone : zones_) refreshZoneState(*zone);
         collectZones();
         state_.settings = settingsDto(settings_);
+        state_.run = uint64_t(
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
         published_ = state_;
         const auto directory =
             settingsFile_.empty() ? std::filesystem::path{} : std::filesystem::absolute(settingsFile_).parent_path();
