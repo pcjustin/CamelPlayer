@@ -2,7 +2,7 @@
 
 ![CamelPlayer logo](assets/camelplayer-logo.jpg)
 
-CamelPlayer is a Windows music player for listening through a DAC. It plays FLAC, ALAC, WAV, AIFF, DSD, AAC and MP3 bit-perfect over WASAPI exclusive, ASIO or Kernel Streaming, shows exactly what reaches the device, and keeps a large library on local drives or a NAS quick to browse.
+CamelPlayer is a Windows music player for listening through a DAC. It plays FLAC, ALAC, WAV, AIFF, DSD, AAC and MP3 bit-perfect over WASAPI exclusive, ASIO or Kernel Streaming, shows exactly what reaches the device, and keeps a large library on local drives or a NAS quick to browse. As in Roon, every output is a zone of its own, several playing at once, and CamelPlayer on other computers can control the one that plays.
 
 It is built with C++20, WinUI 3 and Rust, and is a separate project from the earlier macOS CamelPlayer, a controller for streaming from MinimServer to a network player, with which it shares only its name.
 
@@ -42,13 +42,25 @@ The screenshots show a demo library with made-up albums, covers and lyrics, and 
 - **Volume and ReplayGain:** volume stays fixed for your DAC or amplifier unless you choose software volume, whose vertical slider and mute open from the player bar's volume button. ReplayGain plays tracks or albums (or either, by what the queue plays) at an even loudness from their tags; tracks without tags are analyzed in the background with EBU R128 while ReplayGain is on, and the results stay in the library.
 - **Gapless playback** between tracks of the same format, and **crossfade** (1–10 s, off by default) at every other change of track, natural or chosen; an album played in order stays gapless.
 - **Slow network sources play without breaks:** a file read slower than it plays, such as DSD256 from a NAS over Wi-Fi, is read ahead before it starts, with a notice of how long the wait is, and buffers again rather than play in pieces.
-- **An output menu** in the player bar switches between the outputs you enable in Settings › Audio outputs, each with a name of your choice, and playback goes on from the audible position with the queue unchanged.
-- **Network players:** UPnP AV and OpenHome players on your network, played at the source's format with raw DSD as DSF where they declare it, gapless through the player's next-track function or OpenHome playlist, and with their own remote, app and volume still working. Windows Firewall needs one rule for them, for this program on private networks only, which CamelPlayer offers to add.
-- **AirPlay:** receivers of every maker, including HomePods, a HomePod stereo pair, receivers that ask for a password, a code they show or a paired sender, and TVs and Macs that play only AirPlay 2, at 44.1 kHz/16-bit stereo, unchanged for a CD-format source and through the conversion rule otherwise, over the same firewall rule. Several receivers play together in step, each with its own volume under the group's slider, and a single speaker can play the left or the right channel alone, so that two make a stereo pair.
+- **Network players:** UPnP AV and OpenHome players on your network, played at the source's format with raw DSD as DSF where they declare it, or as DoP or PCM as you set it, gapless through the player's next-track function or OpenHome playlist, and with their own remote, app and volume still working. Windows Firewall needs one rule for them, for this program on private networks only, which CamelPlayer offers to add.
+- **AirPlay:** receivers of every maker, including HomePods, a HomePod stereo pair, receivers that ask for a password, a code they show or a paired sender, and TVs and Macs that play only AirPlay 2, at 44.1 kHz/16-bit stereo, unchanged for a CD-format source and through the conversion rule otherwise, over the same firewall rule. Receivers grouped into one zone play together in step, each with its own volume under the group's slider, and a single speaker can play the left or the right channel alone, so that two make a stereo pair.
 - **HQPlayer:** HQPlayer on this computer or another as an output, as Roon uses it, each track streamed at the source's format, raw DSD as DSF or converted to PCM, for HQPlayer to upsample and filter, with what HQPlayer does shown in the signal path. Its volume can stay fixed, be CamelPlayer's software volume or be HQPlayer's own. HQPlayer on this computer is listed by itself, one on another computer once "Allow control from network" is on in HQPlayer, and either can be added by its address; one on another computer fetches the music through the same firewall rule as network players, which CamelPlayer offers to add.
 - **Upsampling for each output:** follow the file, integer to the highest rate of the file's family, integer by 2×, 4× or 8×, any rate to the highest, or a set rate, with each output's own libsoxr filter (quality, linear, intermediate or minimum phase, and standard, steep or gentle passband). DSD converted to PCM follows it too.
 - **DSD upsampling and PCM to DSD for each output:** DSD to the highest rate, by 2× or 4×, or to DSD128 or DSD256, and PCM files sent as DSD too, through CamelPlayer's own 5th- or 7th-order sigma-delta modulator, with the DSP and the volume acting on that DSD as well. DSD files can take the DSP at their own rate too, per output.
 - **Output settings for each device:** a sample rate or upsampling, pre-decode amount, silence after a format change, device release after a pause, buffers, MMCSS priority, and ASIO and Kernel Streaming options.
+
+### Zones
+
+- **Every output a zone, as in Roon:** each output you turn on in Settings › Audio outputs, with a name of its own, is a zone with its own queue, volume, shuffle, repeat, crossfade, autoplay and DSP, and several zones play different music at once from one library, two DACs on this computer included. Each zone's queue comes back paused at the next start.
+- **The zone picker** in the player bar lists the zones with what each plays, and the window follows the one you choose while the others play on. **Transfer to** moves a queue to another zone from where you hear it, and **Pause all** pauses every zone, also from the tray menu and a hotkey. A device plays for one zone at a time, and the others say which zone has it.
+- **Zone groups:** AirPlay receivers group into one zone that plays in step, and so do this computer's outputs, one DAC the clock and the others kept to it by drift correction, each with a delay to line it up by ear.
+- **Windows stays awake** while any zone plays, whatever the output; the display may still sleep.
+
+### Several computers
+
+- **One computer plays, others control it:** the first-run guide sets a computer to play music or to control another CamelPlayer on the network, as a remote that shows the other computer's library, zones, queues and settings. Several Control points connect at once, each following a zone of its own, and what one does to the music another follows shows there with its name.
+- **Pairing:** the first computer claims a CamelPlayer that allows control; later ones enter a six-digit code a paired device shows, and Settings › This computer and others lists the paired devices, each revocable. Other computers on the network find it by themselves; one on another subnet or over a VPN types its address.
+- **Switching back and swapping:** a Control point plays music on its own computer again with its own library, queues and outputs as they were, and two computers that paired swap roles without a code. A Control point can also update CamelPlayer on the computer it controls.
 
 ### Library
 
@@ -57,14 +69,14 @@ The screenshots show a demo library with made-up albums, covers and lyrics, and 
 - **A jump bar** beside the album, artist, composer and genre lists goes straight to #, A–Z, kana or Han.
 - **A folder tree** in foobar2000's style, if you turn it on in Settings: folders open in place with their track counts, tracks show their file names, and the tree opens as you left it.
 - **Artist and composer pages:** their ten most played tracks, then their own albums and the albums they appear on, each with View all, so a singer's songs on someone else's album are one click away.
-- **Artist pictures** on their page and beside their name in the Artists and Composers lists: a picture you choose, an `artist.jpg` in a folder named after them, or, if you allow it, a freely licensed one from Wikimedia Commons shown with its author and license. Without one, their initial stands in.
+- **Artist pictures** on their page and beside their name in the Artists and Composers lists: a picture you choose, an `artist.jpg` in a folder named after them, or, if you allow it, a freely licensed one from Wikimedia Commons shown with its author and license, looked up in the background for every name. Without one, their initial stands in.
 - **Every name in a credit counts:** "Aimer with chelly" or "A feat. B" lists each artist on its own, and each name on an album page and in the player bar opens that artist.
 - **Search** from the title bar (Ctrl+F) with suggestions as you type, including Chinese and Japanese, whole and leading matches first.
 - **Discord**, once switched on: the playing track with its progress and the signal path's state on your profile, and its own cover if you allow a Cloudflare tunnel for it.
 
 ### Queue, playlists and favorites
 
-- **A queue** with play next, add to the end, reordering, shuffle, repeat and history, restored at the next start. Every list marks the track it is on, and the album wall, the Folders page and the folder tree mark the album or folder that holds it; Go to playing (Ctrl+L) scrolls to it, opening the folders on the way. When it ends, autoplay keeps random library tracks playing.
+- **A queue for each zone** with play next, add to the end, reordering, shuffle, repeat and history, restored at the next start. Every list marks the track it is on, and the album wall, the Folders page and the folder tree mark the album or folder that holds it; Go to playing (Ctrl+L) scrolls to it, opening the folders on the way. When it ends, autoplay keeps random library tracks playing.
 - **Playlists** made from any selection, with M3U8 import and export.
 - **Favorite tracks, albums, artists and composers**, and smart lists: recently added, most played, last played, favorites and never played. A favorite artist is kept by name, so it stays one through rescans and moves.
 
@@ -77,9 +89,9 @@ The screenshots show a demo library with made-up albums, covers and lyrics, and 
 
 ### Windows
 
-- **Media keys**, the volume flyout and the lock screen show and control playback, and system-wide hotkeys can be changed.
-- **The notification area** keeps CamelPlayer running after its window closes, and only one copy runs at a time. **Start with Windows** in Settings › Interface starts it at sign-in in the notification area, paused; turn it off before deleting CamelPlayer's folder, as Windows otherwise keeps an entry for a program that is gone.
-- **Light, dark and black themes** or the Windows setting, and an English and Traditional Chinese interface.
+- **Media keys**, the volume flyout and the lock screen show and control the zone selected, and system-wide hotkeys can be changed.
+- **The notification area** keeps CamelPlayer running after its window closes, and only one copy runs at a time. Closing the window pauses the zone it follows, unless other computers may control this one. **Start with Windows** in Settings › Interface starts it at sign-in in the notification area, paused; turn it off before deleting CamelPlayer's folder, as Windows otherwise keeps an entry for a program that is gone.
+- **Light, dark and black themes** or the Windows setting, Windows' contrast themes followed, and an English and Traditional Chinese interface.
 
 ### Reliability
 
@@ -92,7 +104,7 @@ The screenshots show a demo library with made-up albums, covers and lyrics, and 
 
 1. Download `CamelPlayer-<version>-win-x64.zip` from [GitHub Releases](https://github.com/pcjustin/CamelPlayer/releases), and if you like, check it against `CamelPlayer-<version>-SHA256SUMS.txt`.
 2. Extract the whole zip to a folder you can write to and run `CamelPlayer.exe`. CamelPlayer is not code-signed, so Windows may ask you to confirm the first start.
-3. The first-run guide sets the look, your music folders and the output.
+3. The first-run guide sets whether this computer plays music or controls CamelPlayer on another, then the look, your music folders and the output.
 
 CamelPlayer needs 64-bit Windows 10 version 1809 or later, or Windows 11. Settings, the library and logs are kept in `%LOCALAPPDATA%\CamelPlayer`. To report a problem, open a GitHub issue and attach the diagnostic bundle from Settings › About.
 
@@ -117,7 +129,7 @@ Files are recognized by their content, not their extension. Mono files are copie
 | WASAPI shared | No | To PCM only | Always goes through the Windows mixer, so it is shown as processed. |
 | ASIO | Yes | Native or DoP | The ASIO callback thread joins MMCSS Pro Audio, and late callbacks are reported. |
 | Kernel Streaming | Yes | DoP | Windows defines no Kernel Streaming DSD format. |
-| UPnP AV, OpenHome | To the player | DSF or to PCM | Streamed at the source's format; the highest rate and bit depth can be limited for a player that declares more than it plays. |
+| UPnP AV, OpenHome | To the player | DSF, DoP or to PCM | Streamed at the source's format; the highest rate and bit depth can be limited for a player that declares more than it plays. |
 | AirPlay | CD format only | To PCM only | 44.1 kHz/16-bit stereo, over AirPlay 1, or AirPlay 2 for a receiver without AirPlay 1 and for Macs. A receiver plays about 2 seconds behind what is sent, and the position shown allows for it. |
 | HQPlayer | To HQPlayer | DSF or to PCM | Streamed at the source's format for HQPlayer to process; gapless between tracks of one sample rate, without crossfade. |
 
@@ -140,6 +152,7 @@ DoP needs a PCM rate of the DSD rate / 16, so DSD512 over DoP plays only where t
 | Ctrl+L | Go to the playing track |
 | Alt+Enter | File details of the selected track |
 | Delete | Remove the selected queue or playlist entries |
+| Alt+↑ / Alt+↓ | Move the selected queue or playlist entries up or down |
 | Ctrl-click, Shift-click | Select several rows for their right-click menu |
 
 The system-wide hotkeys work in every program: Alt+Home plays or pauses and Alt+Page Up / Alt+Page Down go to the previous or next track, changeable in Settings › Hotkeys.
@@ -203,13 +216,13 @@ camelcli bench-decoders <directory> --runs 3   # every recognized format; pure d
 
 CamelPlayer runs as one process with these parts:
 
-- **The control point** (`src/ControlPoint`), the WinUI 3 application, sends versioned commands to the Server and shows its snapshots and events; command IDs and revisions keep stale updates from showing. Every list is virtualized over pages read off the UI thread, and each listing's order is built once per library revision, so a random page of 100k tracks takes about 3 ms and of 1,000 albums about 42 ms (p95, Release).
-- **The Server** (`src/Server`) owns settings, device enumeration, the library and playback control.
+- **The control point** (`src/ControlPoint`), the WinUI 3 application, sends versioned commands to the Server and shows its snapshots and events; command IDs and revisions keep stale updates from showing. On a computer that controls another, it drives that computer's Server through the same interface over the LAN, with the Server API that [guide/Server-API.md](guide/Server-API.md) describes, and its own process runs no library or output. Every list is virtualized over pages read off the UI thread, and each listing's order is built once per library revision, so a random page of 100k tracks takes about 3 ms and of 1,000 albums about 42 ms (p95, Release).
+- **The Server** (`src/Server`) owns settings, device enumeration, the library and playback control, with an Engine session for each zone, and serves the Server API on the LAN while other computers may control it.
 - **The Engine** (the Rust crate `rust/audio_engine`, hosted from `src/Engine`) owns every playback session. It asks the chosen C++ decoder adapter for frames through a versioned callback ABI, enforces supported input, track ranges and seeking, pre-decodes into a ring buffer, converts to the device format (repacking, and resampling, downmixing, dither or DSD to PCM only when allowed) in a DSP stage that keeps only about 250 ms ahead of the device and, like the render callback, never touches the heap, runs the DSP chain there in 64-bit float (each track's ReplayGain, then EQ biquads, bs2b crossfeed and zero-latency partitioned FFT convolution in the user's order after one preamp, then the software volume, each change faded in), crossfades two tracks there with equal-power gains before that chain (at a track's end, or from where it plays on a manual change), packs native DSD or DoP, queues the next track for gapless playback and renders to the OutputBridge. For FLAC it reports whether the STREAMINFO frame count and MD5 were verified; the MD5 counts as verified only after a complete decode.
 - **The OutputBridge** (`src/OutputBridge`) holds the WASAPI, ASIO and Kernel Streaming backends. ASIO uses an independent host implementation of the driver interface, so no Steinberg SDK is needed (ASIO is a trademark of Steinberg Media Technologies GmbH).
 - Shared types and utilities live in `src/Common`, the CLI in `src/Tools/camelcli`, the updater in `src/Updater` and the Symphonia adapter in `rust/symphonia_ffi`. Tests are grouped into `tests/server_tests`, `tests/bridge_tests` and `tests/engine_tests`.
 
-**The library** normalizes overlapping folders and aliases, skips reparse points to avoid cycles, and indexes supported audio with image and LRC sidecars into SQLite. A CUE sheet is not split: as in Roon, its file is one track. TagLib reads tags, including several artists, composers and genres, while FLAC STREAMINFO and Vorbis comments are read without a decoder. Artist and composer tags are kept as written, and the names they credit are derived from all of them together: `;` `、`, feat., ft., featuring, with and a bracket opening with one of those words always divide names, while `&` `,` `/` `:` `×` and the words x, and and vs divide them where at least one part also stands alone somewhere in the library, though never before a name opening with "The" after & or and, or before an instrument such as cello, so "22/7", "Bob Marley & The Wailers" and "Yo-Yo Ma, cello" stay whole. Case tells names apart, full- and half-width forms do not, and text in other brackets stays with its name. Names are derived again after each complete scan and whenever the rules change. Scans publish batches of 500 files, reread a file only when it changes, and group albums as each batch is written, so albums appear during the first scan; several folders scan at the same time. Folder monitoring coalesces changes for 2 seconds and rescans only the folders named, rescans fully after lost notifications, polls local folders every 30 minutes and network shares every 6 hours, or every 30 minutes once a scan has found an edit no notification named (a NAS may send none for a write that keeps a file's size, as a tag edited in its padding), and checks that each folder is reachable every 60 seconds. An incomplete or offline scan keeps the tracks it did not see; a complete scan marks missing files unavailable without forgetting them.
+**The library** normalizes overlapping folders and aliases, skips links (symbolic links, junctions and mount points) to avoid cycles while scanning cloud sync placeholders as the files they are, and indexes supported audio with image and LRC sidecars into SQLite. A CUE sheet is not split: as in Roon, its file is one track. TagLib reads tags, including several artists, composers and genres, while FLAC STREAMINFO and Vorbis comments are read without a decoder. Artist and composer tags are kept as written, and the names they credit are derived from all of them together: `;` `、`, feat., ft., featuring, with and a bracket opening with one of those words always divide names, while `&` `,` `/` `:` `×` and the words x, and and vs divide them where at least one part also stands alone somewhere in the library, though never before a name opening with "The" after & or and, or before an instrument such as cello, so "22/7", "Bob Marley & The Wailers" and "Yo-Yo Ma, cello" stay whole. Case tells names apart, full- and half-width forms do not, and text in other brackets stays with its name. Names are derived again after each complete scan and whenever the rules change. Scans publish batches of 500 files, reread a file only when it changes, and group albums as each batch is written, so albums appear during the first scan; several folders scan at the same time. Folder monitoring coalesces changes for 2 seconds and rescans only the folders named, rescans fully after lost notifications, polls local folders every 30 minutes and network shares every 6 hours, or every 30 minutes once a scan has found an edit no notification named (a NAS may send none for a write that keeps a file's size, as a tag edited in its padding), and checks that each folder is reachable every 60 seconds. An incomplete or offline scan keeps the tracks it did not see; a complete scan marks missing files unavailable without forgetting them.
 
 **Moved files** keep their identity, statistics, favorites, playlist entries and queue entries. Local NTFS and ReFS moves are matched by volume GUID, 128-bit file ID and creation time; moves on a NAS or across volumes need a unique fingerprint recorded before the file disappeared, a SHA-256 over the file size and its first and last 64 KiB, so fingerprinting reads at most 128 KiB per file. Each new or changed file is fingerprinted right after its tags are read, while its start is still cached, and fingerprinting waits while music plays from the same storage. Copies stay separate, and missing or ambiguous fingerprints keep separate identities. Move decisions wait for a complete scan.
 
