@@ -554,7 +554,7 @@ TEST_F(LibraryIdentityTest, LookingForMovesAmongAFirstScansFilesTakesSeconds) {
     store.write([&](sqlite::Database& db) { moved = library::reconcileMoves(db, added); }).get();
     const auto took = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     EXPECT_EQ(moved, 0u);
-    EXPECT_LT(took, 5.0);
+    EXPECT_LT(took, 5.0 * testutil::kSlowdown);
 }
 
 TEST_F(LibraryIdentityTest, FoldersAnEarlierVersionRemovedAreDeletedOnce) {

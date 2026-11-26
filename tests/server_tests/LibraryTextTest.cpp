@@ -240,7 +240,7 @@ TEST(LibraryText, AlbumsListedDuringARebuildFollowTheNewOrder) {
     index.waitIdle();
     ASSERT_EQ(order().front(), 1);
     index.setLocale(L"zh-TW_pronun");
-    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(30) * testutil::kSlowdown;
     while (keyOf(1) != bopomofo && std::chrono::steady_clock::now() < until) {
     }
     ASSERT_EQ(keyOf(1), bopomofo);

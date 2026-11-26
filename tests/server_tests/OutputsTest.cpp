@@ -834,7 +834,7 @@ TEST_F(OutputSwitchTest, APausedZoneStaysPausedWhileAnotherIsSelected) {
     ASSERT_TRUE(waitFor([](const Snapshot& s) { return s.playback.state == PlaybackState::Paused; }));
     const auto before = server_.snapshot();
     switchTo(Backend::Asio, "a-dave");
-    const auto& left = zoneOf(server_.snapshot(), before.selectedZone);
+    const auto left = zoneOf(server_.snapshot(), before.selectedZone);
     EXPECT_EQ(left.playback.state, PlaybackState::Paused);
     EXPECT_NEAR(double(left.playback.position), double(before.playback.position), 4410.0);
     EXPECT_EQ(server_.snapshot().settings.backend, Backend::Asio);

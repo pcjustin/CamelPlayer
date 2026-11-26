@@ -187,7 +187,7 @@ protected:
     }
 
     static bool playing(const IServer& server, size_t number) {
-        const auto& z = of(server.snapshot(), number);
+        const auto z = of(server.snapshot(), number);
         return z.playback.state == PlaybackState::Playing && z.playback.position > 0;
     }
 };
