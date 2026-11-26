@@ -573,7 +573,7 @@ public:
     }
 
     // The listener and the observers an event goes to, taken under mutex_ and told outside it.
-    std::vector<std::function<void(const Event&)>> audience() const _Requires_lock_held_(mutex_) {
+    _Requires_lock_held_(mutex_) std::vector<std::function<void(const Event&)>> audience() const {
         std::vector<std::function<void(const Event&)>> out;
         out.reserve(observers_.size() + 1);
         if (listener_) out.push_back(listener_);
@@ -2600,7 +2600,7 @@ private:
     }
 
     // Said once a request has waited a second: most receivers answer at once, a Mac once its user does.
-    static std::string askingName(const AirPlayGroup& group) {
+    _Requires_lock_held_(group.mutex) static std::string askingName(const AirPlayGroup& group) {
         if (!group.asking || std::chrono::steady_clock::now() - group.asking->second < kAskingShownAfter) return {};
         const auto named = std::ranges::find(group.states, group.asking->first, &ReceiverState::id);
         return named == group.states.end() ? group.asking->first : named->name;
