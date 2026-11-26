@@ -101,7 +101,7 @@ protected:
 
     // Waits until `remote` shows the local Server's latest state.
     void waitForSameState() {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5) * testutil::kSlowdown;
         while (std::chrono::steady_clock::now() < deadline) {
             if (toJson(remote->snapshot()) == toJson(local->snapshot())) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
